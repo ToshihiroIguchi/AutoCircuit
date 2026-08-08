@@ -10,11 +10,10 @@ The command-line backend is **complete and verified**: 387 tests pass
 (`python -m pytest tests -q`, ~3.7 min). Phases 0–5 of `docs/IMPLEMENTATION_PLAN.md` are done;
 phase 6 (web UI) is untouched.
 
-**Discovery v2 steps 1–5 are implemented** (see §2) and gates G1, G2, G3 and G5 pass: G1
-30/30 across the three reference spectra, G2 exactly reproducing the measured counts table,
-G3 with the truth and every known exact equivalent surviving the feasibility filter, and G5
-with the whole suite green. What is left of that plan is step 6, DRT — severable by design,
-and the only remaining item in `docs/DISCOVERY_V2_PLAN.md`.
+**Discovery v2 is fully implemented** (see §2) and all five gates pass: G1 30/30 across the
+three reference spectra, G2 exactly reproducing the measured counts table, G3 with the truth
+and every known exact equivalent surviving the feasibility filter, G4 with DRT counting 1, 2
+and 3 relaxations 10/10 at both 0% and 1% noise, and G5 with the whole suite green.
 
 Working end to end today:
 
@@ -27,6 +26,7 @@ python -m autocircuit validate cap.csv
 python -m autocircuit fit cap.csv -c "C1-R1-L1-SKINF1" --spice cap.cir --json cap.json
 python -m autocircuit discover cap.csv --pool component --workers 8 --progress
 python -m autocircuit discover cap.csv --pool component --mode evolve --time-limit 120
+python -m autocircuit drt cell.csv --json drt.json     # exits 1 if DRT does not apply
 ```
 
 Module map (`src/autocircuit/`):
@@ -40,16 +40,17 @@ Module map (`src/autocircuit/`):
 | `core/stats.py` | covariance, AICc, identifiability warnings |
 | `core/validate.py` | Lin-KK data validation |
 | `core/enumerate.py` | exhaustive topology enumeration + the structural feasibility filter |
+| `core/drt.py` | regularised distribution of relaxation times; structure probing only |
 | `core/discover.py` | exhaustive and genetic topology search, Pareto front, equivalence classes |
 | `core/spice.py` | netlist export + NNLS Foster-form ladder synthesis |
 | `io/` | generic CSV, ZView/ZPlot, Touchstone, Keysight readers |
 | `cli/main.py` | argparse CLI |
 
-## 2. Discovery v2 — what was built, and what is left
+## 2. Discovery v2 — what was built
 
-Steps 1–5 of `docs/DISCOVERY_V2_PLAN.md` are implemented; that file's §5 table records the
-status of each and §5.1 the things the implementation added that the plan had not foreseen.
-**Step 6 (DRT) has not been started** and is the next task.
+All seven steps of `docs/DISCOVERY_V2_PLAN.md` are implemented; that file's §5 table records
+the status of each, §5.1 what the search implementation added that the plan had not foreseen,
+and §5.2 the same for DRT.
 
 The rationale, so it is not re-litigated: the filtered topology space at ≤ 5 elements is only
 ~10²–10⁴ candidates and exact degeneracy is bounded at 1–4 equivalents per truth, so
@@ -57,7 +58,7 @@ enumeration beats stochastic search outright — it is affordable *and* it can s
 plausible topology up to N elements was evaluated", which the genetic search can never claim.
 The GP is now a fallback for > 5 elements.
 
-Three things worth knowing before touching this code:
+Four things worth knowing before touching this code:
 
 - **`benchmarks/topology_space.py` still has its own enumerator, on purpose.** The library one
   filters sub-levels and streams; the benchmark one is the naive version. Gate G2 is checked
@@ -69,6 +70,9 @@ Three things worth knowing before touching this code:
 - **The feasibility filter is conservative by construction and therefore modest**: 1.75× on
   the capacitor sweep, 1.15–1.18× elsewhere, against the 2–5× the plan hoped for. The lever
   that actually matters is `--workers`.
+- **`core/drt.py` is deliberately not wired into the search.** The CLI prints it beside the
+  discovery report and `core/discover.py` does not import it at all. That is a decision, not
+  an omission — see `docs/DISCOVERY_V2_PLAN.md` §3.4 and §6 item 0 below.
 
 ## 3. Facts that cost real time to establish
 
@@ -115,6 +119,16 @@ recorded in the code as a comment and in `docs/IMPLEMENTATION_PLAN.md` marked **
   elements and the four-element circuit *that generated the data* was never refitted. The
   shortlist is now a per-element-count quota ranked by a screening AICc. This was invisible in
   every small test case, because in a small space the shortlist covers every size anyway.
+- **A DRT peak cannot be thresholded against the tallest peak in the distribution.** The
+  smaller block of the two-block Maxwell-Wagner reference — the case the module was built for
+  — carries 2% of the total polarisation, and any "fraction of the largest peak" threshold
+  high enough to reject regularisation ripple also rejects the block. A weight threshold
+  cannot separate them either: the ripples carry 0.6–3.0%. The discriminator is the noise —
+  the real block moves |Z| at its own frequency by 140× the RMS residual, the ripples by 0.6×.
+- **DRT must be allowed to report that it does not apply.** A sum of capacitive RC relaxations
+  cannot carry a distributed inductive process, so on the capacitor reference it returns no
+  peaks, a series resistance wrong by 7× and a 64% residual. `well_described` exists so that
+  is reported rather than dressed up as "0 relaxations".
 - **A feasibility filter that lets every element degenerate has no structural power at all.**
   If any element may be shorted or opened, the reachable endpoint-slope hull of *any*
   topology collapses to the union of its leaves' hulls — the test degenerates into "does this
@@ -168,14 +182,20 @@ the two-tier search stayed on the expensive model. All subagent output was re-ru
 independently before being committed. The repository is now under git with the history pushed
 to https://github.com/ToshihiroIguchi/AutoCircuit — commit per plan step.
 
+The DRT session did the same: `tests/test_drt.py` was written by a `sonnet` subagent from a
+spec that named the measured tolerances, then re-run here before being committed, while the
+regularisation, the λ-selection rule and the peak criterion stayed on the expensive model —
+all three of which needed measurement to get right (§5.2 of the plan).
+
 ## 6. Open items
 
-0. **Discovery v2 step 6 — DRT** (`docs/DISCOVERY_V2_PLAN.md` §3.4, gate G4). The next task.
-   It is standalone structure probing and *not* a search bound: [measured] the small element
-   counts are under 1% of the filtered space (n=5 alone is 85–89% of it), so a DRT-derived
-   `n_min` would save seconds, while raising `exhaustive_min` deliberately clears
-   `complete_up_to` — "all topologies up to N" is not true when the smaller sizes were skipped.
-   `exhaustive_min` stays available to anyone who wants that trade explicitly.
+0. Nothing is left of `docs/DISCOVERY_V2_PLAN.md`: step 6 (DRT, gate G4) is done, so all seven
+   steps and all five gates are in. One decision inside it is worth not reopening by accident:
+   **DRT is not wired into the search and should not be.** [measured] It could only raise the
+   enumeration floor, which removes 0.1–0.4% of the filtered space (n = 5 alone is 85–89% of
+   it, and the small sizes are the cheapest fits), while raising `exhaustive_min` deliberately
+   clears `complete_up_to` — "all topologies up to N" is not true when the smaller sizes were
+   skipped. `exhaustive_min` stays available to anyone who wants that trade explicitly.
 1. Web UI (phase 6) — the biggest remaining piece; see `docs/IMPLEMENTATION_PLAN.md` §9.
 2. ngspice round-trip in CI. The test suite already proves the netlist is *electrically*
    right via its own nodal-analysis engine (`tests/test_spice.py`); a real simulator would

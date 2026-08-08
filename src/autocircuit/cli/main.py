@@ -19,6 +19,7 @@ import numpy as np
 from autocircuit import __version__
 from autocircuit.core.circuit import Circuit
 from autocircuit.core.discover import discover
+from autocircuit.core.drt import DRTResult, drt
 from autocircuit.core.elements import (
     COMPONENT_POOL,
     DEFAULT_POOL,
@@ -226,6 +227,16 @@ def cmd_discover(args: argparse.Namespace) -> int:
     )
     print(result.summary(spectrum, limit=args.top))
 
+    # DRT is printed beside the search, never fed into it. Raising the enumeration floor on a
+    # DRT relaxation count would save under 1% of the screen and cost the completeness claim
+    # (docs/DISCOVERY_V2_PLAN.md section 3.4), so the two analyses stay independent and the
+    # reader compares them.
+    probe = None if args.no_drt else _probe_structure(spectrum)
+    if probe is not None:
+        print("\nStructure probe (independent of the search above):")
+        for line in probe.hints():
+            print(f"  {line}")
+
     if args.json:
         payload = {
             "pool": list(result.pool),
@@ -276,6 +287,43 @@ def cmd_validate(args: argparse.Namespace) -> int:
         np.savetxt(args.residuals, rows, delimiter=",", header=header, comments="")
         print(f"\nWrote residuals to {args.residuals}")
     return 0 if result.passed else 1
+
+
+def _probe_structure(spectrum: Spectrum) -> DRTResult | None:
+    """DRT alongside a discovery run, as advice. Never allowed to break the search."""
+    try:
+        return drt(spectrum)
+    except (ValueError, np.linalg.LinAlgError):
+        return None
+
+
+def cmd_drt(args: argparse.Namespace) -> int:
+    spectrum = _load(args)
+    print(_describe(spectrum))
+    print()
+    result = drt(
+        spectrum,
+        points_per_decade=args.points_per_decade,
+        series_inductance=args.series_l,
+        series_capacitance=args.series_c,
+        lam=args.regularisation,
+    )
+    print(result.summary())
+    if args.json:
+        Path(args.json).write_text(json.dumps(result.to_dict(), indent=2), encoding="utf-8")
+        print(f"\nWrote distribution to {args.json}")
+    if args.distribution:
+        rows = np.column_stack([result.tau, result.gamma])
+        np.savetxt(
+            args.distribution,
+            rows,
+            delimiter=",",
+            header="tau_s,gamma_ohm",
+            comments="",
+        )
+        print(f"Wrote gamma(tau) to {args.distribution}")
+    # A spectrum the Debye model cannot represent is a failed analysis, not a zero-peak one.
+    return 0 if result.well_described else 1
 
 
 def cmd_simulate(args: argparse.Namespace) -> int:
@@ -442,6 +490,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--progress", action="store_true",
         help="print a progress line to stderr during screening",
     )
+    p_disc.add_argument(
+        "--no-drt", action="store_true",
+        help="skip the DRT structure probe printed beside the report (it never affects the"
+        " search either way)",
+    )
     p_disc.add_argument("--generations", type=int, default=30)
     p_disc.add_argument("--population", type=int, default=40)
     p_disc.add_argument("--max-elements", type=int, default=7)
@@ -468,6 +521,44 @@ def build_parser() -> argparse.ArgumentParser:
     p_val.add_argument("--limit", type=float, default=0.01, help="residual pass threshold")
     p_val.add_argument("--residuals", help="write per-point residuals to this CSV")
     p_val.set_defaults(func=cmd_validate)
+
+    # drt
+    p_drt = subparsers.add_parser(
+        "drt",
+        help="distribution of relaxation times: how many relaxations does this data show?",
+        description=(
+            "Invert a spectrum into a distribution of relaxation times. Answers how many "
+            "distinct relaxations the sample shows and whether any of them is broadened "
+            "enough to want a CPE rather than a C. Advisory: it constrains nothing, and "
+            "'discover' does not use it to narrow the search."
+        ),
+    )
+    _add_data_arguments(p_drt)
+    p_drt.add_argument(
+        "--points-per-decade", type=int, default=10, help="density of the tau grid"
+    )
+    p_drt.add_argument(
+        "--regularisation",
+        type=float,
+        help="fix the smoothing strength instead of choosing it by GCV",
+    )
+    p_drt.add_argument(
+        "--series-l",
+        dest="series_l",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="include a series inductance (default: decided from the data)",
+    )
+    p_drt.add_argument(
+        "--series-c",
+        dest="series_c",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="include a series capacitance, for blocking data (default: decided from the data)",
+    )
+    p_drt.add_argument("--json", help="write a machine-readable report here")
+    p_drt.add_argument("--distribution", help="write gamma(tau) to this CSV")
+    p_drt.set_defaults(func=cmd_drt)
 
     # simulate
     p_sim = subparsers.add_parser("simulate", help="generate a synthetic spectrum")

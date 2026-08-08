@@ -292,6 +292,32 @@ systematic under a runs test.
   it a report that can say *"every plausible topology with up to N elements was evaluated"*.
   Absence from the report becomes evidence.
 
+### 6.2 Structure probing — DRT (`core/drt.py`, `autocircuit drt`)
+
+A separate question from "what circuit?": *how many relaxations does this sample show, and is
+any of them distributed?* Fixing the time constants on a log grid makes the Debye expansion
+linear, so a regularised least-squares solve answers it with no initial values — the Lin-KK
+machinery of §5 plus a smoothness prior. λ comes from generalised cross-validation on the
+unconstrained problem, where GCV is valid; the reported distribution is then recomputed under
+`γ ≥ 0`, because letting the inversion oscillate through zero invents peaks and the peak
+*count* is the output.
+
+- **[measured] It is a standalone analysis, not a search prior.** The plan had it raising the
+  enumeration floor. That removes 0.1–0.4% of the filtered topology space, which is
+  concentrated in its largest level, and costs `complete_up_to` — a bad trade, and a worse one
+  once a mis-counted peak can delete the right answer from a search still claiming to be
+  exhaustive. `core/discover.py` does not import `core/drt.py`.
+- **[measured] Gate G4 passes 10/10** for 1, 2 and 3 relaxations at 0% and 1% noise, recovering
+  peak positions within 0.026 decades and weights within 1.4%.
+- **[measured] A relaxation is detected against the noise, not against the largest peak.** The
+  obvious threshold rejects the smaller block of a two-block Maxwell-Wagner sample, which
+  carries 2% of the total polarisation — the exact case the feature exists for. See
+  `docs/DISCOVERY_V2_PLAN.md` §5.2.
+- **[measured] It reports when it does not apply.** No sum of capacitive RC relaxations can
+  represent a distributed inductive process, so on a capacitor with skin effect the inversion
+  returns no peaks, a 7×-wrong series resistance and a 64% residual. `well_described` says so
+  and the CLI exits non-zero, rather than presenting "0 relaxations" as a finding.
+
 ## 7. SPICE export
 
 - `autocircuit fit ... --spice model.cir` → `.subckt` netlist with two terminals.
@@ -357,7 +383,7 @@ return a common `Spectrum` (f [Hz], Z [complex], metadata). Export: CSV and ZVie
 | 2 | Fitting engine | **done** — recovers a 9-circuit synthetic suite at 0% and 1% noise with no initial values; calibrated uncertainties; Lin-KK |
 | 3 | CLI | **done** — `fit`, `discover`, `validate`, `simulate`, `convert`, `elements` |
 | 4 | SPICE export | **done** — NNLS Foster-form ladder synthesis; netlist verified by nodal analysis. ngspice round-trip still outstanding. |
-| 5 | Topology discovery | **done** — genetic search, then the exhaustive-first redesign of §6.1 (`docs/DISCOVERY_V2_PLAN.md` steps 1–5). DRT structure probing (step 6) is still outstanding. |
+| 5 | Topology discovery | **done** — genetic search, then the exhaustive-first redesign of §6.1, all seven steps of `docs/DISCOVERY_V2_PLAN.md` including DRT structure probing (§6.2) |
 | 6 | Web UI | **not started** |
 
 Test corpus actually used: series/parallel RC, capacitor C+ESR+ESL, capacitor with `SKINF`,
@@ -366,21 +392,13 @@ semicircle, and a wire with `SKINW` — each at 0% and 1% noise.
 
 ### 10.1 Next steps
 
-1. **Discovery v2 step 6 — DRT.** Steps 1–5 of `docs/DISCOVERY_V2_PLAN.md` are implemented
-   (enumeration, feasibility filter, two-tier exhaustive mode, CLI, benchmarks). What remains
-   is `core/drt.py`: a regularised distribution of relaxation times used as *structure
-   probing* — how many relaxations, is there a series R or L — available as a standalone
-   `autocircuit drt` command and as advisory text in the discovery report. [measured] It does
-   **not** raise the enumeration floor: that would save under 1% of the screen and cost the
-   completeness guarantee (`docs/DISCOVERY_V2_PLAN.md` §3.4). It was severable by design and is
-   the last piece of the v2 plan.
-2. **Web UI (phase 6)** — the only untouched phase, and the largest remaining piece.
-3. **ngspice round-trip in CI** — the nodal-analysis engine in the test suite proves the
+1. **Web UI (phase 6)** — the only untouched phase, and the largest remaining piece.
+2. **ngspice round-trip in CI** — the nodal-analysis engine in the test suite proves the
    netlist is electrically right; running a real simulator would also prove it is *dialect*
    right.
-4. **Performance for the browser** — the fit is ~0.5 s for three parameters and ~1.2 s for six
+3. **Performance for the browser** — the fit is ~0.5 s for three parameters and ~1.2 s for six
    on CPython; Pyodide will be slower. Measure before optimising further.
-5. **More readers** — Gamry `.DTA`, BioLogic `.mpt` (P1 in §8) once real files are available.
+4. **More readers** — Gamry `.DTA`, BioLogic `.mpt` (P1 in §8) once real files are available.
 
 ## 11. References
 

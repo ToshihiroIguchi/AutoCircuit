@@ -1,6 +1,7 @@
 # Topology Discovery v2 — Exhaustive-First Design
 
-Status: approved plan, not yet implemented (2026-08-08).
+Status: implemented (2026-08-09). Steps 1–7 are done; §3.2, §3.4 and gate G1 carry corrections
+made when measurement contradicted the plan, and §5.1/§5.2 record what implementation added.
 Prerequisite reading: `docs/IMPLEMENTATION_PLAN.md` §6 and the **[measured]** notes there.
 
 ## 1. Why redesign
@@ -241,6 +242,12 @@ Acceptance gates (hard, in the benchmark script, not aspirations):
   the benchmark suite.
 - **G4** — DRT recovers the correct relaxation count for synthetic 1-, 2- and 3-peak spectra
   with peaks ≥ 1 decade apart at 1% noise, 10/10 seeds.
+  **[measured] PASSES 10/10** on all three counts at both 0% and 1% noise, and the recovered
+  numbers are better than the gate asks for: peak positions land within 0.026 decades of the
+  true RC products and peak weights within 1.4% of the true block resistances. It also holds
+  on the harder cases the gate does not name — two blocks a single decade apart, and the
+  two-block Maxwell-Wagner reference whose smaller block carries 2% of the total polarisation
+  — but only after the peak criterion was rewritten; see §5.2.
 - **G5** — existing test suite stays green; `mode="evolve"` results unchanged for a fixed
   seed.
 
@@ -253,7 +260,7 @@ Acceptance gates (hard, in the benchmark script, not aspirations):
 | 3 | two-tier exhaustive mode in `discover.py`, `complete_up_to`, progress callback | M | **done** — `tests/test_discover_exhaustive.py` |
 | 4 | `--mode`/`--workers` CLI, multiprocessing tier 1 | S | **done** |
 | 5 | benchmark script + gate G1; tune screening budget against it | M | **done** — `benchmarks/discovery_v2.py` |
-| 6 | `drt.py` + `drt` CLI + G4; report hints only, **no** `n_min` wiring (see §3.4) | M | not started |
+| 6 | `drt.py` + `drt` CLI + G4; report hints only, **no** `n_min` wiring (see §3.4) | M | **done** — `tests/test_drt.py`; G4 passes 10/10 on every case. See §5.2 |
 | 7 | docs: this file marked implemented, README, IMPLEMENTATION_PLAN §6/§10 update | S | **done** |
 
 Steps 1–5 are the core and independent of step 6; DRT lands last and is severable.
@@ -287,6 +294,48 @@ Steps 1–5 are the core and independent of step 6; DRT lands last and is severa
   objects. Sending back only the fitted values would have meant a single-restart local fit in
   the parent, which silently discards the restart spread — the signal a non-identifiable model
   uses to announce itself.
+
+### 5.2 What DRT needed that the plan did not specify
+
+Three of the plan's implicit choices were wrong when measured, and all three were wrong in the
+same direction: the obvious rule looked fine on the easy case and failed on the case the
+module exists to serve.
+
+- **Peak picking cannot threshold against the tallest peak.** [measured] The obvious rule --
+  count a peak if it rises some fraction of the largest peak above its surroundings -- rejects
+  the smaller block of the two-block Maxwell-Wagner reference outright, because that block
+  carries 1e4 ohm against the other's 5e5 and so stands at 2% of the tallest peak. No
+  threshold on weight can fix it either: the spurious ripples a regularised inversion leaves
+  on a depressed semicircle carry 0.6–3.0% of the total, straddling the real block's 2.0%.
+  What separates them is the noise. A relaxation is counted when its prominence is at least
+  half its *own* height (scale-free, so uneven blocks are fine) **and** its weight moves |Z|
+  at its own characteristic frequency by at least 8× the RMS residual. In those units the real
+  block stands at 140× and the ripples at 0.6×. The factor 8 is where a sweep stops improving:
+  1–3 Debye peaks are counted 10/10 at any threshold from 2 up, but two blocks one decade
+  apart and two blocks of 50:1 uneven weight are 9/10 until the threshold reaches 5 and 8
+  respectively — and nothing is lost going up, a weak block still being found 10/10 down to a
+  100:1 weight ratio.
+- **GCV must be allowed to choose no regularisation.** The plan said "GCV with an L-curve
+  fallback", and the natural reading -- distrust a GCV minimum that lands on either end of the
+  λ grid -- is half wrong. [measured] On noise-free data GCV correctly goes to the bottom of
+  the grid and fits to 0.03%; rejecting that and falling back to the L-curve, which has no
+  corner to find when there is no noise to trade against, over-smoothed the same data to a
+  5.5% residual. A bottom-of-grid minimum is now believed when the residual there confirms the
+  data really is that clean; a top-of-grid minimum never is.
+- **DRT has to be able to say "not applicable".** Run on the capacitor reference it returns a
+  distribution with no peaks in it, a series resistance wrong by 7×, and a 64% residual — because
+  a sum of *capacitive* RC relaxations cannot carry a distributed *inductive* process such as
+  skin effect. Reporting "0 relaxations" for that is worse than useless. `DRTResult` therefore
+  carries `well_described`, the hints say plainly that the model does not apply, and the CLI
+  exits non-zero.
+
+Two smaller notes. The τ grid extends **one decade** past the measured window at each end
+rather than the plan's "2× the measured range": time constants far outside the window are
+unidentifiable, and the smoothness prior fills that null space with ramps that peak-pick as
+relaxations the data never showed. And the series R/L/C estimates are printed only when they
+move the impedance by more than the residual already does — the fit assigns *something* to
+every column it is given, and a 1 ohm series resistance on a half-megohm spectrum is a
+rounding error being presented as a component.
 
 ## 6. Risks
 

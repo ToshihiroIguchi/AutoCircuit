@@ -58,6 +58,10 @@ autocircuit discover cap.csv --pool component --workers 8 --progress
 
 # Check the data is Kramers-Kronig consistent before believing any of it
 autocircuit validate cap.csv
+
+# Ask a different question: how many relaxations does this sample show, and is any of them
+# broad enough to want a CPE rather than a C? Exits non-zero if the data is not relaxation-like.
+autocircuit drt cell.csv --json drt.json
 ```
 
 Typical `fit` output:
@@ -143,6 +147,15 @@ systematic.
 **Data validation is not optional.** A spectrum that drifted during the sweep will still fit a
 circuit, and will still report small error bars. The Lin-KK pre-check exists to catch that
 before the numbers are believed.
+
+**DRT tells you about the sample, not about the search.** `autocircuit drt` inverts a spectrum
+into a distribution of relaxation times: how many distinct relaxations there are, how much
+polarisation each carries, and whether any is broader than an ideal Debye peak — which is the
+signature of a distributed process and the reason to reach for a CPE. It is deliberately kept
+out of `discover`: using it to narrow the search would save a fraction of a percent of the work
+and would forfeit the coverage statement above. `discover` prints it beside the report, as a
+second opinion, and `--no-drt` turns that off. When the data is not a sum of relaxations at all
+— a capacitor with skin effect, say — DRT says so instead of reporting a count.
 
 See `docs/IMPLEMENTATION_PLAN.md` for the design and the literature it is based on.
 
