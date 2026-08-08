@@ -119,6 +119,14 @@ recorded in the code as a comment and in `docs/IMPLEMENTATION_PLAN.md` marked **
   elements and the four-element circuit *that generated the data* was never refitted. The
   shortlist is now a per-element-count quota ranked by a screening AICc. This was invisible in
   every small test case, because in a small space the shortlist covers every size anyway.
+- **The tier-1 screening budget cannot be cut, and the capacitor reference cannot tell you
+  that.** `popsize=8, maxiter=40` is the measured floor. Halving it is tempting — the screen is
+  most of the runtime — and on the capacitor sweep the truth screens to rank 1 of 657 at every
+  budget tried, so a 4× cut looks free. On the electrochemical references it is not: at
+  `8×20` the Maxwell-Wagner truth screens to 1452× the best cost of its own size, falls to
+  rank 19 of 330 and misses the shortlist, *while its three exact equivalents stay at ranks
+  1–3* — so the report still looks healthy. `benchmarks/discovery_v2.py screen-rank` is the
+  experiment; it exists because a 54-candidate sample could not have shown this.
 - **A DRT peak cannot be thresholded against the tallest peak in the distribution.** The
   smaller block of the two-block Maxwell-Wagner reference — the case the module was built for
   — carries 2% of the total polarisation, and any "fraction of the largest peak" threshold

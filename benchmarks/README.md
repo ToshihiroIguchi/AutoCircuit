@@ -14,6 +14,7 @@ python benchmarks/fitting.py calibration
 python benchmarks/fitting.py restarts
 python benchmarks/discovery_v2.py filter
 python benchmarks/discovery_v2.py screen
+python benchmarks/discovery_v2.py screen-rank --workers 8   # slow: ~1 h
 python benchmarks/discovery_v2.py gate --workers 8      # slow: hours
 ```
 
@@ -118,11 +119,38 @@ true topology comes first at every budget tried:
 | 20 | 100 | 259 | 1 of 54 |
 
 The library default stays at 8/40. A 54-topology sample is not enough evidence to halve the
-budget on — but it is enough to say the budget is not the thing to spend more on.
+budget on — but it is enough to say the budget is not the thing to spend more on. **The
+`screen-rank` mode below is the experiment that settles it, and this one is superseded for
+that purpose**: it ranks by cost alone and globally, which is not what the shortlist does.
 
 Full-space screening cost on this machine, single core, after the feasibility filter:
 57 ms/topology at n = 3, 86 ms at n = 4, 219 ms at n = 5, i.e. ~22 min for the whole
 capacitor sweep on one core and a few minutes with `--workers 8`.
+
+### `discovery_v2.py screen-rank` — the same budget question, asked properly
+
+Every feasible candidate screened, at every budget, on all three references × 3 seeds, scoring
+what the pipeline actually does with the result: the rank of the truth *and of every known
+exact equivalent* within its own element count, by screening AICc, against the per-size refit
+quota. Kept = `_shortlist` selected it.
+
+| budget | tier-1 time (8 workers) | vs 8×40 | worst rank/quota | truth + equivalents kept |
+|--------|------------------------:|--------:|-----------------:|-------------------------:|
+| **8×40 (default)** | **6.1 min** | **1.00×** | **0.67** | **15/15** |
+| 8×20 | 3.5 min | 0.56× | 13.5 | 12/15 |
+| 4×40 | 4.0 min | 0.64× | 38.3 | 13/15 |
+| 4×20 | 2.5 min | 0.41× | 72.3 | 9/15 |
+
+Times and counts are the Maxwell-Wagner and Randles references. **The budget cannot be cut.**
+At 8×20 the Maxwell-Wagner truth screens to 1452× the best cost of its size, falls to rank 19
+of 330 and misses the shortlist — while its three exact equivalents stay at ranks 1–3, so
+nothing in the report looks wrong.
+
+The capacitor reference is tabulated apart because it disagrees completely: its truth screens
+to **rank 1 of 657 at every budget**, margin 0.14, with 4×20 finishing in 0.9–1.9 min against
+8×40's 3.6–4.9. That reference is the one whose runtime motivated cutting the budget in the
+first place, and measured alone it says the cut is free. It is free only there. Same shape as
+the `_shortlist` bug: invisible on the easy case, expensive on the real space.
 
 ### `fitting.py accuracy`
 

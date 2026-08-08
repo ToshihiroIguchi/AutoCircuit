@@ -467,12 +467,25 @@ def main() -> None:
     )
     parser.add_argument("--sample", type=int, default=60, help="topologies sampled (screen)")
     parser.add_argument(
+        "--only",
+        help="run just the reference spectra whose label contains one of these comma-separated"
+        " strings, e.g. 'Maxwell,Randles'. These runs are long enough that resuming one after"
+        " an interruption beats repeating it.",
+    )
+    parser.add_argument(
         "--budgets",
         default=",".join(f"{b.popsize}x{b.maxiter}" for b in DEFAULT_BUDGETS),
         help="screen-rank budget grid as popsize x maxiter, e.g. 8x40,4x20. The first entry is"
         " the baseline the others are timed against.",
     )
     args = parser.parse_args()
+
+    if args.only:
+        wanted = [text.strip().lower() for text in args.only.split(",") if text.strip()]
+        selected = [r for r in REFERENCES if any(w in r.label.lower() for w in wanted)]
+        if not selected:
+            raise SystemExit(f"error: --only {args.only!r} matched no reference spectrum")
+        REFERENCES[:] = selected
 
     if args.what == "gate":
         report_gate(args.seeds, args.limit, args.workers)

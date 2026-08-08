@@ -148,6 +148,39 @@ earns its place; it is just not the main lever.
   *(Amended during implementation: "the best `n_refine` by screening cost" globally is wrong
   and made G1 fail — `n_refine` is now a total split into a quota per element count, ranked
   within a size by a screening AICc, and the 10× rule is capped. See §5.1.)*
+  **[measured, `benchmarks/discovery_v2.py screen-rank`] `popsize=8, maxiter=40` is the budget,
+  and it cannot be cut.** The screen dominates the run, so halving it is the obvious way to
+  bring the capacitor reference under G1's time target. It does not survive measurement.
+  Screening the *whole* filtered space at each budget, on all three references × 3 seeds, and
+  asking the only question that matters — does the truth, and every known exact equivalent of
+  it, still land inside its per-element-count quota:
+
+  | budget | tier-1 time, 8 workers | vs 8×40 | worst rank/quota | truth + equivalents kept |
+  |--------|-----------------------:|--------:|-----------------:|-------------------------:|
+  | **8×40 (default)** | **6.1 min** | **1.00×** | **0.67** | **15/15** |
+  | 8×20 | 3.5 min | 0.56× | 13.5 | 12/15 |
+  | 4×40 | 4.0 min | 0.64× | 38.3 | 13/15 |
+  | 4×20 | 2.5 min | 0.41× | 72.3 | 9/15 |
+
+  (Times and counts are the two electrochemical references; the capacitor reference is
+  discussed separately below because it behaves completely differently.)
+
+  Every reduced budget loses candidates the report exists to produce — at 8×20 the
+  Maxwell-Wagner truth screens to 1452× the best cost of its size and falls to rank 19 of 330,
+  while its three exact equivalents stay at ranks 1–3. A shortlist that keeps the equivalents
+  and drops the truth still *looks* like a successful search.
+
+  The trap this avoids is worth stating plainly, because the obvious experiment walks into it.
+  On the capacitor reference — the one whose 4.8 min runtime motivated the whole idea — the
+  truth screens to rank **1 of 657 at every budget tested**, margin 0.14, with 4×20 running in
+  0.9–1.9 min against 8×40's 3.6–4.9. Measured there alone, a 4× cut looks free. It is free
+  only for that spectrum. This is the same shape as the `_shortlist` bug in §5.1: a change that
+  small cases cannot see and the real space punishes.
+
+  One thing the table does say is that the *default* has less headroom than is comfortable —
+  worst margin 0.67 means a tracked circuit sat at rank 4 of a 6-deep quota. Widening
+  `n_refine` is the direction with evidence behind it; narrowing the screen is not.
+
 - **Early abandon:** during tier 1, skip the local polish when the DE stage already exceeds
   100× the best cost seen at the same complexity.
 - **Parallelism:** `workers=N` fans tier-1 fits across `multiprocessing.Pool`
@@ -225,14 +258,19 @@ Acceptance gates (hard, in the benchmark script, not aspirations):
 - **G1** — on the three reference spectra (capacitor `C-R-L`+SKINF, two-block
   Maxwell-Wagner, Randles), `mode=exhaustive` places the true topology **or an exact
   equivalent** in the reported equivalence classes, 10/10 seeds, single core,
-  ≤ 15 min each (≤ 3 min with 8 workers).
+  ≤ 15 min each (~~≤ 3 min with 8 workers~~ — withdrawn, see below).
   **[measured] PASSES 30/30**, and the truth is on the Pareto front in all 30. It is also the
   *recommendation* in 28/30; the two exceptions are the parsimony rule dropping a 10 mΩ ESR
   that 1% noise could not resolve, with the truth still on the front beside it. Times with 8
   workers: 1.1–1.2 min (Maxwell-Wagner), 1.4–1.6 min (Randles), 3.8–5.8 min (capacitor).
   **The time budget above was wrong and is superseded by those numbers.** It assumed the
   feasibility filter would remove ~3×; it removes 1.75× on the worst case, so the capacitor
-  reference costs ~4.8 min with 8 workers and ~22 min on one core. Two clarifications the
+  reference costs ~4.8 min with 8 workers and ~22 min on one core. **The "≤ 3 min with 8
+  workers" clause of this gate is therefore also wrong, and is withdrawn rather than chased.**
+  The obvious way to meet it was a cheaper screen, and §3.3 records the measurement showing
+  that this trades the answer for the clock on the electrochemical references. The gate's real
+  content is the 30/30 recovery; the honest time statement is 1.1–1.6 min for the
+  electrochemical references and 3.6–5.8 min for the capacitor, on 8 workers. Two clarifications the
   gate needed once it was run for real: "in the reported equivalence classes" is satisfied by
   the truth being among the refitted candidates, which is weaker than being the
   recommendation — the benchmark reports both — and the gate is only meaningful because the
