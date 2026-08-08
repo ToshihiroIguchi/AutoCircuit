@@ -105,6 +105,12 @@ recorded in the code as a comment and in `docs/IMPLEMENTATION_PLAN.md` marked **
   data the first *exact* equivalent screened sets a reference of order 1e-30, and every other
   exact equivalent then gets abandoned unpolished — losing precisely the equivalence class the
   report exists to produce. Hence `PERFECT_COST` in `discover.py`.
+- **A screening pass must not rank by raw residual across sizes.** Raw cost always improves
+  with parameters, so ranking the whole screen by it put nothing but five-element circuits on
+  the tier-2 shortlist: on the capacitor reference all 60 shortlisted candidates had five
+  elements and the four-element circuit *that generated the data* was never refitted. The
+  shortlist is now a per-element-count quota ranked by a screening AICc. This was invisible in
+  every small test case, because in a small space the shortlist covers every size anyway.
 - **A feasibility filter that lets every element degenerate has no structural power at all.**
   If any element may be shorted or opened, the reachable endpoint-slope hull of *any*
   topology collapses to the union of its leaves' hulls — the test degenerates into "does this

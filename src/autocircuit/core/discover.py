@@ -22,10 +22,12 @@ et al., J. Electrochem. Soc. 170, 086502, 2023).
 
 from __future__ import annotations
 
+import contextlib
 import math
 import multiprocessing
+import multiprocessing.pool
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -88,6 +90,14 @@ REFINE_DEFAULT = {"evolve": 8, "exhaustive": 30, "auto": 30}
 #: Every candidate within this factor of the best screening cost is refitted at full budget,
 #: on top of the ``n_refine`` best. A sloppy screen must not be able to drop a near-tie.
 REFINE_COST_FACTOR = 10.0
+
+#: ...but no more than this many times the per-size quota. Without a ceiling the near-tie rule
+#: is unbounded, and on noisy data it selects hundreds of candidates (see `_shortlist`).
+REFINE_CEILING_FACTOR = 2
+
+#: Floor on the per-element-count refit quota, so that a size class is never represented by one
+#: or two candidates just because the run happened to span many sizes.
+MIN_REFINE_PER_SIZE = 5
 
 #: Tier-1 tasks handed to a worker process at a time. Large enough to amortise the ~1 s
 #: interpreter start-up on Windows, small enough that the early-abandon threshold keeps up.
@@ -801,16 +811,22 @@ def _exhaustive(
             seen.add(circuit.canonical_form())
             texts.append(circuit.to_string())
 
-    scored = _screen_all(
-        texts,
-        spectrum,
-        weighting=weighting,
-        seed=seed,
-        workers=workers,
-        on_progress=on_progress,
-        time_limit=time_limit,
-        started=started,
-    )
+    # One worker pool for the whole run: both tiers use it, so the ~1 s interpreter start-up
+    # each process pays on Windows is amortised across everything rather than paid twice.
+    with _worker_pool(workers, spectrum, weighting) as executor:
+        scored = _screen_all(
+            texts,
+            spectrum,
+            weighting=weighting,
+            seed=seed,
+            executor=executor,
+            on_progress=on_progress,
+            time_limit=time_limit,
+            started=started,
+        )
+        candidates = _refit_shortlist(
+            scored, spectrum, weighting, final_restarts, seed, n_refine, executor
+        )
     # Topologies are screened in size order, so a truncated screen still covers whole levels.
     # Starting above one element forfeits the claim entirely: "all topologies up to N" is only
     # true when the smaller sizes were looked at too.
@@ -819,30 +835,89 @@ def _exhaustive(
         if floor == 1
         else None
     )
-    return (
-        _refit_shortlist(scored, spectrum, weighting, final_restarts, seed, n_refine),
-        complete_up_to,
-        len(scored),
-    )
+    return candidates, complete_up_to, len(scored)
 
 
-def _shortlist(scored: Sequence[tuple[float, str]], n_refine: int) -> list[str]:
+def _screening_aicc(cost: float, n_params: int, n_data: int) -> float:
+    """AICc from a screening cost alone, without the covariance a full fit would give.
+
+    The same formula :func:`stats.compute_statistics` uses, fed the weighted sum of squared
+    residuals and the parameter count. That is everything AICc needs; the expensive part of a
+    full fit is the Jacobian, which only the uncertainties require.
+    """
+    if not math.isfinite(cost) or cost <= 0.0 or n_data - n_params - 1 <= 0:
+        return math.inf
+    aic = n_data * math.log(cost / n_data) + 2.0 * n_params
+    return aic + 2.0 * n_params * (n_params + 1) / (n_data - n_params - 1)
+
+
+def _shortlist(
+    scored: Sequence[tuple[float, str]], n_refine: int, n_data: int
+) -> list[str]:
     """The screened candidates worth a full-budget refit.
 
-    The screen is deliberately sloppy, so the shortlist is the union of two rules: the
-    ``n_refine`` cheapest, and everything within :data:`REFINE_COST_FACTOR` of the very best.
-    The second rule is what stops a near-tie -- exactly the equivalent topologies the report
-    exists to surface -- from being dropped because the screen ranked it 31st.
+    **The quota is per element count, and that is not a detail.** [measured] Ranking the whole
+    screen by cost puts nothing but the largest circuits on the shortlist: raw residual always
+    improves with parameters, so on the capacitor reference every one of the 60 best-scoring
+    candidates had five elements and the four-element truth -- the circuit that generated the
+    data -- never reached tier 2 at all. Two corrections, both needed:
+
+    * rank *within* a size by screening AICc rather than raw cost, so an extra CPE has to earn
+      its two parameters even against its own size class;
+    * give every size its own quota, so the Pareto front has candidates at each complexity
+      instead of a cluster at the top.
+
+    Within a size the list is the AICc-best ``quota``, plus every candidate whose cost is
+    within :data:`REFINE_COST_FACTOR` of that size's best -- the near-tie rule, which is what
+    stops an exact equivalent from being dropped because the sloppy screen ranked it one place
+    too low. [measured] That rule needs a ceiling: at 1% noise a factor 10 in cost is only a
+    factor 3.2 in relative error, so hundreds of candidates land inside it and refitting them
+    all cost half an hour per run while surfacing nothing new.
     """
     usable = [(cost, text) for cost, text in scored if math.isfinite(cost)]
     if not usable:
         return []
-    usable.sort()
-    best = usable[0][0]
-    threshold = best * REFINE_COST_FACTOR if best > 0.0 else math.inf
-    keep = {text for _, text in usable[:n_refine]}
-    keep.update(text for cost, text in usable if cost <= threshold)
-    return [text for _, text in usable if text in keep]
+
+    by_size: dict[int, list[tuple[float, float, str]]] = {}
+    for cost, text in usable:
+        circuit = Circuit.parse(text)
+        aicc = _screening_aicc(cost, circuit.n_params, n_data)
+        by_size.setdefault(len(circuit.leaves), []).append((aicc, cost, text))
+
+    quota = max(MIN_REFINE_PER_SIZE, n_refine // len(by_size))
+    keep: list[str] = []
+    for group in by_size.values():
+        group.sort()
+        best_cost = min(cost for _, cost, _ in group)
+        threshold = best_cost * REFINE_COST_FACTOR if best_cost > 0.0 else math.inf
+        near_ties = sum(1 for _, cost, _ in group if cost <= threshold)
+        take = min(max(quota, near_ties), quota * REFINE_CEILING_FACTOR)
+        keep.extend(text for _, _, text in group[:take])
+    return keep
+
+
+def _full_fit(
+    text: str, spectrum: Spectrum, weighting: Weighting, restarts: int, seed: int
+) -> FitResult | None:
+    """One full-budget fit, or None if the circuit could not be fitted at all."""
+    try:
+        result = fit(
+            Circuit.parse(text), spectrum, weighting=weighting, restarts=restarts, seed=seed
+        )
+    except (ValueError, CircuitError, np.linalg.LinAlgError):
+        return None
+    return result if math.isfinite(result.statistics.aicc) else None
+
+
+def _refit_worker(task: tuple[str, int, int]) -> FitResult | None:
+    """Tier-2 refit in a worker process. The whole FitResult comes back, statistics included.
+
+    Returning the finished object rather than just the parameter values keeps the restart
+    spread -- which is how a non-identifiable model announces itself -- instead of quietly
+    losing it to a single-restart reconstruction in the parent.
+    """
+    text, restarts, seed = task
+    return _full_fit(text, _WORKER["spectrum"], _WORKER["weighting"], restarts, seed)
 
 
 def _refit_shortlist(
@@ -852,24 +927,37 @@ def _refit_shortlist(
     restarts: int,
     seed: int,
     n_refine: int,
+    executor: multiprocessing.pool.Pool | None = None,
 ) -> list[Candidate]:
     """Tier 2: refit the shortlist at full budget. Only these numbers are ever reported."""
-    out: list[Candidate] = []
-    for text in _shortlist(scored, n_refine):
-        try:
-            result = fit(
-                Circuit.parse(text),
-                spectrum,
-                weighting=weighting,
-                restarts=restarts,
-                seed=seed,
-            )
-        except (ValueError, CircuitError, np.linalg.LinAlgError):
-            continue
-        if math.isfinite(result.statistics.aicc):
-            out.append(Candidate(result.circuit, result, 0))
+    texts = _shortlist(scored, n_refine, 2 * spectrum.n)
+    if executor is not None and len(texts) > 1:
+        results = list(executor.map(_refit_worker, [(t, restarts, seed) for t in texts]))
+    else:
+        results = [_full_fit(text, spectrum, weighting, restarts, seed) for text in texts]
+    out = [Candidate(r.circuit, r, 0) for r in results if r is not None]
     out.sort(key=lambda c: c.aicc)
     return out
+
+
+@contextlib.contextmanager
+def _worker_pool(
+    workers: int, spectrum: Spectrum, weighting: Weighting
+) -> Iterator[multiprocessing.pool.Pool | None]:
+    """A process pool for the whole search, or None when running single-process.
+
+    ``workers=1`` must create nothing at all: that is the Pyodide-safe path, where
+    ``multiprocessing`` is unavailable rather than merely slow.
+    """
+    if not workers or workers <= 1:
+        yield None
+        return
+    with multiprocessing.Pool(
+        processes=workers,
+        initializer=_init_worker,
+        initargs=(spectrum.f, spectrum.z, weighting),
+    ) as executor:
+        yield executor
 
 
 def _screen_all(
@@ -878,19 +966,17 @@ def _screen_all(
     *,
     weighting: Weighting,
     seed: int,
-    workers: int,
+    executor: multiprocessing.pool.Pool | None,
     on_progress: Callable[[int, int, str | None], None] | None,
     time_limit: float | None,
     started: float,
 ) -> list[tuple[float, str]]:
     """Tier 1: one cheap fit per topology, returning (cost, circuit) pairs."""
-    if workers and workers > 1:
+    if executor is not None:
         return _screen_parallel(
             texts,
-            spectrum,
-            weighting=weighting,
+            executor,
             seed=seed,
-            workers=workers,
             on_progress=on_progress,
             time_limit=time_limit,
             started=started,
@@ -972,16 +1058,14 @@ def _screen_worker(task: tuple[str, int, float]) -> tuple[float, str]:
 
 def _screen_parallel(
     texts: Sequence[str],
-    spectrum: Spectrum,
+    executor: multiprocessing.pool.Pool,
     *,
-    weighting: Weighting,
     seed: int,
-    workers: int,
     on_progress: Callable[[int, int, str | None], None] | None,
     time_limit: float | None,
     started: float,
 ) -> list[tuple[float, str]]:
-    """The same screen fanned across processes, one pool for the whole run.
+    """The same screen fanned across processes.
 
     Tasks are submitted in chunks rather than all at once so that the early-abandon threshold
     can be refreshed between chunks; within a chunk it is necessarily stale, which costs a
@@ -992,27 +1076,22 @@ def _screen_parallel(
     best_by_complexity: dict[float, float] = {}
     best_overall = math.inf
     best_text: str | None = None
-    with multiprocessing.Pool(
-        processes=workers,
-        initializer=_init_worker,
-        initargs=(spectrum.f, spectrum.z, weighting),
-    ) as executor:
-        for start in range(0, len(texts), WORKER_CHUNK):
-            tasks = [
-                (text, seed, _abandon_at(best_by_complexity, complexity_of[text]))
-                for text in texts[start : start + WORKER_CHUNK]
-            ]
-            for cost, text in executor.imap_unordered(_screen_worker, tasks):
-                scored.append((cost, text))
-                complexity = complexity_of[text]
-                if cost < best_by_complexity.get(complexity, math.inf):
-                    best_by_complexity[complexity] = cost
-                if cost < best_overall:
-                    best_overall, best_text = cost, text
-            if on_progress is not None:
-                on_progress(len(scored), len(texts), best_text)
-            if time_limit is not None and time.perf_counter() - started > time_limit:
-                break
+    for start in range(0, len(texts), WORKER_CHUNK):
+        tasks = [
+            (text, seed, _abandon_at(best_by_complexity, complexity_of[text]))
+            for text in texts[start : start + WORKER_CHUNK]
+        ]
+        for cost, text in executor.imap_unordered(_screen_worker, tasks):
+            scored.append((cost, text))
+            complexity = complexity_of[text]
+            if cost < best_by_complexity.get(complexity, math.inf):
+                best_by_complexity[complexity] = cost
+            if cost < best_overall:
+                best_overall, best_text = cost, text
+        if on_progress is not None:
+            on_progress(len(scored), len(texts), best_text)
+        if time_limit is not None and time.perf_counter() - started > time_limit:
+            break
     return scored
 
 
