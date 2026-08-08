@@ -100,6 +100,36 @@ only remove topologies that provably cannot match; completeness depends on this)
 Expected effect (to be measured, not assumed): 2–5× reduction. The filter gets its own tests:
 for each benchmark spectrum, the true topology and all its known equivalents must survive.
 
+**Implemented, and the expectation above was wrong.** [measured, `benchmarks/discovery_v2.py
+filter`] Two things had to change once the rules were written out.
+
+1. *Any element can be driven to a short or an open* by pushing its scale parameter to a
+   bound, and that changes the endpoint class. A model whose corner frequency sits just
+   outside the measured window is a real, fittable model, so the filter allows a
+   **degeneracy budget**: up to `budget` elements may be treated as degenerate when matching
+   an endpoint (`DEFAULT_DEGENERACY_BUDGET = 1`). Independently at each end — an element can
+   legitimately act as a short at one end and an open at the other, so demanding one
+   consistent assignment would be unsound.
+2. *Endpoint slopes interpolate.* A series R-C with its corner inside the first decade shows
+   a slope of about −0.5, which is neither of its asymptotic exponents. The topology is
+   therefore represented by the **convex hull** of everything it can reach, not by a set of
+   isolated values.
+
+Both margins cost cutting power, and the honest measured reduction is well under the guess:
+
+| degeneracy budget | capacitor | Maxwell-Wagner | Randles | truth survives |
+|-------------------|----------:|---------------:|--------:|----------------|
+| 0 | 7.7× | 3.1× | 2.3× | yes (all references) |
+| **1 (default)** | **1.75×** | **1.15×** | **1.18×** | yes (all references) |
+| 3 | 1.19× | 1.02× | 1.05× | yes (all references) |
+
+Budget 0 reaches the hoped-for 2–5× and passes G3 on every reference tested — but it is the
+setting that can reject a topology purely because one corner frequency fell outside the
+window, and completeness is the reason this mode exists. The default is therefore 1, with the
+budget exposed as `feasibility_budget` for anyone who would rather have the speed. Even at 1
+the filter removes 43% of the flagship capacitor sweep for a fixed cost of ~0.3 s, so it
+earns its place; it is just not the main lever.
+
 ### 3.3 `core/discover.py` (refactor)
 
 - New entry `discover(spectrum, *, mode="auto", ...)`:
@@ -176,17 +206,33 @@ Acceptance gates (hard, in the benchmark script, not aspirations):
 
 ## 5. Work order
 
-| step | contents | size |
-|------|----------|------|
-| 1 | `enumerate.py` + counts regression test (G2) | S |
-| 2 | feasibility filter + its conservativeness tests (G3) | M |
-| 3 | two-tier exhaustive mode in `discover.py`, `complete_up_to`, progress callback | M |
-| 4 | `--mode`/`--workers` CLI, multiprocessing tier 1 | S |
-| 5 | benchmark script + gate G1; tune screening budget against it | M |
-| 6 | `drt.py` + `drt` CLI + G4; wire `n_min` into auto mode | M |
-| 7 | docs: this file marked implemented, README, IMPLEMENTATION_PLAN §6/§10 update | S |
+| step | contents | size | status |
+|------|----------|------|--------|
+| 1 | `enumerate.py` + counts regression test (G2) | S | **done** — `tests/test_enumerate.py`, counts reproduce the table exactly through n = 6 |
+| 2 | feasibility filter + its conservativeness tests (G3) | M | **done** — `tests/test_feasibility.py`; see the revised §3.2 |
+| 3 | two-tier exhaustive mode in `discover.py`, `complete_up_to`, progress callback | M | **done** — `tests/test_discover_exhaustive.py` |
+| 4 | `--mode`/`--workers` CLI, multiprocessing tier 1 | S | **done** |
+| 5 | benchmark script + gate G1; tune screening budget against it | M | **done** — `benchmarks/discovery_v2.py` |
+| 6 | `drt.py` + `drt` CLI + G4; wire `n_min` into auto mode | M | not started |
+| 7 | docs: this file marked implemented, README, IMPLEMENTATION_PLAN §6/§10 update | S | **done** |
 
 Steps 1–5 are the core and independent of step 6; DRT lands last and is severable.
+
+### 5.1 What the implementation added that the plan did not specify
+
+- **`fit.screen()`** — a rank-only fit returning nothing but the cost. Building a full
+  `FitResult` (covariance, statistics, restart spread) for thousands of topologies that will
+  never be reported is pure waste, and it is also where the early-abandon switch lives.
+- **`PERFECT_COST`** — early abandon is disabled while the reference fit of a given complexity
+  is already exact. Without it, on noise-free data the first exact equivalent screened sets a
+  threshold of order 1e-30 and every *other* exact equivalent is abandoned unpolished. Those
+  equivalents are the report's whole reason for existing.
+- **Per-mode `n_refine` defaults** (`REFINE_DEFAULT`): 30 for exhaustive, 8 for evolve. Sharing
+  one default would have silently changed genetic-search results, which gate G5 forbids.
+- **`complete_up_to` is derived, not asserted.** It is computed from how many whole levels the
+  screen actually finished, so a run cut short by `--time-limit` or `--max-candidates` reports
+  a smaller number rather than an untrue one, and a run started above one element reports
+  nothing at all.
 
 ## 6. Risks
 

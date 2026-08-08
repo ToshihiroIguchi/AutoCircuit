@@ -12,6 +12,9 @@ python benchmarks/topology_space.py
 python benchmarks/fitting.py accuracy
 python benchmarks/fitting.py calibration
 python benchmarks/fitting.py restarts
+python benchmarks/discovery_v2.py filter
+python benchmarks/discovery_v2.py screen
+python benchmarks/discovery_v2.py gate --workers 8      # slow: hours
 ```
 
 Re-run the relevant script after touching the optimizer, the element library or the
@@ -48,6 +51,44 @@ Fitting *every* same-size topology to noise-free data from a known circuit:
 Exact degeneracy is real but bounded — a handful of circuits, not dozens. Note this counts
 *exact algebraic* equivalence on clean data; with real noise, more circuits become
 practically indistinguishable, which is what the Pareto front and AICc are for.
+
+### `discovery_v2.py filter` — structural feasibility filter
+
+How much of the enumerated space the endpoint-behaviour screen removes before any fitting,
+and whether the true topology survives it. Reduction is over the cumulative n ≤ 5 space.
+
+| reference | pool | n ≤ 5 | kept | reduction | truth kept |
+|-----------|------|------:|-----:|----------:|------------|
+| capacitor `C-R-L-SKINF` | R,C,L,CPE,SKINF | 11,550 | 6,598 | 1.75× | yes |
+| Maxwell-Wagner `p(R,C)-p(R,C)` | R,C,L,CPE | 2,976 | 2,581 | 1.15× | yes |
+| Randles `R-p(C,R-W)` | R,C,CPE,W | 4,395 | 3,713 | 1.18× | yes |
+
+Identical at 0% and 1% noise — the tolerance band is wide enough that noise does not move it.
+The plan guessed 2–5×; that is only reachable with `feasibility_budget=0`, which forbids any
+element from being treated as degenerate and can therefore reject a model whose corner
+frequency merely fell outside the measured window. Completeness is the point of this mode, so
+the default budget is 1 and the reduction is smaller. See `docs/DISCOVERY_V2_PLAN.md` §3.2 for
+the budget sweep (7.7×/3.1×/2.3× at budget 0). The screen itself costs ~0.3 s for 11,550
+candidates, so even 1.75× is free money.
+
+### `discovery_v2.py screen` — tier-1 screening budget
+
+54 topologies sampled from the capacitor reference space, ranked by screening cost alone. The
+true topology comes first at every budget tried:
+
+| popsize | maxiter | ms/topology | rank of the truth |
+|--------:|--------:|------------:|------------------:|
+| 4 | 20 | 80 | 1 of 54 |
+| **8** | **40** | **126** | **1 of 54** |
+| 12 | 60 | 164 | 1 of 54 |
+| 20 | 100 | 259 | 1 of 54 |
+
+The library default stays at 8/40. A 54-topology sample is not enough evidence to halve the
+budget on — but it is enough to say the budget is not the thing to spend more on.
+
+Full-space screening cost on this machine, single core, after the feasibility filter:
+57 ms/topology at n = 3, 86 ms at n = 4, 219 ms at n = 5, i.e. ~22 min for the whole
+capacitor sweep on one core and a few minutes with `--workers 8`.
 
 ### `fitting.py accuracy`
 

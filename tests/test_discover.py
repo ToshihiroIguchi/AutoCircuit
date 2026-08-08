@@ -5,6 +5,12 @@ What they do assert is the contract the feature actually makes: the genetic oper
 produce valid circuits, structurally redundant topologies are filtered out, the Pareto front
 really is non-dominated, a run is reproducible from its seed, and on easy data the true
 topology does appear on the front.
+
+Tests that exercise the genetic search itself -- seeds, generations, the time limit -- pass
+``mode="evolve"`` explicitly. The default is now ``"auto"``, which starts with exhaustive
+enumeration, and on the wider pools that means fitting several hundred topologies: correct,
+but not what these particular tests are about, and far too slow to run for each of them.
+Exhaustive and auto mode have their own file, ``test_discover_exhaustive.py``.
 """
 
 from __future__ import annotations
@@ -32,6 +38,9 @@ FAST = {
     "n_refine": 3,
     "final_restarts": 2,
 }
+
+#: The same reduced budget, pinned to the genetic search.
+FAST_EVOLVE = {**FAST, "mode": "evolve"}
 
 
 def test_random_topology_has_the_requested_element_count() -> None:
@@ -139,8 +148,8 @@ def test_discovery_is_reproducible_from_its_seed() -> None:
         noise=0.005,
         seed=0,
     )
-    first = discover(data, pool=("R", "C"), seed=3, **FAST)
-    second = discover(data, pool=("R", "C"), seed=3, **FAST)
+    first = discover(data, pool=("R", "C"), seed=3, **FAST_EVOLVE)
+    second = discover(data, pool=("R", "C"), seed=3, **FAST_EVOLVE)
     assert [c.circuit.canonical_form() for c in first.pareto] == [
         c.circuit.canonical_form() for c in second.pareto
     ]
@@ -224,7 +233,7 @@ def test_seed_circuits_are_evaluated() -> None:
         seed=0,
     )
     result = discover(
-        data, pool=("R", "C"), seed=0, seeds=("R1-p(R2,C1)",), **FAST
+        data, pool=("R", "C"), seed=0, seeds=("R1-p(R2,C1)",), **FAST_EVOLVE
     )
     target = Circuit.parse("R1-p(R2,C1)").canonical_form()
     assert target in [c.circuit.canonical_form() for c in result.candidates]
@@ -252,6 +261,7 @@ def test_recommendation_prefers_parsimony_over_raw_score() -> None:
     result = discover(
         data,
         pool=("R", "C", "CPE"),
+        mode="evolve",
         generations=10,
         population=20,
         max_elements=6,
@@ -316,7 +326,13 @@ def test_time_limit_stops_the_search() -> None:
     )
     started = time.perf_counter()
     result = discover(
-        data, pool=("R", "C", "CPE"), generations=1000, population=20, seed=0, time_limit=5.0
+        data,
+        pool=("R", "C", "CPE"),
+        mode="evolve",
+        generations=1000,
+        population=20,
+        seed=0,
+        time_limit=5.0,
     )
     elapsed = time.perf_counter() - started
     # The limit governs the evolutionary loop; the final refit runs afterwards, so allow slack.

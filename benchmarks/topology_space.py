@@ -14,8 +14,13 @@ This is the measurement that motivated the exhaustive-first redesign in
 Run: ``python benchmarks/topology_space.py`` (needs PYTHONPATH=src). Part (b) fits a few
 hundred circuits and takes a couple of minutes.
 
-The ``enumerate_topologies`` prototype here is the direct ancestor of the planned
-``autocircuit.core.enumerate`` module; its output counts are the regression target (gate G2).
+The ``enumerate_topologies`` prototype here is the direct ancestor of
+``autocircuit.core.enumerate``, and is **deliberately not replaced by it**. The library version
+streams the requested level and filters its sub-levels, which is a real optimisation with a
+real correctness argument behind it (see that module's ``_compose`` docstring); this one is the
+naive, obviously-correct formulation. Keeping both means gate G2 is checked against an
+independent implementation rather than against itself. Their outputs were compared as *sets*,
+not just counts, for every pool up to six elements: identical.
 """
 
 from __future__ import annotations

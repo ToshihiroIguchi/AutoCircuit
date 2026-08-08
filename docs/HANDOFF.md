@@ -1,13 +1,16 @@
 # Handoff — state of AutoCircuit as of 2026-08-08
 
-Written at the end of the session that built the backend. Read this first, then
-`CLAUDE.md`, then `docs/DISCOVERY_V2_PLAN.md` (the approved next task).
+Written at the end of the session that built the backend, updated at the end of the session
+that implemented discovery v2 steps 1–5. Read this first, then `CLAUDE.md`, then
+`docs/DISCOVERY_V2_PLAN.md`.
 
 ## 1. Where things stand
 
-The command-line backend is **complete and verified**: 238 tests pass
-(`python -m pytest tests -q`, ~3.5 min). Phases 0–5 of `docs/IMPLEMENTATION_PLAN.md` are done;
-phase 6 (web UI) is untouched.
+The command-line backend is **complete and verified**. Phases 0–5 of
+`docs/IMPLEMENTATION_PLAN.md` are done; phase 6 (web UI) is untouched.
+
+**Discovery v2 steps 1–5 are implemented** (see §2). What is left of that plan is step 6,
+DRT — severable by design, and the only remaining item in `docs/DISCOVERY_V2_PLAN.md`.
 
 Working end to end today:
 
@@ -18,39 +21,50 @@ python -m autocircuit simulate -c "C1-R1-L1-SKINF1" -p C1.C=1e-6 -p R1.R=1e-2 `
     -p L1.L=5e-10 -p SKINF1.A=2e-5 -p SKINF1.n=0.5 --fmin 100 --fmax 1e9 --noise 0.01 -o cap.csv
 python -m autocircuit validate cap.csv
 python -m autocircuit fit cap.csv -c "C1-R1-L1-SKINF1" --spice cap.cir --json cap.json
-python -m autocircuit discover cap.csv --pool component --time-limit 120
+python -m autocircuit discover cap.csv --pool component --workers 8 --progress
+python -m autocircuit discover cap.csv --pool component --mode evolve --time-limit 120
 ```
 
 Module map (`src/autocircuit/`):
 
 | module | role |
 |--------|------|
-| `core/elements.py` | 12 elements; broadcast-safe `impedance()`; data-derived bounds |
+| `core/elements.py` | 12 elements; broadcast-safe `impedance()`; data-derived bounds; endpoint slope metadata |
 | `core/circuit.py` | series/parallel AST, canonical forms, `simplify`, value canonicalisation |
 | `core/dsl.py` | parser for `R1-p(C1,R2-W1)` |
-| `core/fit.py` | the no-initial-values fitter (log transform → DE → TRF polish → restarts) |
+| `core/fit.py` | the no-initial-values fitter (log transform → DE → TRF polish → restarts); `screen()` for rank-only fits |
 | `core/stats.py` | covariance, AICc, identifiability warnings |
 | `core/validate.py` | Lin-KK data validation |
-| `core/discover.py` | genetic topology search, Pareto front, equivalence classes |
+| `core/enumerate.py` | exhaustive topology enumeration + the structural feasibility filter |
+| `core/discover.py` | exhaustive and genetic topology search, Pareto front, equivalence classes |
 | `core/spice.py` | netlist export + NNLS Foster-form ladder synthesis |
 | `io/` | generic CSV, ZView/ZPlot, Touchstone, Keysight readers |
 | `cli/main.py` | argparse CLI |
 
-## 2. The next task
+## 2. Discovery v2 — what was built, and what is left
 
-**Discovery v2, specified in `docs/DISCOVERY_V2_PLAN.md`.** Start at its §5 step 1
-(`core/enumerate.py` + the counts regression test).
+Steps 1–5 of `docs/DISCOVERY_V2_PLAN.md` are implemented; that file's §5 table records the
+status of each and §5.1 the things the implementation added that the plan had not foreseen.
+**Step 6 (DRT) has not been started** and is the next task.
 
-One-paragraph rationale, so it is not re-litigated: after the genetic search shipped, two
-measurements changed the design. The filtered topology space at ≤ 5 elements is only ~10²–10⁴
-candidates (see `benchmarks/README.md`), and exact degeneracy is bounded at 1–4 equivalents
-per truth. So enumeration beats stochastic search outright — it is affordable *and* it can
-state "every plausible topology up to N elements was evaluated", which the genetic search can
-never claim. The GP drops to a fallback for > 5 elements.
+The rationale, so it is not re-litigated: the filtered topology space at ≤ 5 elements is only
+~10²–10⁴ candidates and exact degeneracy is bounded at 1–4 equivalents per truth, so
+enumeration beats stochastic search outright — it is affordable *and* it can state "every
+plausible topology up to N elements was evaluated", which the genetic search can never claim.
+The GP is now a fallback for > 5 elements.
 
-The prototype enumerator that produced those counts is `benchmarks/topology_space.py`
-(`enumerate_topologies`); `core/enumerate.py` is essentially that function made lazy, and its
-measured counts are acceptance gate G2.
+Three things worth knowing before touching this code:
+
+- **`benchmarks/topology_space.py` still has its own enumerator, on purpose.** The library one
+  filters sub-levels and streams; the benchmark one is the naive version. Gate G2 is checked
+  against an independent implementation that way. Their outputs were compared as *sets* for
+  every pool through n = 6: identical.
+- **`discover()`'s default mode is now `"auto"`**, so calls that used to run a quick genetic
+  search now enumerate first. Tests that are specifically about the genetic operators pass
+  `mode="evolve"`; that is why `tests/test_discover.py` has `FAST_EVOLVE`.
+- **The feasibility filter is conservative by construction and therefore modest**: 1.75× on
+  the capacitor sweep, 1.15–1.18× elsewhere, against the 2–5× the plan hoped for. The lever
+  that actually matters is `--workers`.
 
 ## 3. Facts that cost real time to establish
 
@@ -81,12 +95,31 @@ recorded in the code as a comment and in `docs/IMPLEMENTATION_PLAN.md` marked **
 - **AICc is a bad headline.** On a 71-point capacitor spectrum minimum-AICc selected a
   9-parameter circuit with two parameters whose standard errors exceeded their own values.
   `DiscoveryResult.recommended` applies parsimony instead.
+- **Filtering the enumerator's sub-levels is safe**, and it is what makes enumeration fast.
+  If a branch collapses under `simplify` then so does any network containing it, and if a
+  branch is implausible then so is any network containing it — both properties are defined by
+  recursion over every node of the tree. The counts were verified against the independent
+  prototype before this was relied on.
+- **Early abandon must switch itself off against an exact reference.** Skipping the polish for
+  candidates 100× worse than the best of their complexity is a large saving, but on noise-free
+  data the first *exact* equivalent screened sets a reference of order 1e-30, and every other
+  exact equivalent then gets abandoned unpolished — losing precisely the equivalence class the
+  report exists to produce. Hence `PERFECT_COST` in `discover.py`.
+- **A feasibility filter that lets every element degenerate has no structural power at all.**
+  If any element may be shorted or opened, the reachable endpoint-slope hull of *any*
+  topology collapses to the union of its leaves' hulls — the test degenerates into "does this
+  topology contain a suitable element type". That is why the degeneracy budget is finite
+  (default 1) and why the measured reduction is what it is.
 
 ## 4. Environment quirks on this machine
 
 - **No `uv`, no `typer`, and the package is not pip-installed.** Always set
   `$env:PYTHONPATH = "C:\Users\toshi\python\AutoCircuit\src"`. Run the CLI as
   `python -m autocircuit`. `numpy` 2.5.1, `scipy` 1.17.1, `pytest` 9.1.1, Python 3.13.
+- **`ruff` and `mypy` are not installed here either**, despite being the project's declared
+  tooling. Style and typing were kept correct by hand; if you install them, expect the first
+  run to have opinions nobody has been able to act on yet.
+- **`pytest-timeout` is not installed** — `--timeout=` is rejected by the argument parser.
 - **numpy and scipy are the only permitted runtime dependencies** — this is what keeps the
   Pyodide target viable. The CLI uses stdlib `argparse` for this reason.
 - **PowerShell mangles quotes** in `python -c @'...'@`; heredocs lose `"` characters. Write a
@@ -112,8 +145,19 @@ From `CLAUDE.md`, and they were followed:
 - Verify subagent output rather than trusting the report: their tests were re-run and their
   most error-prone code (Touchstone S→Z conversion) was checked by hand.
 
-## 6. Open items after discovery v2
+The discovery-v2 session kept to the same split and it held up: the counts regression test
+(G2), the feasibility tests (G3) and the CLI flags went to `sonnet` subagents with the
+"xfail, do not weaken" instruction, while the enumeration algorithm, the feasibility rules and
+the two-tier search stayed on the expensive model. All subagent output was re-run
+independently before being committed. The repository is now under git with the history pushed
+to https://github.com/ToshihiroIguchi/AutoCircuit — commit per plan step.
 
+## 6. Open items
+
+0. **Discovery v2 step 6 — DRT** (`docs/DISCOVERY_V2_PLAN.md` §3.4, gate G4). The next task.
+   Note that `discover()` already takes `exhaustive_min`, which is where the DRT-derived
+   `n_min` plugs in; raising it deliberately clears `complete_up_to`, because "all topologies
+   up to N" is not true when the smaller sizes were skipped.
 1. Web UI (phase 6) — the biggest remaining piece; see `docs/IMPLEMENTATION_PLAN.md` §9.
 2. ngspice round-trip in CI. The test suite already proves the netlist is *electrically*
    right via its own nodal-analysis engine (`tests/test_spice.py`); a real simulator would

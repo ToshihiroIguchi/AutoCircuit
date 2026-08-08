@@ -112,6 +112,14 @@ class Element(ABC):
     #: ``rc`` - a passive RC ladder (capacitive fractional elements);
     #: ``rl`` - a passive RL ladder (inductive / skin-effect elements).
     spice_form: ClassVar[str] = "rc"
+    #: Leading log-log slope of |Z| as omega -> 0 and as omega -> infinity: the exponent m in
+    #: |Z| ~ omega^m. Given as an interval because elements with a free exponent (CPE, CC, HN,
+    #: SKINF) sweep a range of slopes as that exponent moves over its hard limits. The
+    #: structural feasibility filter in :mod:`autocircuit.core.enumerate` combines these along
+    #: the topology tree and compares the result with the measured endpoint slopes, which
+    #: rules out whole families of candidates before a single fit is attempted.
+    dc_exponent: ClassVar[tuple[float, float]] = (0.0, 0.0)
+    hf_exponent: ClassVar[tuple[float, float]] = (0.0, 0.0)
 
     @property
     def n_params(self) -> int:
@@ -158,6 +166,8 @@ class Resistor(Element):
     params = (ParamSpec("R", "ohm", True, *_R_LIMITS),)
     complexity = 1.0
     spice_form = "primitive"
+    dc_exponent = (0.0, 0.0)
+    hf_exponent = (0.0, 0.0)
 
     def impedance(self, omega: Float, values: Float) -> Complex:
         return (values[0] + 0j) * np.ones_like(omega, dtype=np.complex128)
@@ -172,6 +182,8 @@ class Capacitor(Element):
     params = (ParamSpec("C", "F", True, *_C_LIMITS),)
     complexity = 1.0
     spice_form = "primitive"
+    dc_exponent = (-1.0, -1.0)
+    hf_exponent = (-1.0, -1.0)
 
     def impedance(self, omega: Float, values: Float) -> Complex:
         return 1.0 / (1j * omega * values[0])
@@ -186,6 +198,8 @@ class Inductor(Element):
     params = (ParamSpec("L", "H", True, *_L_LIMITS),)
     complexity = 1.0
     spice_form = "primitive"
+    dc_exponent = (1.0, 1.0)
+    hf_exponent = (1.0, 1.0)
 
     def impedance(self, omega: Float, values: Float) -> Complex:
         return 1j * omega * values[0]
@@ -204,6 +218,9 @@ class ConstantPhaseElement(Element):
         ParamSpec("n", "-", False, *_EXP_LIMITS),
     )
     complexity = 2.5
+    # |Z| ~ omega^-n with n over its hard limits, at both ends.
+    dc_exponent = (-_EXP_LIMITS[1], -_EXP_LIMITS[0])
+    hf_exponent = (-_EXP_LIMITS[1], -_EXP_LIMITS[0])
 
     def impedance(self, omega: Float, values: Float) -> Complex:
         return 1.0 / (values[0] * (1j * omega) ** values[1])
@@ -224,6 +241,8 @@ class Warburg(Element):
     name = "Warburg (semi-infinite)"
     params = (ParamSpec("A", "ohm*s^-0.5", True, 1e-9, 1e15),)
     complexity = 1.5
+    dc_exponent = (-0.5, -0.5)
+    hf_exponent = (-0.5, -0.5)
 
     def impedance(self, omega: Float, values: Float) -> Complex:
         return values[0] / np.sqrt(1j * omega)
@@ -244,6 +263,9 @@ class WarburgShort(Element):
         ParamSpec("tau", "s", True, *_TAU_LIMITS),
     )
     complexity = 2.0
+    # tanh(x)/x -> 1 as x -> 0, so Z -> R; at high frequency tanh -> 1 and Z -> R/sqrt(j w t).
+    dc_exponent = (0.0, 0.0)
+    hf_exponent = (-0.5, -0.5)
 
     def impedance(self, omega: Float, values: Float) -> Complex:
         x = np.sqrt(1j * omega * values[1])
@@ -263,6 +285,9 @@ class WarburgOpen(Element):
         ParamSpec("tau", "s", True, *_TAU_LIMITS),
     )
     complexity = 2.0
+    # coth(x)/x ~ 1/x^2 as x -> 0, so Z ~ R/(j w tau): capacitive at DC, 45 degrees at HF.
+    dc_exponent = (-1.0, -1.0)
+    hf_exponent = (-0.5, -0.5)
 
     def impedance(self, omega: Float, values: Float) -> Complex:
         x = np.sqrt(1j * omega * values[1])
@@ -282,6 +307,8 @@ class Gerischer(Element):
         ParamSpec("tau", "s", True, *_TAU_LIMITS),
     )
     complexity = 2.0
+    dc_exponent = (0.0, 0.0)
+    hf_exponent = (-0.5, -0.5)
 
     def impedance(self, omega: Float, values: Float) -> Complex:
         return values[0] / np.sqrt(1.0 + 1j * omega * values[1])
@@ -301,6 +328,9 @@ class ColeCole(Element):
         ParamSpec("alpha", "-", False, *_EXP_LIMITS),
     )
     complexity = 3.0
+    # Resistive plateau at DC; |Z| ~ omega^-alpha once (j w tau)^alpha dominates.
+    dc_exponent = (0.0, 0.0)
+    hf_exponent = (-_EXP_LIMITS[1], -_EXP_LIMITS[0])
 
     def impedance(self, omega: Float, values: Float) -> Complex:
         return values[0] / (1.0 + (1j * omega * values[1]) ** values[2])
@@ -325,6 +355,9 @@ class HavriliakNegami(Element):
         ParamSpec("beta", "-", False, *_EXP_LIMITS),
     )
     complexity = 4.0
+    # High-frequency slope is -alpha*beta, so the extremes are the products of the limits.
+    dc_exponent = (0.0, 0.0)
+    hf_exponent = (-_EXP_LIMITS[1] * _EXP_LIMITS[1], -_EXP_LIMITS[0] * _EXP_LIMITS[0])
 
     def impedance(self, omega: Float, values: Float) -> Complex:
         return values[0] / (1.0 + (1j * omega * values[1]) ** values[2]) ** values[3]
@@ -354,6 +387,9 @@ class SkinFractional(Element):
     )
     complexity = 2.5
     spice_form = "rl"
+    # |Z| ~ omega^n, inductive at both ends over the whole allowed exponent range.
+    dc_exponent = (0.05, 0.95)
+    hf_exponent = (0.05, 0.95)
 
     def impedance(self, omega: Float, values: Float) -> Complex:
         return values[0] * (1j * omega) ** values[1]
@@ -386,6 +422,9 @@ class SkinRoundWire(Element):
     )
     complexity = 3.0
     spice_form = "rl"
+    # DC limit is the plain R_dc; the high-frequency limit is the sqrt(f) skin asymptote.
+    dc_exponent = (0.0, 0.0)
+    hf_exponent = (0.5, 0.5)
 
     #: |q| above which the three-term asymptotic expansion below is used instead of the
     #: Bessel functions. The expansion's leading error is O(|q|^-3), so at 1e5 it agrees with

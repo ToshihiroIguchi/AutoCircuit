@@ -162,6 +162,79 @@ def test_convert_round_trips_csv_through_zview_and_back(tmp_path: Path) -> None:
 
 
 # =============================================================================================
+# discover
+# =============================================================================================
+
+# Kept tiny (few points, two-element pool, a low exhaustive limit) so these tests run in
+# seconds rather than minutes.
+_DISCOVER_KWARGS = ["--pool", "R,C", "--exhaustive-limit", "3", "--no-validate"]
+
+
+def _simulate_discover_csv(tmp_path: Path) -> Path:
+    return _simulate_csv(
+        tmp_path,
+        "p(R1,C1)",
+        {"R1.R": 220.0, "C1.C": 1e-7},
+        name="discover_sim.csv",
+    )
+
+
+def test_discover_mode_exhaustive_reports_mode_and_completeness(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    data = _simulate_discover_csv(tmp_path)
+
+    rc = main(["discover", str(data), "--mode", "exhaustive"] + _DISCOVER_KWARGS)
+    assert rc == 0
+
+    out = capsys.readouterr().out
+    assert "mode: exhaustive" in out
+    assert "Coverage: every plausible topology with up to 3 elements" in out
+
+
+def test_discover_mode_exhaustive_json_payload_has_mode_and_complete_up_to(
+    tmp_path: Path,
+) -> None:
+    data = _simulate_discover_csv(tmp_path)
+    report_path = tmp_path / "discover.json"
+
+    rc = main(
+        ["discover", str(data), "--mode", "exhaustive", "--json", str(report_path)]
+        + _DISCOVER_KWARGS
+    )
+    assert rc == 0
+
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["mode"] == "exhaustive"
+    assert report["complete_up_to"] == 3
+
+
+def test_discover_mode_evolve_does_not_claim_completeness(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    data = _simulate_discover_csv(tmp_path)
+
+    rc = main(
+        [
+            "discover", str(data), "--mode", "evolve",
+            "--pool", "R,C", "--no-validate",
+            "--generations", "2", "--population", "8", "--max-elements", "3",
+        ]
+    )
+    assert rc == 0
+
+    out = capsys.readouterr().out
+    assert "sampled, not exhaustive" in out
+
+
+def test_discover_with_an_invalid_mode_exits_non_zero(tmp_path: Path) -> None:
+    data = _simulate_discover_csv(tmp_path)
+
+    with pytest.raises(SystemExit):
+        main(["discover", str(data), "--mode", "bogus"] + _DISCOVER_KWARGS)
+
+
+# =============================================================================================
 # Error handling
 # =============================================================================================
 

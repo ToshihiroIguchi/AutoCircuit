@@ -51,8 +51,10 @@ autocircuit simulate -c "C1-R1-L1-SKINF1" \
 # Fit it. No initial values are given, and none are needed.
 autocircuit fit cap.csv -c "C1-R1-L1-SKINF1" --spice cap.cir --json cap.json
 
-# Let the software work out the topology too
-autocircuit discover cap.csv --pool component --time-limit 120
+# Let the software work out the topology too. By default this enumerates *every* plausible
+# topology up to five elements, so the report can state what it covered rather than what it
+# happened to find. --workers fans the screening pass across cores.
+autocircuit discover cap.csv --pool component --workers 8 --progress
 
 # Check the data is Kramers-Kronig consistent before believing any of it
 autocircuit validate cap.csv
@@ -123,6 +125,20 @@ reparameterisations of one another — `R1-p(R2,C1)` and `p(R1,C1-R2)` describe 
 set of Nyquist semicircles and fit any such data identically. AutoCircuit detects and reports
 these as indistinguishable rather than picking one and presenting it as the answer. Choosing
 between them requires physical knowledge of the sample, not more computation.
+
+**Discovery is exhaustive first.** The distinct topology space is small — a few thousand
+candidates at five elements — so `discover` enumerates all of it (`--mode exhaustive`) instead
+of sampling it, and reports how far that coverage reached:
+
+```
+Coverage: every plausible topology with up to 5 elements from this pool was evaluated.
+```
+
+That line is the point of the feature: a topology missing from the report is missing because
+it does not fit, not because the search never tried it. `--mode evolve` switches back to the
+genetic search, which is still what runs above `--exhaustive-limit`; `--mode auto` (the
+default) does the enumeration and only falls back to evolution if the residuals still look
+systematic.
 
 **Data validation is not optional.** A spectrum that drifted during the sweep will still fit a
 circuit, and will still report small error bars. The Lin-KK pre-check exists to catch that

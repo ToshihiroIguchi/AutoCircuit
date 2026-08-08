@@ -265,13 +265,32 @@ groups candidates whose fitted responses agree to better than 1e-6 everywhere an
 as indistinguishable. This is the honest form of the degeneracy caveat, and it turns what
 would look like a search failure into information.
 
-**[measured] Current capability.** On synthetic data the search recovers the true topology (or
-an exact equivalent) onto the Pareto front for capacitor models and single-relaxation models.
-For multi-relaxation electrochemical spectra (two Maxwell-Wagner blocks, Randles) it reliably
-finds topologies that fit *as well as* the truth at the same or lower complexity, but does not
-consistently surface the textbook form within a two-minute budget. Improving that is the main
-open work item; the likely levers are a cheaper polish stage during search, seeding the initial
-population from a library of literature circuits, and island populations.
+**[measured] Current capability of the genetic search.** On synthetic data it recovers the true
+topology (or an exact equivalent) onto the Pareto front for capacitor models and
+single-relaxation models. For multi-relaxation electrochemical spectra (two Maxwell-Wagner
+blocks, Randles) it reliably finds topologies that fit *as well as* the truth at the same or
+lower complexity, but does not consistently surface the textbook form within a two-minute
+budget — it evaluated only 113–257 topologies in that time.
+
+### 6.1 Discovery v2 — exhaustive first (implemented; see `docs/DISCOVERY_V2_PLAN.md`)
+
+That coverage problem is what the redesign fixes, and it fixes it by not searching at all.
+`core/enumerate.py` produces every distinct plausible topology for a pool and element count;
+`discover(mode="exhaustive")` fits all of them in two tiers — a cheap screen for everything,
+the full budget for the shortlist and for every near-tie. The default `mode="auto"` runs that
+first and only falls back to the genetic search if the residuals of the best model still look
+systematic under a runs test.
+
+- **[measured] The space is small enough to enumerate**: 2 to 11,550 distinct topologies at
+  ≤ 5 elements depending on the pool (`benchmarks/README.md`), enumerated in under a second.
+- **[measured] The structural feasibility filter is a minor lever, not a major one.** It
+  removes 43% of the capacitor sweep and 13–15% of the electrochemical ones — well below the
+  2–5× the plan expected, because a conservative filter has to allow for corner frequencies
+  falling outside the measured window. It costs ~0.3 s, so it stays; the real lever is
+  `--workers`.
+- What this buys that no amount of GP tuning could: `DiscoveryResult.complete_up_to`, and with
+  it a report that can say *"every plausible topology with up to N elements was evaluated"*.
+  Absence from the report becomes evidence.
 
 ## 7. SPICE export
 
@@ -338,7 +357,7 @@ return a common `Spectrum` (f [Hz], Z [complex], metadata). Export: CSV and ZVie
 | 2 | Fitting engine | **done** — recovers a 9-circuit synthetic suite at 0% and 1% noise with no initial values; calibrated uncertainties; Lin-KK |
 | 3 | CLI | **done** — `fit`, `discover`, `validate`, `simulate`, `convert`, `elements` |
 | 4 | SPICE export | **done** — NNLS Foster-form ladder synthesis; netlist verified by nodal analysis. ngspice round-trip still outstanding. |
-| 5 | Topology discovery | **done for component models**; see the capability note in §6 for multi-relaxation spectra |
+| 5 | Topology discovery | **done** — genetic search, then the exhaustive-first redesign of §6.1 (`docs/DISCOVERY_V2_PLAN.md` steps 1–5). DRT structure probing (step 6) is still outstanding. |
 | 6 | Web UI | **not started** |
 
 Test corpus actually used: series/parallel RC, capacitor C+ESR+ESL, capacitor with `SKINF`,
@@ -347,12 +366,12 @@ semicircle, and a wire with `SKINW` — each at 0% and 1% noise.
 
 ### 10.1 Next steps
 
-1. **Discovery v2 — exhaustive-first redesign.** Approved and specified in
-   `docs/DISCOVERY_V2_PLAN.md`. Post-implementation measurements showed the filtered
-   topology space at ≤ 5 elements is only ~10²–10⁴ candidates, so enumeration with a
-   completeness guarantee replaces the GP as the primary mode; the GP becomes a > 5-element
-   fallback. Includes a DRT module for structure probing (relaxation counting) and as a
-   standalone `drt` command. This supersedes the earlier idea of merely retuning the GP.
+1. **Discovery v2 step 6 — DRT.** Steps 1–5 of `docs/DISCOVERY_V2_PLAN.md` are implemented
+   (enumeration, feasibility filter, two-tier exhaustive mode, CLI, benchmarks). What remains
+   is `core/drt.py`: a regularised distribution of relaxation times used as *structure
+   probing* — how many relaxations, is there a series R or L — feeding `n_min` into auto mode
+   and available as a standalone `autocircuit drt` command. It was severable by design and is
+   the last piece of the v2 plan.
 2. **Web UI (phase 6)** — the only untouched phase, and the largest remaining piece.
 3. **ngspice round-trip in CI** — the nodal-analysis engine in the test suite proves the
    netlist is electrically right; running a real simulator would also prove it is *dialect*

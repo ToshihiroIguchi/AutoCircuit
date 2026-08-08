@@ -9,6 +9,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -168,6 +170,32 @@ def cmd_fit(args: argparse.Namespace) -> int:
     return 0 if result.success else 1
 
 
+def _progress_reporter() -> Callable[[int, int, str | None], None]:
+    """Build an ``on_progress`` callback that writes a self-overwriting line to stderr.
+
+    Throttled to roughly 20 updates per second or every 25 candidates, whichever comes first,
+    so that a screen firing the callback thousands of times cannot dominate the run time.
+    It writes to stderr on purpose: stdout carries the report, which must stay pipeable.
+    """
+    last_time = 0.0
+    last_done = -1
+
+    def on_progress(done: int, total: int, best: str | None) -> None:
+        nonlocal last_time, last_done
+        now = time.perf_counter()
+        finished = done >= total
+        if not finished and now - last_time < 0.05 and done - last_done < 25:
+            return
+        last_time, last_done = now, done
+        sys.stderr.write(f"\r  screening {done}/{total}  best so far: {best or '-'}")
+        sys.stderr.flush()
+        if finished:
+            sys.stderr.write("\n")
+            sys.stderr.flush()
+
+    return on_progress
+
+
 def cmd_discover(args: argparse.Namespace) -> int:
     spectrum = _load(args)
     print(_describe(spectrum))
@@ -182,6 +210,12 @@ def cmd_discover(args: argparse.Namespace) -> int:
     result = discover(
         spectrum,
         pool=pool,
+        mode=args.mode,
+        exhaustive_limit=args.exhaustive_limit,
+        max_candidates=args.max_candidates,
+        workers=args.workers,
+        feasibility_filter=not args.no_feasibility_filter,
+        on_progress=_progress_reporter() if args.progress else None,
         generations=args.generations,
         population=args.population,
         max_elements=args.max_elements,
@@ -195,6 +229,8 @@ def cmd_discover(args: argparse.Namespace) -> int:
     if args.json:
         payload = {
             "pool": list(result.pool),
+            "mode": result.mode,
+            "complete_up_to": result.complete_up_to,
             "n_evaluated": result.n_evaluated,
             "generations": result.generations,
             "elapsed_s": result.elapsed_s,
@@ -377,6 +413,34 @@ def build_parser() -> argparse.ArgumentParser:
     p_disc.add_argument(
         "--pool", default="default",
         help="element pool: 'default', 'component', 'electrochemical', or a comma list",
+    )
+    p_disc.add_argument(
+        "--mode", choices=["auto", "exhaustive", "evolve"], default="auto",
+        help=(
+            "which search to use; auto enumerates exhaustively then falls back to the "
+            "genetic search only if the residuals still look systematic"
+        ),
+    )
+    p_disc.add_argument(
+        "--exhaustive-limit", type=int, default=5,
+        help="largest element count to enumerate",
+    )
+    p_disc.add_argument(
+        "--max-candidates", type=int, default=20000,
+        help="ceiling on topologies screened before the exhaustive limit is clamped down",
+    )
+    p_disc.add_argument(
+        "--workers", type=int, default=1,
+        help="processes for the screening pass; 1 keeps the run single-process (required "
+        "under Pyodide)",
+    )
+    p_disc.add_argument(
+        "--no-feasibility-filter", action="store_true",
+        help="keep every enumerated topology, skipping the endpoint-behaviour screen",
+    )
+    p_disc.add_argument(
+        "--progress", action="store_true",
+        help="print a progress line to stderr during screening",
     )
     p_disc.add_argument("--generations", type=int, default=30)
     p_disc.add_argument("--population", type=int, default=40)

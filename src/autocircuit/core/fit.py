@@ -460,6 +460,65 @@ def fit(
     )
 
 
+def screen(
+    circuit: Circuit | str,
+    spectrum: Spectrum,
+    *,
+    weighting: Weighting = "modulus",
+    sigma: Float | None = None,
+    seed: int = 0,
+    popsize: int = 8,
+    maxiter: int = 40,
+    tol: float = 1e-4,
+    margin_decades: float = 3.0,
+    abandon_above: float = math.inf,
+) -> float:
+    """Rank-only fit: return the weighted sum of squared residuals and nothing else.
+
+    Exhaustive discovery fits thousands of topologies just to sort them, and only the best
+    few are ever refitted properly and reported. Building a full :class:`FitResult` for the
+    rest -- covariance, statistics, restart spread -- is wasted work, so this does the global
+    stage once, polishes, and hands back a single number.
+
+    ``abandon_above`` is the early-abandon switch: when the global stage alone already lands
+    above that cost, the local polish is skipped and the raw global cost returned. A candidate
+    that is two orders of magnitude worse than the best one of its size is not going to be
+    rescued by a trust-region step, and skipping it is where most of the screening time is
+    saved.
+
+    Raises the same exceptions as :func:`fit`; callers screening many topologies should catch
+    ``ValueError``, ``CircuitError`` and ``numpy.linalg.LinAlgError``.
+    """
+    if isinstance(circuit, str):
+        circuit = Circuit.parse(circuit)
+    problem = _Problem(circuit, spectrum, weighting, sigma, {}, None, margin_decades)
+    x = _global_stage(
+        problem,
+        seed=seed,
+        popsize=popsize,
+        maxiter=maxiter,
+        tol=tol,
+        workers=1,
+        time_limit=None,
+        x0=None,
+    )
+    cost = problem.cost(x)
+    if not math.isfinite(cost) or cost > abandon_above:
+        return cost
+    local = least_squares(
+        problem.residuals,
+        problem.canonicalize(x),
+        bounds=(problem.lower_x, problem.upper_x),
+        method="trf",
+        xtol=1e-12,
+        ftol=1e-12,
+        gtol=1e-10,
+        max_nfev=2000,
+    )
+    polished = float(np.dot(local.fun, local.fun))
+    return polished if math.isfinite(polished) else cost
+
+
 def _global_stage(
     problem: _Problem,
     *,

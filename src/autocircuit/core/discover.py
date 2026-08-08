@@ -23,9 +23,11 @@ et al., J. Electrochem. Soc. 170, 086502, 2023).
 from __future__ import annotations
 
 import math
+import multiprocessing
 import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any, Literal
 
 import numpy as np
 
@@ -41,12 +43,55 @@ from .circuit import (
     simplify,
 )
 from .elements import DEFAULT_POOL
-
-# The structural plausibility filter now lives with the enumerator, which is what applies it
-# in bulk; it is re-exported here because it was part of this module's public surface first.
-from .enumerate import is_plausible, is_plausible_node  # noqa: F401
-from .fit import FitResult, Weighting, fit
+from .enumerate import (
+    DEFAULT_DEGENERACY_BUDGET,
+    EndpointBehaviour,
+    enumerate_topologies,
+    is_feasible,
+    # The structural plausibility filter now lives with the enumerator, which is what applies
+    # it in bulk; it is re-exported here because it was this module's public surface first.
+    is_plausible,  # noqa: F401
+    is_plausible_node,  # noqa: F401
+)
+from .fit import FitResult, Weighting, fit, screen
 from .spectrum import Spectrum
+
+# The runs test on residual signs, borrowed from the Kramers-Kronig validator: it answers the
+# same question ("are these residuals noise, or structure the model failed to describe?"), so
+# ``mode="auto"`` uses it to decide whether the exhaustive front is under-fitted.
+from .validate import RUNS_Z_LIMIT, _runs_z
+
+Mode = Literal["auto", "exhaustive", "evolve"]
+
+#: Tier-1 screening budget. Enough to rank thousands of topologies, nowhere near enough to
+#: publish: every number that reaches the user comes from the tier-2 refit.
+SCREEN_POPSIZE = 8
+SCREEN_MAXITER = 40
+SCREEN_TOL = 1e-4
+
+#: A screened candidate whose global stage is already this many times worse than the best
+#: candidate of the same complexity has its local polish skipped (see :func:`fit.screen`).
+ABANDON_FACTOR = 100.0
+
+#: Screening cost below which a fit counts as exact. With modulus weighting the cost is the
+#: sum of squared *relative* residuals, so this is a part-per-million agreement. Early abandon
+#: is switched off against such a reference: on noise-free data every exact equivalent of the
+#: truth would otherwise be abandoned by whichever one happened to be screened first, and
+#: those equivalents are precisely what the report exists to surface.
+PERFECT_COST = 1e-9
+
+#: Default number of candidates refitted at full budget, per mode. The exhaustive stage ranks
+#: thousands of topologies with one sloppy fit each, so it needs a wider shortlist than the
+#: genetic search, which has already refitted its survivors many times over.
+REFINE_DEFAULT = {"evolve": 8, "exhaustive": 30, "auto": 30}
+
+#: Every candidate within this factor of the best screening cost is refitted at full budget,
+#: on top of the ``n_refine`` best. A sloppy screen must not be able to drop a near-tie.
+REFINE_COST_FACTOR = 10.0
+
+#: Tier-1 tasks handed to a worker process at a time. Large enough to amortise the ~1 s
+#: interpreter start-up on Windows, small enough that the early-abandon threshold keeps up.
+WORKER_CHUNK = 64
 
 #: Relative standard error above which a parameter counts as unresolved by the data.
 UNRESOLVED_STDERR = 1.0
@@ -106,6 +151,16 @@ class DiscoveryResult:
     generations: int
     elapsed_s: float
     pool: tuple[str, ...]
+    mode: str = "evolve"
+    """Which search produced this: ``exhaustive``, ``evolve``, or ``auto`` for both."""
+    complete_up_to: int | None = None
+    """Largest element count whose topologies were *all* evaluated, or None if none were.
+
+    This is the completeness statement that motivates exhaustive discovery: when it is 5,
+    every plausible topology with up to five elements from this pool was fitted, so a
+    topology absent from the report is absent because it does not fit -- not because the
+    search happened to miss it. The genetic search can never set this.
+    """
 
     @property
     def best(self) -> Candidate | None:
@@ -168,11 +223,26 @@ class DiscoveryResult:
             if other is not candidate and _same_response(other, candidate)
         ]
 
+    def completeness(self) -> str:
+        """One line stating exactly how much of the topology space was covered."""
+        if self.complete_up_to is None or self.complete_up_to < 1:
+            return (
+                "Coverage: sampled, not exhaustive -- absence from this report is not "
+                "evidence against a topology."
+            )
+        return (
+            f"Coverage: every plausible topology with up to {self.complete_up_to} elements "
+            f"from this pool was evaluated."
+        )
+
     def summary(self, spectrum: Spectrum | None = None, limit: int = 10) -> str:
+        scope = f"in {self.elapsed_s:.1f} s"
+        if self.generations:
+            scope = f"over {self.generations} generations {scope}"
         lines = [
-            f"Evaluated {self.n_evaluated} distinct topologies over {self.generations} "
-            f"generations in {self.elapsed_s:.1f} s",
+            f"Evaluated {self.n_evaluated} distinct topologies {scope} (mode: {self.mode})",
             f"Element pool: {', '.join(self.pool)}",
+            self.completeness(),
             "",
             "Pareto front (accuracy versus complexity):",
             f"  {'circuit':<34}{'AICc':>11}{'chi2_red':>11}{'cplx':>7}{'free?':>7}",
@@ -421,6 +491,14 @@ def discover(
     spectrum: Spectrum,
     *,
     pool: Sequence[str] = DEFAULT_POOL,
+    mode: Mode = "auto",
+    exhaustive_limit: int = 5,
+    exhaustive_min: int = 1,
+    max_candidates: int = 20_000,
+    feasibility_filter: bool = True,
+    feasibility_budget: int = DEFAULT_DEGENERACY_BUDGET,
+    workers: int = 1,
+    on_progress: Callable[[int, int, str | None], None] | None = None,
     generations: int = 30,
     population: int = 40,
     max_elements: int = 7,
@@ -432,37 +510,187 @@ def discover(
     search_maxiter: int = 60,
     search_tol: float = 1e-5,
     final_restarts: int = 5,
-    n_refine: int = 8,
+    n_refine: int | None = None,
     time_limit: float | None = None,
     seeds: Sequence[str] | None = None,
 ) -> DiscoveryResult:
     """Search for equivalent-circuit topologies that explain a spectrum.
 
+    Three modes:
+
+    * ``"exhaustive"`` enumerates *every* plausible topology up to ``exhaustive_limit``
+      elements and fits them all in two tiers -- a cheap screen for everything, the full
+      budget for the shortlist. It is the only mode that can report completeness.
+    * ``"evolve"`` is the genetic search, unchanged; use it above ``exhaustive_limit``
+      elements or with pools too wide to enumerate.
+    * ``"auto"`` (the default) runs the exhaustive stage, then falls back to the genetic
+      search for larger topologies only if the best exhaustive fit still shows *systematic*
+      residuals -- a runs test on the residual signs, the same criterion the Kramers-Kronig
+      validator uses. Data that is already explained does not pay for a second search.
+
     Args:
         spectrum: The measured data.
         pool: Element codes the search may use. Restricting this is the main way to inject
             physical knowledge -- e.g. ``("R", "C", "L", "CPE", "SKINF")`` for components.
-        generations: Evolutionary generations.
-        population: Topologies per generation.
-        max_elements: Cap on elements per topology.
+        mode: ``auto``, ``exhaustive`` or ``evolve`` (see above).
+        exhaustive_limit: Largest element count to enumerate exhaustively. Clamped down
+            automatically when a level would push the candidate count past
+            ``max_candidates``; the resulting coverage is reported as
+            :attr:`DiscoveryResult.complete_up_to`, never silently.
+        exhaustive_min: Smallest element count to enumerate. Raise it only with an
+            independent reason to believe the model is at least that big.
+        max_candidates: Ceiling on how many topologies the exhaustive stage may screen.
+        feasibility_filter: Apply the structural endpoint-behaviour screen before fitting.
+        feasibility_budget: How many elements that screen may treat as degenerate; larger is
+            more conservative and removes fewer candidates.
+        workers: Processes for the tier-1 screen. Keep at 1 under Pyodide.
+        on_progress: Called as ``on_progress(done, total, best)`` during the screen, where
+            ``best`` is the DSL string of the best-scoring topology so far.
+        generations: Evolutionary generations (genetic search only).
+        population: Topologies per generation (genetic search only).
+        max_elements: Cap on elements per topology in the genetic search.
         min_elements: Smallest random topology in the initial population.
         seed: Random seed; the whole search is reproducible from it.
         weighting: Residual weighting passed through to the fitter.
-        search_restarts, search_popsize, search_maxiter: Reduced fitting budget used while
-            searching. Survivors are refitted properly at the end.
+        search_restarts, search_popsize, search_maxiter: Reduced fitting budget used by the
+            genetic search. Survivors are refitted properly at the end.
         final_restarts: Restart count for the final refit of the reported candidates.
-        n_refine: How many top candidates to refit at full budget.
+        n_refine: How many top candidates to refit at full budget; see :data:`REFINE_DEFAULT`
+            for the per-mode default.
         time_limit: Wall-clock budget in seconds; the search stops cleanly when exceeded.
         seeds: Optional circuit strings to inject into the initial population, for example
             textbook models worth testing alongside the evolved ones.
 
     Returns:
-        A :class:`DiscoveryResult` holding every distinct topology evaluated and the
-        accuracy-versus-complexity Pareto front.
+        A :class:`DiscoveryResult` holding every distinct topology evaluated, the
+        accuracy-versus-complexity Pareto front, and how far the coverage is complete.
     """
+    if mode not in ("auto", "exhaustive", "evolve"):
+        raise ValueError(f"unknown discovery mode {mode!r}")
     started = time.perf_counter()
+    codes = tuple(pool)
+    refine = REFINE_DEFAULT[mode] if n_refine is None else n_refine
+
+    if mode == "evolve":
+        return _evolve(
+            spectrum,
+            pool=codes,
+            generations=generations,
+            population=population,
+            max_elements=max_elements,
+            min_elements=min_elements,
+            seed=seed,
+            weighting=weighting,
+            search_restarts=search_restarts,
+            search_popsize=search_popsize,
+            search_maxiter=search_maxiter,
+            search_tol=search_tol,
+            final_restarts=final_restarts,
+            n_refine=refine,
+            time_limit=time_limit,
+            seeds=seeds,
+            started=started,
+        )
+
+    candidates, complete_up_to, n_screened = _exhaustive(
+        spectrum,
+        pool=codes,
+        limit=min(exhaustive_limit, max_elements),
+        floor=max(1, exhaustive_min),
+        max_candidates=max_candidates,
+        feasibility_filter=feasibility_filter,
+        feasibility_budget=feasibility_budget,
+        weighting=weighting,
+        seed=seed,
+        n_refine=refine,
+        final_restarts=final_restarts,
+        workers=workers,
+        on_progress=on_progress,
+        time_limit=time_limit,
+        started=started,
+        extra=seeds,
+    )
+    generations_run = 0
+
+    if mode == "auto" and _is_underfitted(candidates) and max_elements > (complete_up_to or 0):
+        remaining = None if time_limit is None else time_limit - (time.perf_counter() - started)
+        if remaining is None or remaining > 0.0:
+            evolved = _evolve(
+                spectrum,
+                pool=codes,
+                generations=generations,
+                population=population,
+                max_elements=max_elements,
+                min_elements=max((complete_up_to or 0) + 1, min_elements),
+                seed=seed,
+                weighting=weighting,
+                search_restarts=search_restarts,
+                search_popsize=search_popsize,
+                search_maxiter=search_maxiter,
+                search_tol=search_tol,
+                final_restarts=final_restarts,
+                n_refine=refine,
+                time_limit=remaining,
+                seeds=[c.circuit.to_string() for c in candidates[:5]],
+                started=time.perf_counter(),
+            )
+            candidates = _unique_best(candidates + evolved.candidates)
+            n_screened += evolved.n_evaluated
+            generations_run = evolved.generations
+
+    candidates.sort(key=lambda c: c.aicc)
+    return DiscoveryResult(
+        candidates=candidates,
+        pareto=pareto_front(candidates),
+        n_evaluated=n_screened,
+        generations=generations_run,
+        elapsed_s=time.perf_counter() - started,
+        pool=codes,
+        mode=mode,
+        complete_up_to=complete_up_to,
+    )
+
+
+def _is_underfitted(candidates: Sequence[Candidate]) -> bool:
+    """True when the best model leaves residuals that look like structure, not noise.
+
+    The residual vector is the real parts followed by the imaginary parts, so it is split
+    before the runs test -- a sign pattern that alternates within each half but flips between
+    them would otherwise read as random.
+    """
+    if not candidates:
+        return True
+    best = min(candidates, key=lambda c: c.result.chi2_reduced)
+    residuals = best.result.residuals
+    if residuals.size < 4:
+        return False
+    half = residuals.size // 2
+    z = min(_runs_z(residuals[:half]), _runs_z(residuals[half:]))
+    return bool(z < RUNS_Z_LIMIT)
+
+
+def _evolve(
+    spectrum: Spectrum,
+    *,
+    pool: tuple[str, ...],
+    generations: int,
+    population: int,
+    max_elements: int,
+    min_elements: int,
+    seed: int,
+    weighting: Weighting,
+    search_restarts: int,
+    search_popsize: int,
+    search_maxiter: int,
+    search_tol: float,
+    final_restarts: int,
+    n_refine: int,
+    time_limit: float | None,
+    seeds: Sequence[str] | None,
+    started: float,
+) -> DiscoveryResult:
+    """The genetic search, unchanged: regularised evolution over the topology grammar."""
     rng = np.random.default_rng(seed)
-    pool = tuple(pool)
     evaluator = _Evaluator(
         spectrum, weighting, search_restarts, search_popsize, search_maxiter, search_tol, seed
     )
@@ -507,7 +735,285 @@ def discover(
         generations=generation + 1,
         elapsed_s=time.perf_counter() - started,
         pool=pool,
+        mode="evolve",
+        complete_up_to=None,
     )
+
+
+# -- Exhaustive search ---------------------------------------------------------------------
+
+
+def _exhaustive(
+    spectrum: Spectrum,
+    *,
+    pool: tuple[str, ...],
+    limit: int,
+    floor: int,
+    max_candidates: int,
+    feasibility_filter: bool,
+    feasibility_budget: int,
+    weighting: Weighting,
+    seed: int,
+    n_refine: int,
+    final_restarts: int,
+    workers: int,
+    on_progress: Callable[[int, int, str | None], None] | None,
+    time_limit: float | None,
+    started: float,
+    extra: Sequence[str] | None = None,
+) -> tuple[list[Candidate], int | None, int]:
+    """Enumerate, screen and refit. Returns (candidates, complete_up_to, topologies seen)."""
+    behaviour = (
+        EndpointBehaviour.from_spectrum(spectrum) if feasibility_filter else None
+    )
+
+    texts: list[str] = []
+    # (element count, how many topologies have been queued once that level is complete), used
+    # to work out afterwards how far the coverage really got if the screen ran out of time.
+    boundaries: list[tuple[int, int]] = []
+    for n in range(floor, limit + 1):
+        level: list[str] = []
+        overflowed = False
+        for node in enumerate_topologies(pool, n):
+            if behaviour is not None and not is_feasible(
+                node, behaviour, budget=feasibility_budget
+            ):
+                continue
+            level.append(Circuit(node).to_string())
+            # Abandon the level as soon as it cannot fit. Enumeration is lazy, so an oversized
+            # level -- 10^5 candidates on the electrochemical pool at n = 5 -- is never built
+            # in full just to be thrown away.
+            if texts and len(texts) + len(level) > max_candidates:
+                overflowed = True
+                break
+        # A level is taken whole or not at all: half a level is not a completeness claim.
+        if overflowed:
+            break
+        texts.extend(level)
+        boundaries.append((n, len(texts)))
+
+    # The enumerator already yields each canonical form once per level, and a level is defined
+    # by its element count, so the only possible duplicates are user-supplied seed circuits.
+    seen = {Circuit.parse(text).canonical_form() for text in texts}
+    for text in extra or ():
+        circuit = Circuit.parse(text)
+        if circuit.canonical_form() not in seen:
+            seen.add(circuit.canonical_form())
+            texts.append(circuit.to_string())
+
+    scored = _screen_all(
+        texts,
+        spectrum,
+        weighting=weighting,
+        seed=seed,
+        workers=workers,
+        on_progress=on_progress,
+        time_limit=time_limit,
+        started=started,
+    )
+    # Topologies are screened in size order, so a truncated screen still covers whole levels.
+    # Starting above one element forfeits the claim entirely: "all topologies up to N" is only
+    # true when the smaller sizes were looked at too.
+    complete_up_to = (
+        next((n for n, end in reversed(boundaries) if end <= len(scored)), None)
+        if floor == 1
+        else None
+    )
+    return (
+        _refit_shortlist(scored, spectrum, weighting, final_restarts, seed, n_refine),
+        complete_up_to,
+        len(scored),
+    )
+
+
+def _shortlist(scored: Sequence[tuple[float, str]], n_refine: int) -> list[str]:
+    """The screened candidates worth a full-budget refit.
+
+    The screen is deliberately sloppy, so the shortlist is the union of two rules: the
+    ``n_refine`` cheapest, and everything within :data:`REFINE_COST_FACTOR` of the very best.
+    The second rule is what stops a near-tie -- exactly the equivalent topologies the report
+    exists to surface -- from being dropped because the screen ranked it 31st.
+    """
+    usable = [(cost, text) for cost, text in scored if math.isfinite(cost)]
+    if not usable:
+        return []
+    usable.sort()
+    best = usable[0][0]
+    threshold = best * REFINE_COST_FACTOR if best > 0.0 else math.inf
+    keep = {text for _, text in usable[:n_refine]}
+    keep.update(text for cost, text in usable if cost <= threshold)
+    return [text for _, text in usable if text in keep]
+
+
+def _refit_shortlist(
+    scored: Sequence[tuple[float, str]],
+    spectrum: Spectrum,
+    weighting: Weighting,
+    restarts: int,
+    seed: int,
+    n_refine: int,
+) -> list[Candidate]:
+    """Tier 2: refit the shortlist at full budget. Only these numbers are ever reported."""
+    out: list[Candidate] = []
+    for text in _shortlist(scored, n_refine):
+        try:
+            result = fit(
+                Circuit.parse(text),
+                spectrum,
+                weighting=weighting,
+                restarts=restarts,
+                seed=seed,
+            )
+        except (ValueError, CircuitError, np.linalg.LinAlgError):
+            continue
+        if math.isfinite(result.statistics.aicc):
+            out.append(Candidate(result.circuit, result, 0))
+    out.sort(key=lambda c: c.aicc)
+    return out
+
+
+def _screen_all(
+    texts: Sequence[str],
+    spectrum: Spectrum,
+    *,
+    weighting: Weighting,
+    seed: int,
+    workers: int,
+    on_progress: Callable[[int, int, str | None], None] | None,
+    time_limit: float | None,
+    started: float,
+) -> list[tuple[float, str]]:
+    """Tier 1: one cheap fit per topology, returning (cost, circuit) pairs."""
+    if workers and workers > 1:
+        return _screen_parallel(
+            texts,
+            spectrum,
+            weighting=weighting,
+            seed=seed,
+            workers=workers,
+            on_progress=on_progress,
+            time_limit=time_limit,
+            started=started,
+        )
+
+    scored: list[tuple[float, str]] = []
+    best_by_complexity: dict[float, float] = {}
+    best_overall = math.inf
+    best_text: str | None = None
+    for done, text in enumerate(texts, start=1):
+        circuit = Circuit.parse(text)
+        complexity = circuit.complexity
+        try:
+            cost = screen(
+                circuit,
+                spectrum,
+                weighting=weighting,
+                seed=seed,
+                popsize=SCREEN_POPSIZE,
+                maxiter=SCREEN_MAXITER,
+                tol=SCREEN_TOL,
+                abandon_above=_abandon_at(best_by_complexity, complexity),
+            )
+        except (ValueError, CircuitError, np.linalg.LinAlgError):
+            cost = math.inf
+        scored.append((cost, text))
+        if cost < best_by_complexity.get(complexity, math.inf):
+            best_by_complexity[complexity] = cost
+        if cost < best_overall:
+            best_overall, best_text = cost, text
+        if on_progress is not None:
+            on_progress(done, len(texts), best_text)
+        if time_limit is not None and time.perf_counter() - started > time_limit:
+            break
+    return scored
+
+
+def _abandon_at(best_by_complexity: dict[float, float], complexity: float) -> float:
+    """Cost above which the local polish is not worth running, for this complexity.
+
+    Returns infinity -- i.e. never abandon -- while the reference fit is still exact, because
+    on clean data an exact equivalent screened second would otherwise be judged against a
+    reference of order 1e-30 and dropped without ever being polished.
+    """
+    reference = best_by_complexity.get(complexity, math.inf)
+    if reference <= PERFECT_COST:
+        return math.inf
+    return reference * ABANDON_FACTOR
+
+
+#: Per-process state for the parallel screen. Filled once per worker by the pool initializer
+#: so that the spectrum is not pickled with every task.
+_WORKER: dict[str, Any] = {}
+
+
+def _init_worker(f: Any, z: Any, weighting: Weighting) -> None:
+    _WORKER["spectrum"] = Spectrum(f, z)
+    _WORKER["weighting"] = weighting
+
+
+def _screen_worker(task: tuple[str, int, float]) -> tuple[float, str]:
+    """Screen one topology in a worker process; the task carries only strings and numbers."""
+    text, seed, abandon = task
+    try:
+        cost = screen(
+            text,
+            _WORKER["spectrum"],
+            weighting=_WORKER["weighting"],
+            seed=seed,
+            popsize=SCREEN_POPSIZE,
+            maxiter=SCREEN_MAXITER,
+            tol=SCREEN_TOL,
+            abandon_above=abandon,
+        )
+    except (ValueError, CircuitError, np.linalg.LinAlgError):
+        cost = math.inf
+    return cost, text
+
+
+def _screen_parallel(
+    texts: Sequence[str],
+    spectrum: Spectrum,
+    *,
+    weighting: Weighting,
+    seed: int,
+    workers: int,
+    on_progress: Callable[[int, int, str | None], None] | None,
+    time_limit: float | None,
+    started: float,
+) -> list[tuple[float, str]]:
+    """The same screen fanned across processes, one pool for the whole run.
+
+    Tasks are submitted in chunks rather than all at once so that the early-abandon threshold
+    can be refreshed between chunks; within a chunk it is necessarily stale, which costs a
+    little time but can never change a result.
+    """
+    scored: list[tuple[float, str]] = []
+    complexity_of = {text: Circuit.parse(text).complexity for text in texts}
+    best_by_complexity: dict[float, float] = {}
+    best_overall = math.inf
+    best_text: str | None = None
+    with multiprocessing.Pool(
+        processes=workers,
+        initializer=_init_worker,
+        initargs=(spectrum.f, spectrum.z, weighting),
+    ) as executor:
+        for start in range(0, len(texts), WORKER_CHUNK):
+            tasks = [
+                (text, seed, _abandon_at(best_by_complexity, complexity_of[text]))
+                for text in texts[start : start + WORKER_CHUNK]
+            ]
+            for cost, text in executor.imap_unordered(_screen_worker, tasks):
+                scored.append((cost, text))
+                complexity = complexity_of[text]
+                if cost < best_by_complexity.get(complexity, math.inf):
+                    best_by_complexity[complexity] = cost
+                if cost < best_overall:
+                    best_overall, best_text = cost, text
+            if on_progress is not None:
+                on_progress(len(scored), len(texts), best_text)
+            if time_limit is not None and time.perf_counter() - started > time_limit:
+                break
+    return scored
 
 
 def _unique_best(candidates: Sequence[Candidate]) -> list[Candidate]:
