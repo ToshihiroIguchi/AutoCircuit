@@ -1,0 +1,5 @@
+# generated fixture, no header row
+% freq(Hz)  re(ohm)  im(ohm)
+1000 12.5 -150.2
+10000 8.3 -15
+100000 5.1 -1.6

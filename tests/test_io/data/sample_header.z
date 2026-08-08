@@ -1,0 +1,7 @@
+Area: 1.0
+Comment: test capacitor
+Instrument: Solartron 1260
+Freq(Hz)	Ampl	Bias	Time(Sec)	Z'(a)	Z''(b)
+1000	0	0	0	12.5	-150.2
+10000	0	0	0	8.3	-15
+100000	0	0	0	5.1	-1.6

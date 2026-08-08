@@ -1,0 +1,5 @@
+"Title","Keysight Test"
+"Frequency","CS","RS"
+1000,1e-05,0.05
+10000,1e-05,0.05
+100000,1e-05,0.05
