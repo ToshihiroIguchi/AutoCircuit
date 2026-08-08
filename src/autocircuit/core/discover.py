@@ -29,7 +29,7 @@ import multiprocessing.pool
 import time
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple
 
 import numpy as np
 
@@ -70,6 +70,22 @@ Mode = Literal["auto", "exhaustive", "evolve"]
 SCREEN_POPSIZE = 8
 SCREEN_MAXITER = 40
 SCREEN_TOL = 1e-4
+
+
+class ScreenBudget(NamedTuple):
+    """The tier-1 differential-evolution budget, as one injectable object.
+
+    The screen is the dominant cost of an exhaustive run, so how far it can be cut without
+    losing the truth from the tier-2 shortlist is an empirical question. Bundling the budget
+    here lets ``benchmarks/discovery_v2.py screen-rank`` sweep it without monkey-patching
+    module constants; nothing in the library ever passes anything but the default.
+    """
+
+    popsize: int = SCREEN_POPSIZE
+    maxiter: int = SCREEN_MAXITER
+
+
+SCREEN_BUDGET = ScreenBudget()
 
 #: A screened candidate whose global stage is already this many times worse than the best
 #: candidate of the same complexity has its local polish skipped (see :func:`fit.screen`).
@@ -972,6 +988,7 @@ def _screen_all(
     on_progress: Callable[[int, int, str | None], None] | None,
     time_limit: float | None,
     started: float,
+    budget: ScreenBudget = SCREEN_BUDGET,
 ) -> list[tuple[float, str]]:
     """Tier 1: one cheap fit per topology, returning (cost, circuit) pairs."""
     if executor is not None:
@@ -982,6 +999,7 @@ def _screen_all(
             on_progress=on_progress,
             time_limit=time_limit,
             started=started,
+            budget=budget,
         )
 
     scored: list[tuple[float, str]] = []
@@ -997,8 +1015,8 @@ def _screen_all(
                 spectrum,
                 weighting=weighting,
                 seed=seed,
-                popsize=SCREEN_POPSIZE,
-                maxiter=SCREEN_MAXITER,
+                popsize=budget.popsize,
+                maxiter=budget.maxiter,
                 tol=SCREEN_TOL,
                 abandon_above=_abandon_at(best_by_complexity, complexity),
             )
@@ -1039,17 +1057,17 @@ def _init_worker(f: Any, z: Any, weighting: Weighting) -> None:
     _WORKER["weighting"] = weighting
 
 
-def _screen_worker(task: tuple[str, int, float]) -> tuple[float, str]:
+def _screen_worker(task: tuple[str, int, float, int, int]) -> tuple[float, str]:
     """Screen one topology in a worker process; the task carries only strings and numbers."""
-    text, seed, abandon = task
+    text, seed, abandon, popsize, maxiter = task
     try:
         cost = screen(
             text,
             _WORKER["spectrum"],
             weighting=_WORKER["weighting"],
             seed=seed,
-            popsize=SCREEN_POPSIZE,
-            maxiter=SCREEN_MAXITER,
+            popsize=popsize,
+            maxiter=maxiter,
             tol=SCREEN_TOL,
             abandon_above=abandon,
         )
@@ -1066,6 +1084,7 @@ def _screen_parallel(
     on_progress: Callable[[int, int, str | None], None] | None,
     time_limit: float | None,
     started: float,
+    budget: ScreenBudget = SCREEN_BUDGET,
 ) -> list[tuple[float, str]]:
     """The same screen fanned across processes.
 
@@ -1080,7 +1099,13 @@ def _screen_parallel(
     best_text: str | None = None
     for start in range(0, len(texts), WORKER_CHUNK):
         tasks = [
-            (text, seed, _abandon_at(best_by_complexity, complexity_of[text]))
+            (
+                text,
+                seed,
+                _abandon_at(best_by_complexity, complexity_of[text]),
+                budget.popsize,
+                budget.maxiter,
+            )
             for text in texts[start : start + WORKER_CHUNK]
         ]
         for cost, text in executor.imap_unordered(_screen_worker, tasks):

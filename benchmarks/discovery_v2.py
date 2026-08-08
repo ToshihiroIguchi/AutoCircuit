@@ -19,26 +19,58 @@ Three measurements, selected by the first command-line argument:
     reach the tier-2 shortlist. A screen that is too cheap loses the answer; one that is too
     expensive defeats the point of screening.
 
+``screen-rank``
+    The same question asked properly, and the evidence a budget change has to rest on.
+    ``screen`` samples ~60 topologies out of thousands and reports a global rank; that is not
+    the quantity the pipeline uses. What decides whether the two-tier search keeps the answer
+    is whether the truth -- and every known exact equivalent of it -- lands inside its
+    **per-element-count quota**, ranked by screening AICc, in the *whole* filtered space. So
+    this mode screens every candidate, at every budget in a grid, over several seeds, and
+    records each tracked circuit's rank within its size, the quota it had to beat, and whether
+    ``_shortlist`` in fact selected it. Cutting the budget on a 60-topology sample would repeat
+    the mistake that cost gate G1 once already (ranking by raw cost looked fine on small cases
+    and lost the truth on the real space).
+
 Run with the package on the path (it is not pip-installed on the dev machine)::
 
     $env:PYTHONPATH = "C:\\Users\\toshi\\python\\AutoCircuit\\src"
     python benchmarks/discovery_v2.py filter
     python benchmarks/discovery_v2.py screen
+    python benchmarks/discovery_v2.py screen-rank --workers 8
     python benchmarks/discovery_v2.py gate --workers 8
 
-``gate`` is the slow one: it fits every plausible topology up to five elements, several times
-over. Use ``--seeds 1`` and ``--limit 4`` for a sanity run.
+``gate`` and ``screen-rank`` are the slow ones: both fit every plausible topology up to five
+elements, several times over. Use ``--seeds 1`` and ``--limit 4`` for a sanity run.
 """
 
 from __future__ import annotations
 
 import argparse
 import itertools
+import math
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from autocircuit.core.circuit import Circuit
-from autocircuit.core.discover import DiscoveryResult, discover
+from autocircuit.core.discover import (
+    MIN_REFINE_PER_SIZE,
+    REFINE_DEFAULT,
+    DiscoveryResult,
+    ScreenBudget,
+    discover,
+)
+
+# ``screen-rank`` measures the ranking the two-tier search actually performs, so it calls that
+# machinery rather than re-deriving it: a reimplementation here would measure the benchmark.
+# (This is the opposite choice from ``benchmarks/topology_space.py``, which keeps its own
+# enumerator on purpose so that gate G2 checks one implementation against another.)
+from autocircuit.core.discover import (  # noqa: PLC2701
+    _screen_all,
+    _screening_aicc,
+    _shortlist,
+    _worker_pool,
+)
 from autocircuit.core.enumerate import (
     EndpointBehaviour,
     enumerate_topologies,
@@ -60,6 +92,11 @@ class Reference:
     f_min: float
     f_max: float
     noise: float = 0.01
+    #: Same-size topologies known to fit this reference identically, measured by fitting every
+    #: same-size topology to noise-free data and keeping those matching to 1e-9. The same list
+    #: gate G3 uses (``tests/test_feasibility.py``): a screening budget that keeps the truth but
+    #: drops its equivalents has quietly destroyed the equivalence-class report.
+    equivalents: tuple[str, ...] = ()
 
     def spectrum(self, seed: int = 0, noise: float | None = None) -> Spectrum:
         return simulate(
@@ -95,6 +132,7 @@ REFERENCES = [
         ("R", "C", "L", "CPE"),
         1e-1,
         1e7,
+        equivalents=("p(R1-C1,R2,C2)", "p(p(R1,C1)-C2,R2)", "p(p(R1,C1)-R2,C2)"),
     ),
     Reference(
         "Randles (with Warburg)",
@@ -247,21 +285,207 @@ def report_screen(sample: int) -> None:
         )
 
 
+DEFAULT_BUDGETS = (
+    ScreenBudget(8, 40),  # current default
+    ScreenBudget(8, 20),
+    ScreenBudget(4, 40),
+    ScreenBudget(4, 20),
+)
+
+
+@dataclass(frozen=True)
+class RankRow:
+    """Where one tracked circuit landed in the screen it has to survive."""
+
+    text: str
+    size: int
+    rank: int  #: position within its own element count, ranked by screening AICc
+    of: int  #: how many candidates that element count held
+    quota: int  #: how many of them ``_shortlist`` takes before the near-tie rule
+    cost_ratio: float  #: its screening cost over the best cost at its size
+    shortlisted: bool  #: what ``_shortlist`` actually did -- the only hard verdict here
+
+    @property
+    def margin(self) -> float:
+        """Rank as a fraction of the quota. Below 1 is inside; well below 1 is safe."""
+        return self.rank / self.quota
+
+
+def _feasible_texts(reference: Reference, data: Spectrum, limit: int) -> list[str]:
+    """The candidate list the exhaustive stage would build for this spectrum."""
+    behaviour = EndpointBehaviour.from_spectrum(data)
+    return [
+        Circuit(node).to_string()
+        for n in range(1, limit + 1)
+        for node in enumerate_topologies(reference.pool, n)
+        if is_feasible(node, behaviour)
+    ]
+
+
+def _rank_rows(
+    scored: list[tuple[float, str]], tracked: dict[str, str], n_data: int, n_refine: int
+) -> list[RankRow]:
+    """Rank every screened candidate the way :func:`_shortlist` does, then find the tracked ones.
+
+    Ranking is per element count and by screening AICc, because that is what the shortlist
+    does; a global rank by raw cost -- what the ``screen`` mode reports -- answers a question
+    the pipeline never asks.
+    """
+    by_size: dict[int, list[tuple[float, float, str]]] = {}
+    for cost, text in scored:
+        if not math.isfinite(cost):
+            continue
+        circuit = Circuit.parse(text)
+        aicc = _screening_aicc(cost, circuit.n_params, n_data)
+        by_size.setdefault(len(circuit.leaves), []).append((aicc, cost, text))
+    for group in by_size.values():
+        group.sort()
+
+    quota = max(MIN_REFINE_PER_SIZE, n_refine // max(len(by_size), 1))
+    chosen = {Circuit.parse(text).canonical_form() for text in _shortlist(scored, n_refine, n_data)}
+
+    rows: list[RankRow] = []
+    for canonical, label in tracked.items():
+        for size, group in by_size.items():
+            position = next(
+                (
+                    i
+                    for i, (_, _, text) in enumerate(group, start=1)
+                    if Circuit.parse(text).canonical_form() == canonical
+                ),
+                None,
+            )
+            if position is None:
+                continue
+            best_cost = min(cost for _, cost, _ in group)
+            cost = group[position - 1][1]
+            rows.append(
+                RankRow(
+                    label,
+                    size,
+                    position,
+                    len(group),
+                    quota,
+                    cost / best_cost if best_cost > 0.0 else math.inf,
+                    canonical in chosen,
+                )
+            )
+            break
+        else:
+            # Screened but unfittable at every budget, or removed by the feasibility filter --
+            # either way it never reached the ranking, which is a failure of this budget.
+            rows.append(RankRow(label, 0, 0, 0, 1, math.inf, False))
+    return rows
+
+
+def report_screen_rank(
+    seeds: int, limit: int, workers: int, budgets: Sequence[ScreenBudget]
+) -> None:
+    print("=" * 108)
+    print("Tier-1 budget vs. the tier-2 shortlist: does the truth still make its per-size quota?")
+    print("=" * 108)
+    print(
+        "rank/of = position within the same element count by screening AICc; quota = how many\n"
+        "_shortlist takes per size before the near-tie rule; margin = rank/quota (< 1 is in).\n"
+        "'kept' is the verdict that counts: _shortlist actually selected it.\n"
+    )
+    n_refine = REFINE_DEFAULT["exhaustive"]
+    # budget -> (worst margin seen anywhere, tracked circuits kept, tracked circuits tested)
+    overall: dict[ScreenBudget, list[float]] = {b: [0.0, 0.0, 0.0] for b in budgets}
+    seconds: dict[ScreenBudget, float] = dict.fromkeys(budgets, 0.0)
+
+    for reference in REFERENCES:
+        print("-" * 108)
+        print(f"{reference.label}: {reference.circuit}   pool {','.join(reference.pool)}")
+        tracked = {
+            Circuit.parse(text).canonical_form(): text
+            for text in (reference.circuit, *reference.equivalents)
+        }
+        for seed in range(seeds):
+            data = reference.spectrum(seed)
+            texts = _feasible_texts(reference, data, limit)
+            print(f"  seed {seed}: {len(texts):,} feasible candidates", flush=True)
+            with _worker_pool(workers, data, "modulus") as executor:
+                for budget in budgets:
+                    started = time.perf_counter()
+                    scored = _screen_all(
+                        texts,
+                        data,
+                        weighting="modulus",
+                        seed=seed,
+                        executor=executor,
+                        on_progress=None,
+                        time_limit=None,
+                        started=started,
+                        budget=budget,
+                    )
+                    elapsed = time.perf_counter() - started
+                    seconds[budget] += elapsed
+                    rows = _rank_rows(scored, tracked, 2 * data.n, n_refine)
+                    for row in rows:
+                        overall[budget][1] += float(row.shortlisted)
+                        overall[budget][2] += 1.0
+                        overall[budget][0] = max(overall[budget][0], row.margin)
+                        print(
+                            f"    {budget.popsize:>2}x{budget.maxiter:<3}"
+                            f" {elapsed / 60:>5.1f} min  {row.text:<26}"
+                            f" n={row.size}  {row.rank:>4}/{row.of:<5}"
+                            f" quota {row.quota:>2}  margin {row.margin:>5.2f}"
+                            f"  cost/best {row.cost_ratio:>8.2f}"
+                            f"  kept {'yes' if row.shortlisted else 'NO'}",
+                            flush=True,
+                        )
+
+    print("-" * 108)
+    print("summary (all references, all seeds, all tracked circuits):")
+    print(f"{'budget':>10}{'total screen':>15}{'vs 8x40':>10}{'worst margin':>15}{'kept':>10}")
+    baseline = seconds.get(budgets[0], 0.0)
+    for budget in budgets:
+        worst, kept, total = overall[budget]
+        print(
+            f"{f'{budget.popsize}x{budget.maxiter}':>10}{seconds[budget] / 60:>13.1f} m"
+            f"{seconds[budget] / baseline if baseline else float('nan'):>9.2f}x"
+            f"{worst:>15.2f}{f'{int(kept)}/{int(total)}':>10}"
+        )
+    print(
+        "\nA budget is safe to adopt only if every tracked circuit is kept and the worst margin\n"
+        "stays clear of 1 -- a margin at 0.9 means the next seed can push it out."
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("what", choices=["gate", "filter", "screen"])
-    parser.add_argument("--seeds", type=int, default=10, help="seeds per reference (gate)")
-    parser.add_argument("--limit", type=int, default=5, help="exhaustive element limit (gate)")
-    parser.add_argument("--workers", type=int, default=1, help="screening processes (gate)")
+    parser.add_argument("what", choices=["gate", "filter", "screen", "screen-rank"])
+    parser.add_argument(
+        "--seeds", type=int, default=10, help="seeds per reference (gate, screen-rank)"
+    )
+    parser.add_argument(
+        "--limit", type=int, default=5, help="exhaustive element limit (gate, screen-rank)"
+    )
+    parser.add_argument(
+        "--workers", type=int, default=1, help="screening processes (gate, screen-rank)"
+    )
     parser.add_argument("--sample", type=int, default=60, help="topologies sampled (screen)")
+    parser.add_argument(
+        "--budgets",
+        default=",".join(f"{b.popsize}x{b.maxiter}" for b in DEFAULT_BUDGETS),
+        help="screen-rank budget grid as popsize x maxiter, e.g. 8x40,4x20. The first entry is"
+        " the baseline the others are timed against.",
+    )
     args = parser.parse_args()
 
     if args.what == "gate":
         report_gate(args.seeds, args.limit, args.workers)
     elif args.what == "filter":
         report_filter()
-    else:
+    elif args.what == "screen":
         report_screen(args.sample)
+    else:
+        budgets = [
+            ScreenBudget(*(int(part) for part in text.split("x")))
+            for text in args.budgets.split(",")
+        ]
+        report_screen_rank(args.seeds, args.limit, args.workers, budgets)
 
 
 if __name__ == "__main__":
