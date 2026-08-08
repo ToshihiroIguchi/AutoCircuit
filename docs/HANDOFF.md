@@ -6,11 +6,15 @@ that implemented discovery v2 steps 1–5. Read this first, then `CLAUDE.md`, th
 
 ## 1. Where things stand
 
-The command-line backend is **complete and verified**. Phases 0–5 of
-`docs/IMPLEMENTATION_PLAN.md` are done; phase 6 (web UI) is untouched.
+The command-line backend is **complete and verified**: 387 tests pass
+(`python -m pytest tests -q`, ~3.7 min). Phases 0–5 of `docs/IMPLEMENTATION_PLAN.md` are done;
+phase 6 (web UI) is untouched.
 
-**Discovery v2 steps 1–5 are implemented** (see §2). What is left of that plan is step 6,
-DRT — severable by design, and the only remaining item in `docs/DISCOVERY_V2_PLAN.md`.
+**Discovery v2 steps 1–5 are implemented** (see §2) and gates G1, G2, G3 and G5 pass: G1
+30/30 across the three reference spectra, G2 exactly reproducing the measured counts table,
+G3 with the truth and every known exact equivalent surviving the feasibility filter, and G5
+with the whole suite green. What is left of that plan is step 6, DRT — severable by design,
+and the only remaining item in `docs/DISCOVERY_V2_PLAN.md`.
 
 Working end to end today:
 
@@ -135,8 +139,14 @@ recorded in the code as a comment and in `docs/IMPLEMENTATION_PLAN.md` marked **
   That is not a program failure — re-run without the truncation before believing an error.
 - **Background jobs redirected with `Out-File` buffer until completion.** To wait on one, use
   `Monitor` with an `until grep -q ...` loop (it runs bash), not chained sleeps.
-- Full suite ~3.5 min; the fast subset is
-  `python -m pytest tests -q -k "not test_fit and not test_discover"` (~1 s).
+- Full suite ~3.7 min (387 tests); the fast subset is
+  `python -m pytest tests -q -k "not test_fit and not test_discover"` (~4 s) — note that the
+  `not test_discover` filter also drops `test_discover_exhaustive.py`, which is where the
+  exhaustive mode is covered.
+- **Long benchmarks must be launched detached.** A backgrounded shell command is killed after
+  ten minutes, and the G1 gate takes about two hours. Use
+  `Start-Process python -ArgumentList ... -RedirectStandardOutput <file> -PassThru` and watch
+  the file; set `$env:PYTHONPATH` first, the child inherits it.
 
 ## 5. Working agreements from this session
 

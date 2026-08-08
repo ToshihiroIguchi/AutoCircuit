@@ -52,6 +52,40 @@ Exact degeneracy is real but bounded — a handful of circuits, not dozens. Note
 *exact algebraic* equivalence on clean data; with real noise, more circuits become
 practically indistinguishable, which is what the Pareto front and AICc are for.
 
+### `discovery_v2.py gate` — acceptance gate G1
+
+`mode="exhaustive"`, element limit 5, 1% noise, 10 seeds per reference, 8 workers on a
+12-core machine. "Reported" is gate G1 as written — the true topology, or an exact equivalent
+of it, present in the reported equivalence classes.
+
+| reference | pool | candidates screened | reported | on the front | is the recommendation | time / run |
+|-----------|------|--------------------:|---------:|-------------:|----------------------:|-----------:|
+| capacitor `C-R-L-SKINF` | R,C,L,CPE,SKINF | 6,598 | **10/10** | 10/10 | 9/10 | 3.8–5.8 min |
+| Maxwell-Wagner `p(R,C)-p(R,C)` | R,C,L,CPE | 2,581 | **10/10** | 10/10 | 10/10 | 1.1–1.2 min |
+| Randles `R-p(C,R-W)` | R,C,CPE,W | 3,713 | **10/10** | 10/10 | 9/10 | 1.4–1.6 min |
+
+**G1 passes 30/30.** Every run reported `complete_up_to = 5`.
+
+Two things in this table are worth more than the pass count.
+
+*The two runs where the truth is not the recommendation are the parsimony rule working, not
+the search failing.* On capacitor seed 3 the recommendation was `C1-L1-SKINF1`: the true ESR
+is 10 mΩ and at 1% noise that seed could not resolve it, so the simplest model fitting within
+a factor 2 of the best chi² drops it. The four-element truth is still on the front next to it.
+Randles seed 7 is the same story with a different near-tie.
+
+*The Maxwell-Wagner recommendation cycles between `p(p(R1,C1)-C2,R2)`, `p(R1-C1,R2,C2)`,
+`p(p(R1,C1)-R2,C2)` and `p(R1,C1)-p(R2,C2)` from seed to seed* — which is precisely the set of
+four exact equivalents measured independently by `topology_space.py` (b). The data cannot
+separate them and the tool does not pretend otherwise; which one comes out on top is a coin
+toss, and that is why the deliverable is the equivalence class rather than a single circuit.
+
+The plan's time budget was ≤ 3 min per run with 8 workers. The capacitor case misses it at
+~4.8 min, because the feasibility filter removes 1.75× rather than the 3× the budget assumed.
+Single core it is ~22 min of screening for that reference, over the plan's 15 min figure.
+`benchmarks/README.md` records what was measured rather than what was hoped for; the budget
+line in `docs/DISCOVERY_V2_PLAN.md` has been corrected to match.
+
 ### `discovery_v2.py filter` — structural feasibility filter
 
 How much of the enumerated space the endpoint-behaviour screen removes before any fitting,

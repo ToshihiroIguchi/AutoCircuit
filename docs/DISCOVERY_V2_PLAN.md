@@ -144,6 +144,9 @@ earns its place; it is just not the main lever.
   `n_refine` (default 30) by screening cost *plus* everything within 10× of the best cost
   (so near-ties are never dropped by a sloppy screen). All published numbers come from
   tier 2; tier-1 results are never reported.
+  *(Amended during implementation: "the best `n_refine` by screening cost" globally is wrong
+  and made G1 fail — `n_refine` is now a total split into a quota per element count, ranked
+  within a size by a screening AICc, and the 10× rule is capped. See §5.1.)*
 - **Early abandon:** during tier 1, skip the local polish when the DE stage already exceeds
   100× the best cost seen at the same complexity.
 - **Parallelism:** `workers=N` fans tier-1 fits across `multiprocessing.Pool`
@@ -196,6 +199,17 @@ Acceptance gates (hard, in the benchmark script, not aspirations):
   Maxwell-Wagner, Randles), `mode=exhaustive` places the true topology **or an exact
   equivalent** in the reported equivalence classes, 10/10 seeds, single core,
   ≤ 15 min each (≤ 3 min with 8 workers).
+  **[measured] PASSES 30/30**, and the truth is on the Pareto front in all 30. It is also the
+  *recommendation* in 28/30; the two exceptions are the parsimony rule dropping a 10 mΩ ESR
+  that 1% noise could not resolve, with the truth still on the front beside it. Times with 8
+  workers: 1.1–1.2 min (Maxwell-Wagner), 1.4–1.6 min (Randles), 3.8–5.8 min (capacitor).
+  **The time budget above was wrong and is superseded by those numbers.** It assumed the
+  feasibility filter would remove ~3×; it removes 1.75× on the worst case, so the capacitor
+  reference costs ~4.8 min with 8 workers and ~22 min on one core. Two clarifications the
+  gate needed once it was run for real: "in the reported equivalence classes" is satisfied by
+  the truth being among the refitted candidates, which is weaker than being the
+  recommendation — the benchmark reports both — and the gate is only meaningful because the
+  tier-2 shortlist has a per-element-count quota (see §5.1).
 - **G2** — enumeration counts match the measured table exactly.
 - **G3** — the feasibility filter never removes the truth or any of its known equivalents on
   the benchmark suite.
@@ -233,6 +247,20 @@ Steps 1–5 are the core and independent of step 6; DRT lands last and is severa
   screen actually finished, so a run cut short by `--time-limit` or `--max-candidates` reports
   a smaller number rather than an untrue one, and a run started above one element reports
   nothing at all.
+- **The tier-2 shortlist is a quota per element count, ranked by a screening AICc.** [measured]
+  The plan said "the best `n_refine` by screening cost", and that does not work: raw residual
+  always improves with parameters, so on the capacitor reference all 60 shortlisted candidates
+  had five elements and the four-element circuit *that generated the data* was never refitted.
+  G1 failed until this was changed. The per-size quota is also what puts candidates at every
+  complexity on the Pareto front instead of a cluster at the top.
+- **The near-tie rule needs a ceiling.** "Everything within 10× of the best cost" is unbounded,
+  and at 1% noise a factor 10 in cost is only a factor 3.2 in relative error — hundreds of
+  candidates qualified and tier 2 ran for over half an hour per search, far longer than the
+  screen it was double-checking.
+- **Tier 2 uses the same worker pool as tier 1**, and the workers return whole `FitResult`
+  objects. Sending back only the fitted values would have meant a single-restart local fit in
+  the parent, which silently discards the restart spread — the signal a non-identifiable model
+  uses to announce itself.
 
 ## 6. Risks
 
