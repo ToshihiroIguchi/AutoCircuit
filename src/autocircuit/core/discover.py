@@ -34,7 +34,6 @@ from .circuit import (
     CircuitError,
     ElementNode,
     Node,
-    Parallel,
     Series,
     count_elements,
     parallel,
@@ -42,6 +41,10 @@ from .circuit import (
     simplify,
 )
 from .elements import DEFAULT_POOL
+
+# The structural plausibility filter now lives with the enumerator, which is what applies it
+# in bulk; it is re-exported here because it was part of this module's public surface first.
+from .enumerate import is_plausible, is_plausible_node  # noqa: F401
 from .fit import FitResult, Weighting, fit
 from .spectrum import Spectrum
 
@@ -334,37 +337,6 @@ def crossover(a: Node, b: Node, rng: np.random.Generator) -> Node:
     target = a_paths[int(rng.integers(len(a_paths)))]
     donor = _get(b, b_paths[int(rng.integers(len(b_paths)))])
     return _replace(a, target, donor)
-
-
-# -- Physical post-filters -----------------------------------------------------------------
-
-
-def is_plausible(circuit: Circuit) -> bool:
-    """Reject topologies that cannot describe a real two-terminal passive component.
-
-    The rules are structural, not statistical, so they cost nothing to apply before fitting:
-
-    * a bare parallel branch across the whole network of a single inductor or resistor is
-      allowed, but a circuit whose *entire* body is one parallel block of two elements of
-      the same kind is redundant (already handled by :func:`simplify`);
-    * a parallel block containing a lone capacitor together with a lone CPE is degenerate,
-      since a CPE with n = 1 is a capacitor;
-    * a parallel block that puts an inductor across a capacitor with nothing else is a pure
-      LC resonator, which cannot represent a lossy measured spectrum on its own.
-    """
-    return _plausible_node(circuit.root)
-
-
-def _plausible_node(node: Node) -> bool:
-    if isinstance(node, ElementNode):
-        return True
-    if isinstance(node, Parallel):
-        codes = [c.code for c in node.children if isinstance(c, ElementNode)]
-        if "C" in codes and "CPE" in codes:
-            return False
-        if len(node.children) == 2 and set(codes) == {"L", "C"}:
-            return False
-    return all(_plausible_node(child) for child in node.children)
 
 
 # -- Search --------------------------------------------------------------------------------
