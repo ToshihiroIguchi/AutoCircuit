@@ -13,8 +13,14 @@ import numpy as np
 import pytest
 
 from autocircuit.core.circuit import Circuit
-from autocircuit.core.discover import discover
-from autocircuit.core.enumerate import count_topologies
+from autocircuit.core.discover import (
+    MIN_REFINE_PER_SIZE,
+    REFINE_CEILING_FACTOR,
+    _screening_aicc,
+    _shortlist,
+    discover,
+)
+from autocircuit.core.enumerate import count_topologies, enumerate_topologies
 from autocircuit.core.simulate import log_frequencies, simulate
 
 SEMICIRCLE = {"R1.R": 20.0, "R2.R": 1e3, "C1.C": 1e-8}
@@ -179,6 +185,48 @@ def test_auto_mode_covers_what_it_can_and_says_so() -> None:
     assert result.mode == "auto"
     assert result.complete_up_to == 3
     assert "up to 3 elements" in result.completeness()
+
+
+def _forms(pool: tuple[str, ...], n: int) -> list[str]:
+    return [Circuit(node).to_string() for node in enumerate_topologies(pool, n)]
+
+
+def test_shortlist_gives_every_element_count_its_own_quota() -> None:
+    """The bug this locks down cost gate G1 an entire benchmark run.
+
+    Raw residual cost always improves with parameters, so ranking the whole screen by it hands
+    the shortlist to the biggest circuits: on the capacitor reference all 60 shortlisted
+    candidates had five elements and the four-element circuit that generated the data was
+    never refitted at all. Small test spaces hide this completely, because there the shortlist
+    covers every size anyway -- hence this deliberately lopsided synthetic screen.
+    """
+    small = _forms(("R", "C"), 2)
+    large = _forms(("R", "C"), 5)
+    assert len(large) > 30, "fixture assumes the large size dominates by count"
+    scored = [(1e-6, text) for text in large] + [(1e-3, text) for text in small]
+
+    keep = set(_shortlist(scored, n_refine=10, n_data=140))
+    assert keep & set(small), "every two-element candidate was crowded out by the big circuits"
+    assert keep & set(large)
+
+
+def test_shortlist_stays_bounded_when_everything_is_a_near_tie() -> None:
+    """The near-tie rule must not be able to nominate the whole space for a full refit."""
+    texts = _forms(("R", "C"), 5)
+    scored = [(1e-6, text) for text in texts]
+    keep = _shortlist(scored, n_refine=10, n_data=140)
+    assert len(keep) < len(texts)
+    assert len(keep) <= max(MIN_REFINE_PER_SIZE, 10) * REFINE_CEILING_FACTOR
+
+
+def test_screening_aicc_charges_for_parameters() -> None:
+    """Two circuits that fit equally well are not equally good; the bigger one is worse."""
+    assert _screening_aicc(1e-3, 5, 140) < _screening_aicc(1e-3, 8, 140)
+    # ...and a genuinely better fit still wins despite costing more parameters.
+    assert _screening_aicc(1e-6, 8, 140) < _screening_aicc(1e-3, 5, 140)
+    # Degenerate inputs are ranked last rather than raising.
+    assert _screening_aicc(0.0, 5, 140) == float("inf")
+    assert _screening_aicc(1e-3, 200, 140) == float("inf")
 
 
 def test_seed_circuits_are_evaluated_in_exhaustive_mode() -> None:

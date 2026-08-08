@@ -565,8 +565,10 @@ def discover(
         search_restarts, search_popsize, search_maxiter: Reduced fitting budget used by the
             genetic search. Survivors are refitted properly at the end.
         final_restarts: Restart count for the final refit of the reported candidates.
-        n_refine: How many top candidates to refit at full budget; see :data:`REFINE_DEFAULT`
-            for the per-mode default.
+        n_refine: Refit budget for the full-budget second tier. In the exhaustive stage it is
+            a *total* that is split into a quota per element count, so that every complexity
+            reaches the Pareto front; see :func:`_shortlist`. :data:`REFINE_DEFAULT` holds the
+            per-mode default.
         time_limit: Wall-clock budget in seconds; the search stops cleanly when exceeded.
         seeds: Optional circuit strings to inject into the initial population, for example
             textbook models worth testing alongside the evolved ones.
