@@ -369,8 +369,10 @@ semicircle, and a wire with `SKINW` — each at 0% and 1% noise.
 1. **Discovery v2 step 6 — DRT.** Steps 1–5 of `docs/DISCOVERY_V2_PLAN.md` are implemented
    (enumeration, feasibility filter, two-tier exhaustive mode, CLI, benchmarks). What remains
    is `core/drt.py`: a regularised distribution of relaxation times used as *structure
-   probing* — how many relaxations, is there a series R or L — feeding `n_min` into auto mode
-   and available as a standalone `autocircuit drt` command. It was severable by design and is
+   probing* — how many relaxations, is there a series R or L — available as a standalone
+   `autocircuit drt` command and as advisory text in the discovery report. [measured] It does
+   **not** raise the enumeration floor: that would save under 1% of the screen and cost the
+   completeness guarantee (`docs/DISCOVERY_V2_PLAN.md` §3.4). It was severable by design and is
    the last piece of the v2 plan.
 2. **Web UI (phase 6)** — the only untouched phase, and the largest remaining piece.
 3. **ngspice round-trip in CI** — the nodal-analysis engine in the test suite proves the

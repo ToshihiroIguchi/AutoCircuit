@@ -171,9 +171,11 @@ to https://github.com/ToshihiroIguchi/AutoCircuit — commit per plan step.
 ## 6. Open items
 
 0. **Discovery v2 step 6 — DRT** (`docs/DISCOVERY_V2_PLAN.md` §3.4, gate G4). The next task.
-   Note that `discover()` already takes `exhaustive_min`, which is where the DRT-derived
-   `n_min` plugs in; raising it deliberately clears `complete_up_to`, because "all topologies
-   up to N" is not true when the smaller sizes were skipped.
+   It is standalone structure probing and *not* a search bound: [measured] the small element
+   counts are under 1% of the filtered space (n=5 alone is 85–89% of it), so a DRT-derived
+   `n_min` would save seconds, while raising `exhaustive_min` deliberately clears
+   `complete_up_to` — "all topologies up to N" is not true when the smaller sizes were skipped.
+   `exhaustive_min` stays available to anyone who wants that trade explicitly.
 1. Web UI (phase 6) — the biggest remaining piece; see `docs/IMPLEMENTATION_PLAN.md` §9.
 2. ngspice round-trip in CI. The test suite already proves the netlist is *electrically*
    right via its own nodal-analysis engine (`tests/test_spice.py`); a real simulator would

@@ -51,7 +51,7 @@ spectrum
   │ Lin-KK (exists)                        — is the data worth fitting at all?
   ▼
 Stage A  Structure probing (new, optional) — DRT: how many relaxations? series R? series L/C?
-  │        → n_min, endpoint behaviour, suggested pool restriction
+  │        → advisory hints for the report (not a search bound; see the §3.4 correction)
   ▼
 Stage B  Enumeration (new)                 — all plausible topologies, n = 1 .. n_exh (≤ 5)
   │        → structural feasibility filter kills candidates before any fitting
@@ -169,11 +169,37 @@ Purpose here is *structure probing*, not a rival analysis method:
 - Output `DRTResult`: γ(τ), peaks (position, polarisation weight, width) via prominence-based
   peak picking, `n_relaxations`, series R and L estimates, and a `broadened: bool` per peak
   (width vs the ideal Debye width ⇒ suggests CPE/CC rather than pure C).
-- Consumed by `discover(mode="auto")` as **bounds, never as truth**: `n_min = n_relaxations`
-  (enumeration starts there instead of at 1 — pure speed-up), and a hint list for the report.
-  Discovery must remain correct with DRT disabled.
+- Consumed by `discover(mode="auto")` as **advice for the report only**. Discovery must remain
+  correct with DRT disabled.
 - Standalone CLI: `autocircuit drt data.csv [--json out.json]` — independently useful for the
   Maxwell-Wagner use case (how many blocks does the ceramic actually show?).
+
+**Correction: DRT does not feed `n_min`, and speed was never a reason to build it.**
+[measured] The plan above had DRT raising the enumeration floor — "enumeration starts at
+`n_relaxations` instead of at 1 — pure speed-up". Once steps 1–5 were measured that turns out
+to buy nothing and cost the one thing this redesign exists for. Feasible candidates per
+element count, on the three reference spectra:
+
+| reference | n=1 | n=2 | n=3 | n=4 | n=5 | total | skipped by `n_min=2` | by `n_min=3` |
+|-----------|----:|----:|----:|----:|----:|------:|---------------------:|-------------:|
+| capacitor (R,C,L,CPE,SKINF) | 0 | 7 | 77 | 657 | 5,857 | 6,598 | 0 (0.0%) | 7 (0.1%) |
+| Maxwell-Wagner (R,C,L,CPE) | 1 | 10 | 55 | 330 | 2,185 | 2,581 | 1 (0.0%) | 11 (0.4%) |
+| Randles (R,C,CPE,W) | 2 | 11 | 66 | 442 | 3,192 | 3,713 | 2 (0.1%) | 13 (0.4%) |
+
+The space is overwhelmingly its largest level — n=5 alone is 85–89% of it — so any floor DRT
+could justify removes well under 1% of the work, a few seconds. Small circuits are also the
+*cheapest* to screen, so the saving is smaller still than the counts suggest. Against that,
+raising `exhaustive_min` deliberately clears `complete_up_to` (§5.1): "every plausible topology
+up to N elements was evaluated" is false when the small sizes were skipped. Trading the
+completeness guarantee for a few seconds is not a trade worth making, and a DRT that
+mis-counts a broadened peak would silently delete the correct answer from a search that still
+claimed to be exhaustive.
+
+DRT is therefore built for the reason it was independently worth having — **standalone
+structure probing**: how many relaxation blocks does this ceramic actually show, and is a peak
+broadened enough to mean CPE rather than C. Its output reaches discovery as advisory text in
+the report and nothing else. Anyone who does want the floor raised already has
+`exhaustive_min`, and gets the honest `complete_up_to` that goes with it.
 
 ### 3.5 CLI
 
@@ -227,7 +253,7 @@ Acceptance gates (hard, in the benchmark script, not aspirations):
 | 3 | two-tier exhaustive mode in `discover.py`, `complete_up_to`, progress callback | M | **done** — `tests/test_discover_exhaustive.py` |
 | 4 | `--mode`/`--workers` CLI, multiprocessing tier 1 | S | **done** |
 | 5 | benchmark script + gate G1; tune screening budget against it | M | **done** — `benchmarks/discovery_v2.py` |
-| 6 | `drt.py` + `drt` CLI + G4; wire `n_min` into auto mode | M | not started |
+| 6 | `drt.py` + `drt` CLI + G4; report hints only, **no** `n_min` wiring (see §3.4) | M | not started |
 | 7 | docs: this file marked implemented, README, IMPLEMENTATION_PLAN §6/§10 update | S | **done** |
 
 Steps 1–5 are the core and independent of step 6; DRT lands last and is severable.
@@ -265,7 +291,7 @@ Steps 1–5 are the core and independent of step 6; DRT lands last and is severa
 ## 6. Risks
 
 - **Combinatorics with wide pools** (electrochemical pool, 8 codes: ~10⁵ at n=5). Mitigated
-  by `max_candidates` auto-clamping of `exhaustive_limit`, pool restriction via DRT hints,
+  by `max_candidates` auto-clamping of `exhaustive_limit`, user-chosen pool restriction,
   and honest reporting of `complete_up_to` (completeness up to 4 elements is still a far
   stronger statement than the GP ever made).
 - **Feasibility filter too aggressive** ⇒ silent loss of completeness. Mitigated by G3, by
