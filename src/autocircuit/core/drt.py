@@ -452,9 +452,9 @@ def _design_matrix(omega: Float, tau: Float, add_l: bool, add_c: bool) -> Comple
     """Columns of the linear DRT model: series terms first, then one Debye term per tau."""
     columns: list[Complex] = [np.ones_like(omega, dtype=np.complex128)]
     if add_l:
-        columns.append(1j * omega)
+        columns.append(np.asarray(1j * omega, dtype=np.complex128))
     if add_c:
-        columns.append(1.0 / (1j * omega))
+        columns.append(np.asarray(1.0 / (1j * omega), dtype=np.complex128))
     columns.extend(1.0 / (1.0 + 1j * omega * t) for t in tau)
     return np.stack(columns, axis=1)
 
@@ -724,7 +724,7 @@ def _ideal_fwhm(
     this in the real distribution is broadening the *data* carries, not broadening the method
     added -- which is the only version of the question that has an answer.
     """
-    z = 1.0 / (1.0 + 1j * omega * tau_peak)
+    z: Complex = np.asarray(1.0 / (1.0 + 1j * omega * tau_peak), dtype=np.complex128)
     w_re, w_im = weight_vectors(z, weighting)
     design = _design_matrix(omega, tau, add_l, add_c)
     a, b, scale = _weighted_system(design, z, w_re, w_im)

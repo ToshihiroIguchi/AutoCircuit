@@ -63,7 +63,8 @@ class Spectrum:
         """Build a spectrum from |Z| and phase in degrees."""
         mag = np.asarray(magnitude, dtype=np.float64)
         phi = np.deg2rad(np.asarray(phase_deg, dtype=np.float64))
-        return cls(np.asarray(f, dtype=np.float64), mag * np.exp(1j * phi), metadata or {})
+        z = np.asarray(mag * np.exp(1j * phi), dtype=np.complex128)
+        return cls(np.asarray(f, dtype=np.float64), z, metadata or {})
 
     @property
     def omega(self) -> NDArray[np.float64]:

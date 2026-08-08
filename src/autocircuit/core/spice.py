@@ -26,8 +26,9 @@ that band and the achieved accuracy in its comments.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Literal
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -91,9 +92,11 @@ def _design_columns(
     """Basis functions of the Foster form; returns the matrix and the reactive column index."""
     columns: list[Complex] = [np.ones_like(omega, dtype=np.complex128)]
     if form == "rc":
-        columns.append(1.0 / (1j * omega))  # coefficient is 1/C0
+        columns.append(np.asarray(1.0 / (1j * omega), dtype=np.complex128))  # coefficient is 1/C0
     else:
-        columns.append(1j * omega + 0.0 * omega)  # coefficient is L0
+        columns.append(
+            np.asarray(1j * omega + 0.0 * omega, dtype=np.complex128)
+        )  # coefficient is L0
     for t in tau:
         if form == "rc":
             columns.append(1.0 / (1.0 + 1j * omega * t))  # coefficient is R_k
@@ -249,8 +252,14 @@ class _NetlistBuilder:
             return
 
         form: Literal["rc", "rl"] = "rc" if element.spice_form == "rc" else "rl"
+
+        def _impedance(
+            w: Float, e: elements.Element = element, v: Float = values
+        ) -> Complex:
+            return e.impedance(w, v)
+
         ladder = synthesize_ladder(
-            lambda w, e=element, v=values: e.impedance(w, v),
+            _impedance,
             self.f_min,
             self.f_max,
             form,

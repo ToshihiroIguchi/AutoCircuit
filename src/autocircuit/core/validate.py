@@ -97,11 +97,11 @@ def _design_matrix(
     """Columns of the KK-compliant linear model, evaluated at each angular frequency."""
     columns: list[Complex] = [np.ones_like(omega, dtype=np.complex128)]
     if add_inductance:
-        columns.append(1j * omega)
+        columns.append(np.asarray(1j * omega, dtype=np.complex128))
     if add_capacitance:
-        columns.append(1.0 / (1j * omega))
+        columns.append(np.asarray(1.0 / (1j * omega), dtype=np.complex128))
     for t in tau:
-        columns.append(1.0 / (1.0 + 1j * omega * t))
+        columns.append(np.asarray(1.0 / (1.0 + 1j * omega * t), dtype=np.complex128))
     return np.stack(columns, axis=1)
 
 

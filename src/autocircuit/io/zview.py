@@ -115,6 +115,10 @@ def read(path: str | Path, **hints: Any) -> Spectrum:
         data_lines = [ln for i, ln in nonblank if i >= data_start]
         f_idx, re_idx, im_idx = 0, 4, 5
 
+    # Both branches above always set delimiter to a concrete string before falling through
+    # here; this is just making that invariant visible to the type checker.
+    assert delimiter is not None
+
     metadata: dict[str, Any] = {}
     for ln in meta_lines:
         key, value = _parse_meta_line(ln)

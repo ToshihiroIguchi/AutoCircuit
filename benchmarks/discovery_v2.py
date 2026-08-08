@@ -58,18 +58,16 @@ from autocircuit.core.discover import (
     REFINE_DEFAULT,
     DiscoveryResult,
     ScreenBudget,
-    discover,
-)
-
-# ``screen-rank`` measures the ranking the two-tier search actually performs, so it calls that
-# machinery rather than re-deriving it: a reimplementation here would measure the benchmark.
-# (This is the opposite choice from ``benchmarks/topology_space.py``, which keeps its own
-# enumerator on purpose so that gate G2 checks one implementation against another.)
-from autocircuit.core.discover import (  # noqa: PLC2701
+    # ``screen-rank`` measures the ranking the two-tier search actually performs, so it calls
+    # that machinery rather than re-deriving it: a reimplementation here would measure the
+    # benchmark. (This is the opposite choice from ``benchmarks/topology_space.py``, which
+    # keeps its own enumerator on purpose so that gate G2 checks one implementation against
+    # another.) The following four imports are private:
     _screen_all,
     _screening_aicc,
     _shortlist,
     _worker_pool,
+    discover,
 )
 from autocircuit.core.enumerate import (
     EndpointBehaviour,

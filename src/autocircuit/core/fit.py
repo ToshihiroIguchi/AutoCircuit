@@ -310,7 +310,7 @@ class _Problem:
         values[self.free_idx, :] = free
         return values
 
-    def cost_vectorized(self, xs: Float) -> Float:
+    def cost_vectorized(self, xs: Float, /) -> Float:
         """Score a whole population in one pass; ``xs`` is ``(n_free, n_candidates)``.
 
         Evaluating the circuit once for the entire differential-evolution population instead
@@ -558,7 +558,11 @@ def _global_stage(
     else:
         kwargs["vectorized"] = True
         kwargs["updating"] = "deferred"
-        result = differential_evolution(problem.cost_vectorized, **kwargs)
+        # scipy-stubs has a single, non-overloaded signature for differential_evolution that
+        # always types `func` as scalar-returning; it does not model the `vectorized=True`
+        # calling convention (population in, cost array out) that this code relies on, so the
+        # declared return type of cost_vectorized genuinely cannot match the stub here.
+        result = differential_evolution(problem.cost_vectorized, **kwargs)  # type: ignore[arg-type]
     return np.asarray(result.x, dtype=np.float64)
 
 

@@ -17,7 +17,6 @@ from autocircuit.core.circuit import Circuit
 from autocircuit.core.elements import REGISTRY
 from autocircuit.core.spice import Ladder, synthesize_ladder, to_netlist
 
-
 # -- A minimal SPICE AC engine ---------------------------------------------------------------
 
 

@@ -218,12 +218,12 @@ def _parse_lines(raw_lines: list[str], p: Path, **hints: Any) -> Spectrum:
                 (col_mag, ("mag", False)),
                 (col_phase, ("phase", False)),
             )
-            for idx, role in positional_roles:
+            for idx, pos_role in positional_roles:
                 if idx >= n_cols:
                     raise ColumnMappingError(
                         f"Column index {idx} out of range for a {n_cols}-column file {p}"
                     )
-                column_roles[idx] = role
+                column_roles[idx] = pos_role
         else:
             if col_re is None:
                 col_re = 1

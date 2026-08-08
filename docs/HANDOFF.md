@@ -148,9 +148,17 @@ recorded in the code as a comment and in `docs/IMPLEMENTATION_PLAN.md` marked **
 - **No `uv`, no `typer`, and the package is not pip-installed.** Always set
   `$env:PYTHONPATH = "C:\Users\toshi\python\AutoCircuit\src"`. Run the CLI as
   `python -m autocircuit`. `numpy` 2.5.1, `scipy` 1.17.1, `pytest` 9.1.1, Python 3.13.
-- **`ruff` and `mypy` are not installed here either**, despite being the project's declared
-  tooling. Style and typing were kept correct by hand; if you install them, expect the first
-  run to have opinions nobody has been able to act on yet.
+- **`ruff` and `mypy` are installed and clean** (`python -m ruff check .`, `python -m mypy`,
+  both from the repo root). Two things about that setup are deliberate:
+  - **`scipy-stubs` is a dev dependency**, without which mypy cannot see scipy at all.
+  - **mypy's `python_version` is 3.12 while `requires-python` is 3.11.** Not an oversight: the
+    stubs bundled inside numpy ≥ 2.3 use 3.12 `type X = ...` statements, so asking mypy for
+    3.11 fails while parsing *numpy*, before it reaches this project. 3.11 support is a
+    packaging claim checked by running the suite, not by the type checker.
+  - One `# type: ignore[arg-type]` exists, in `fit.py`'s `differential_evolution` call.
+    `scipy-stubs` has a single non-overloaded signature that always types `func` as
+    scalar-returning and does not model `vectorized=True`, which is the convention that whole
+    code path depends on. It is a stub gap, not a defect here.
 - **`pytest-timeout` is not installed** — `--timeout=` is rejected by the argument parser.
 - **numpy and scipy are the only permitted runtime dependencies** — this is what keeps the
   Pyodide target viable. The CLI uses stdlib `argparse` for this reason.

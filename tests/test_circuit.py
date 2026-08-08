@@ -100,9 +100,9 @@ def test_syntax_errors_raise_circuit_syntax_error(text: str) -> None:
 def test_series_impedance_is_the_sum() -> None:
     circuit = Circuit.parse("R1-L1")
     omega = _omega([100.0, 1000.0, 1.0e6])
-    r, l = 47.0, 3.3e-3
-    z = circuit.impedance(omega, np.array([r, l]))
-    expected = r + 1j * omega * l
+    r, ind = 47.0, 3.3e-3
+    z = circuit.impedance(omega, np.array([r, ind]))
+    expected = r + 1j * omega * ind
     assert_allclose(z, expected, rtol=1e-12)
 
 

@@ -10,9 +10,9 @@ import argparse
 import json
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import numpy as np
 
@@ -51,7 +51,9 @@ def _parse_assignments(items: Sequence[str] | None, what: str) -> dict[str, floa
         try:
             out[name.strip()] = float(text)
         except ValueError:
-            raise SystemExit(f"error: {what} value for {name!r} is not a number: {text!r}") from None
+            raise SystemExit(
+                f"error: {what} value for {name!r} is not a number: {text!r}"
+            ) from None
     return out
 
 

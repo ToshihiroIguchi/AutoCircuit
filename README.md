@@ -162,6 +162,9 @@ See `docs/IMPLEMENTATION_PLAN.md` for the design and the literature it is based 
 ## Development
 
 ```bash
+pip install -e ".[dev]"
 python -m pytest tests -q       # full suite
 python -m pytest tests -q -k "not fit and not discover"   # fast subset
+python -m ruff check .          # lint
+python -m mypy                  # types
 ```

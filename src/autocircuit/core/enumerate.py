@@ -445,7 +445,11 @@ def is_feasible(
     budget: int = DEFAULT_DEGENERACY_BUDGET,
 ) -> bool:
     """True unless ``node`` provably cannot reproduce the measured endpoint behaviour."""
-    for end, (lo, hi) in (("low", behaviour.low_band), ("high", behaviour.high_band)):
+    ends: tuple[tuple[End, _Band], ...] = (
+        ("low", behaviour.low_band),
+        ("high", behaviour.high_band),
+    )
+    for end, (lo, hi) in ends:
         if lo == -math.inf and hi == math.inf:
             continue
         reachable_lo, reachable_hi = endpoint_exponents(node, end, budget)

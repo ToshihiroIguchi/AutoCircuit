@@ -18,6 +18,7 @@ measured near resonance.
 
 from __future__ import annotations
 
+import contextlib
 import re
 from pathlib import Path
 from typing import Any
@@ -71,10 +72,8 @@ def read(path: str | Path, **hints: Any) -> Spectrum:
                 elif tok == "R":
                     i += 1
                     if i < len(tokens):
-                        try:
+                        with contextlib.suppress(ValueError):
                             z0 = float(tokens[i])
-                        except ValueError:
-                            pass
                 i += 1
             option_line_found = True
             continue
@@ -86,10 +85,8 @@ def read(path: str | Path, **hints: Any) -> Spectrum:
                 bracket_metadata[key] = m.group(2).strip()
             continue
         for tok in line.replace(",", " ").split():
-            try:
+            with contextlib.suppress(ValueError):
                 numbers.append(float(tok))
-            except ValueError:
-                pass
 
     metadata: dict[str, Any] = dict(bracket_metadata)
     warnings: list[str] = []

@@ -30,7 +30,6 @@ import pytest
 
 from autocircuit.cli.main import main
 from autocircuit.core.drt import (
-    DRTResult,
     _magnitude_at,
     _penalty_matrix,
     _series_terms,
@@ -344,14 +343,18 @@ def test_raising_significance_never_increases_the_peak_count() -> None:
     data = _two_peak_spectrum(seed=0, noise=0.01)
     grid = [1.0, 4.0, 8.0, 16.0, 32.0, 64.0]
     counts = [drt(data, significance=s).n_relaxations for s in grid]
-    assert all(a >= b for a, b in zip(counts, counts[1:])), counts
+    # Pairwise adjacent comparison: counts and counts[1:] are the same list offset by one, so
+    # they differ in length by design.
+    assert all(a >= b for a, b in zip(counts, counts[1:], strict=False)), counts
 
 
 def test_raising_prominence_never_increases_the_peak_count() -> None:
     data = _two_peak_spectrum(seed=0, noise=0.01)
     grid = [0.1, 0.3, 0.5, 0.7, 0.9]
     counts = [drt(data, prominence=p).n_relaxations for p in grid]
-    assert all(a >= b for a, b in zip(counts, counts[1:])), counts
+    # Pairwise adjacent comparison: counts and counts[1:] are the same list offset by one, so
+    # they differ in length by design.
+    assert all(a >= b for a, b in zip(counts, counts[1:], strict=False)), counts
 
 
 # =================================================================================================

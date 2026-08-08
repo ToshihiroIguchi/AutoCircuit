@@ -16,7 +16,6 @@ Exhaustive and auto mode have their own file, ``test_discover_exhaustive.py``.
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from autocircuit.core.circuit import Circuit, count_elements, simplify
 from autocircuit.core.discover import (

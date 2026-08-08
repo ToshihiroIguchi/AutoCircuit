@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 import numpy as np
 from numpy.typing import NDArray
@@ -38,7 +38,7 @@ class Parallel:
     children: tuple[Node, ...]
 
 
-Node = Union[ElementNode, Series, Parallel]
+Node = ElementNode | Series | Parallel
 
 
 class CircuitError(ValueError):

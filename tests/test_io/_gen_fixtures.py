@@ -25,26 +25,26 @@ im = [-150.2, -15.0, -1.6]  # capacitive: negative imaginary already
 write(
     "generic_re_im.csv",
     "Frequency,Re(Z),Im(Z)\n"
-    + "\n".join(f"{f:.6g},{r:.6g},{i:.6g}" for f, r, i in zip(freqs, re, im))
+    + "\n".join(f"{f:.6g},{r:.6g},{i:.6g}" for f, r, i in zip(freqs, re, im, strict=True))
     + "\n",
 )
 
 mag = [150.72, 17.32, 5.23]
 phase = [-85.24, -61.18, -17.58]  # degrees, negative => capacitive
-re_from_polar = [m * math.cos(math.radians(p)) for m, p in zip(mag, phase)]
-im_from_polar = [m * math.sin(math.radians(p)) for m, p in zip(mag, phase)]
+re_from_polar = [m * math.cos(math.radians(p)) for m, p in zip(mag, phase, strict=True)]
+im_from_polar = [m * math.sin(math.radians(p)) for m, p in zip(mag, phase, strict=True)]
 
 write(
     "generic_mag_phase.tsv",
     "Freq\t|Z|\tPhase\n"
-    + "\n".join(f"{f:.6g}\t{m:.6g}\t{p:.6g}" for f, m, p in zip(freqs, mag, phase))
+    + "\n".join(f"{f:.6g}\t{m:.6g}\t{p:.6g}" for f, m, p in zip(freqs, mag, phase, strict=True))
     + "\n",
 )
 
 write(
     "generic_zpp_convention.csv",
     "Frequency,Re(Z),Z''\n"
-    + "\n".join(f"{f:.6g},{r:.6g},{-i:.6g}" for f, r, i in zip(freqs, re, im))
+    + "\n".join(f"{f:.6g},{r:.6g},{-i:.6g}" for f, r, i in zip(freqs, re, im, strict=True))
     + "\n",
 )
 
@@ -52,7 +52,7 @@ write(
     "generic_no_header.txt",
     "# generated fixture, no header row\n"
     "% freq(Hz)  re(ohm)  im(ohm)\n"
-    + "\n".join(f"{f:.6g} {r:.6g} {i:.6g}" for f, r, i in zip(freqs, re, im))
+    + "\n".join(f"{f:.6g} {r:.6g} {i:.6g}" for f, r, i in zip(freqs, re, im, strict=True))
     + "\n",
 )
 
@@ -60,7 +60,7 @@ omega = [2.0 * math.pi * f for f in freqs]
 write(
     "generic_omega.csv",
     "Omega,Re(Z),Im(Z)\n"
-    + "\n".join(f"{w:.10g},{r:.6g},{i:.6g}" for w, r, i in zip(omega, re, im))
+    + "\n".join(f"{w:.10g},{r:.6g},{i:.6g}" for w, r, i in zip(omega, re, im, strict=True))
     + "\n",
 )
 
@@ -77,7 +77,7 @@ zv_re = [12.5, 8.3, 5.1]
 zv_im = [-150.2, -15.0, -1.6]  # ZPlot already signs Z'' as Im(Z); capacitive negative
 
 header_rows = "\n".join(
-    f"{f:.6g}\t0\t0\t0\t{r:.6g}\t{i:.6g}" for f, r, i in zip(freqs, zv_re, zv_im)
+    f"{f:.6g}\t0\t0\t0\t{r:.6g}\t{i:.6g}" for f, r, i in zip(freqs, zv_re, zv_im, strict=True)
 )
 write(
     "sample_header.z",
@@ -88,7 +88,7 @@ write(
 )
 
 pos_rows = "\n".join(
-    f"{f:.6g},0,0,0,{r:.6g},{i:.6g},0,0" for f, r, i in zip(freqs, zv_re, zv_im)
+    f"{f:.6g},0,0,0,{r:.6g},{i:.6g},0,0" for f, r, i in zip(freqs, zv_re, zv_im, strict=True)
 )
 write(
     "sample_positional.z",
@@ -115,7 +115,7 @@ zs = [z_of(f) for f in ts_freqs]
 # 1-port: S11 = (Z - z0) / (Z + z0)
 s11s = [(z - z0) / (z + z0) for z in zs]
 lines = ["! Synthetic 1-port capacitor fixture for autocircuit.io tests", "# HZ S RI R 50"]
-for f, s in zip(ts_freqs, s11s):
+for f, s in zip(ts_freqs, s11s, strict=True):
     lines.append(f"{f:.6g} {s.real:.10g} {s.imag:.10g}")
 write("cap_1port.s1p", "\n".join(lines) + "\n")
 
@@ -125,7 +125,7 @@ lines = [
     "! Synthetic 2-port capacitor fixture (series-thru) for autocircuit.io tests",
     "# HZ S RI R 50",
 ]
-for f, s21 in zip(ts_freqs, s21_series):
+for f, s21 in zip(ts_freqs, s21_series, strict=True):
     # S11=S22=0, S12=S21 (reciprocal network)
     lines.append(f"{f:.6g} 0 0 {s21.real:.10g} {s21.imag:.10g} {s21.real:.10g} {s21.imag:.10g} 0 0")
 write("cap_series_thru.s2p", "\n".join(lines) + "\n")
@@ -138,7 +138,7 @@ lines = [
     "[Number of Ports] 2",
     "# HZ S RI R 50",
 ]
-for f, s21 in zip(ts_freqs, s21_shunt):
+for f, s21 in zip(ts_freqs, s21_shunt, strict=True):
     lines.append(f"{f:.6g} 0 0 {s21.real:.10g} {s21.imag:.10g} {s21.real:.10g} {s21.imag:.10g} 0 0")
 write("cap_shunt_thru.s2p", "\n".join(lines) + "\n")
 
@@ -151,7 +151,7 @@ write(
     '"Title","Keysight Test"\n'
     '"Date","2026-08-08"\n'
     '"Frequency","R","X"\n'
-    + "\n".join(f"{f:.6g},{r:.6g},{i:.6g}" for f, r, i in zip(freqs, re, im))
+    + "\n".join(f"{f:.6g},{r:.6g},{i:.6g}" for f, r, i in zip(freqs, re, im, strict=True))
     + "\n",
 )
 
@@ -159,7 +159,7 @@ write(
     "kv_z_theta.csv",
     '"Title","Keysight Test"\n'
     '"Frequency","Z","THR"\n'
-    + "\n".join(f"{f:.6g},{m:.6g},{p:.6g}" for f, m, p in zip(freqs, mag, phase))
+    + "\n".join(f"{f:.6g},{m:.6g},{p:.6g}" for f, m, p in zip(freqs, mag, phase, strict=True))
     + "\n",
 )
 
@@ -199,7 +199,7 @@ write(
     "kv_fallback.csv",
     '"Title","Unusual trace names"\n'
     '"Frequency","Re(Z)","Im(Z)"\n'
-    + "\n".join(f"{f:.6g},{r:.6g},{i:.6g}" for f, r, i in zip(freqs, re, im))
+    + "\n".join(f"{f:.6g},{r:.6g},{i:.6g}" for f, r, i in zip(freqs, re, im, strict=True))
     + "\n",
 )
 

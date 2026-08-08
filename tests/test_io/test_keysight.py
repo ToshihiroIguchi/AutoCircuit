@@ -28,8 +28,8 @@ def test_z_theta_round_trip() -> None:
     spec = keysight.read(DATA / "kv_z_theta.csv")
     mag = [150.72, 17.32, 5.23]
     phase = [-85.24, -61.18, -17.58]
-    expected_re = [m * math.cos(math.radians(p)) for m, p in zip(mag, phase)]
-    expected_im = [m * math.sin(math.radians(p)) for m, p in zip(mag, phase)]
+    expected_re = [m * math.cos(math.radians(p)) for m, p in zip(mag, phase, strict=True)]
+    expected_im = [m * math.sin(math.radians(p)) for m, p in zip(mag, phase, strict=True)]
     assert_allclose(spec.f, FREQS)
     assert_allclose(spec.z.real, expected_re, rtol=1e-4)
     assert_allclose(spec.z.imag, expected_im, rtol=1e-4)

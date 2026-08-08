@@ -15,7 +15,7 @@ dependencies = ["numpy>=1.24", "scipy>=1.10"]
 autocircuit = "autocircuit.cli.main:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "ruff>=0.4", "mypy>=1.8"]
+dev = ["pytest>=7", "ruff>=0.4", "mypy>=1.8", "scipy-stubs>=1.15"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -32,7 +32,12 @@ src = ["src", "tests"]
 select = ["E", "F", "I", "UP", "B", "SIM", "NPY"]
 
 [tool.mypy]
-python_version = "3.11"
+# The package supports 3.11 (see requires-python), but mypy cannot be *told* 3.11 here: the
+# stubs shipped inside numpy >= 2.3 use `type X = ...` statements, which are 3.12 syntax, so
+# checking under 3.11 fails while parsing numpy itself rather than this project. The source
+# uses no 3.12-only syntax, and `from __future__ import annotations` is on everywhere, so
+# 3.11 support is a packaging claim tested by running the suite, not by this checker.
+python_version = "3.12"
 packages = ["autocircuit"]
 mypy_path = "src"
 warn_unused_ignores = true
