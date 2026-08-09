@@ -16,7 +16,10 @@ python benchmarks/discovery_v2.py filter
 python benchmarks/discovery_v2.py screen
 python benchmarks/discovery_v2.py screen-rank --workers 8   # slow: ~1 h
 python benchmarks/discovery_v2.py gate --workers 8      # slow: hours
+python benchmarks/pyodide/bench.py                      # CPython baseline for the web numbers
 ```
+
+`benchmarks/pyodide/` additionally needs Node; see its own README.
 
 Re-run the relevant script after touching the optimizer, the element library or the
 discovery filters, and update the numbers below if they move.
@@ -181,3 +184,20 @@ reports a chi² an order of magnitude worse.
 (The failure counts are unchanged from the first time this was measured; the times are ~3×
 lower because batched element evaluation landed afterwards. Any time estimate elsewhere in the
 docs derived from the earlier numbers is conservative.)
+
+### `pyodide/bench.py` — how much slower is the browser?
+
+Full table and the phase-6 conclusions in `benchmarks/pyodide/README.md`. The short version:
+**WASM costs 1.3–1.8× on the numerical work**, not the "minutes-not-seconds" the plan feared,
+because the expensive part is numpy and scipy compiled to WASM rather than interpreted Python.
+The interpreter-bound import pays 3.9×, once, for 1.6 s.
+
+| operation | CPython | Pyodide | ratio |
+|-----------|--------:|--------:|------:|
+| `fit`, 6 parameters | 0.704 s | 0.906 s | 1.3× |
+| `screen`, 4 elements | 32.2 ms | 45.1 ms | 1.4× |
+| `discover`, component pool, n ≤ 4 (741 screened) | 127.5 s | 169.1 s | 1.33× |
+
+So `exhaustive_limit=4` is a usable web default at 2.8 min single-threaded — which makes
+progress streaming mandatory rather than optional — `exhaustive_limit=5` is a ~30 min opt-in,
+and the fitter needs no separate web budget.

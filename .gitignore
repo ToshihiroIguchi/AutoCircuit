@@ -8,3 +8,10 @@ dist/
 .ruff_cache/
 .venv/
 venv/
+node_modules/
+# Build artifact and run output of benchmarks/pyodide; the results live in its README.
+benchmarks/pyodide/src.zip
+benchmarks/pyodide/*.json
+!benchmarks/pyodide/package.json
+!benchmarks/pyodide/package-lock.json
+benchmarks/pyodide/*.txt

@@ -1,0 +1,13 @@
+{
+  "name": "autocircuit-pyodide-bench",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Measures AutoCircuit under Pyodide (WASM) against the CPython baseline.",
+  "type": "module",
+  "scripts": {
+    "bench": "python make_zip.py && node run_pyodide.mjs src.zip bench.py"
+  },
+  "dependencies": {
+    "pyodide": "^314.0.3"
+  }
+}

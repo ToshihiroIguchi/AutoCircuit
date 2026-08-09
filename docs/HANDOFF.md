@@ -173,6 +173,12 @@ recorded in the code as a comment and in `docs/IMPLEMENTATION_PLAN.md` marked **
   `python -m pytest tests -q -k "not test_fit and not test_discover"` (~4 s) — note that the
   `not test_discover` filter also drops `test_discover_exhaustive.py`, which is where the
   exhaustive mode is covered.
+- **Node 24 is available**, which is what `benchmarks/pyodide/` uses to run the package under
+  WASM without a browser. Its `npm install` and the first `loadPackage` both need network.
+- **`Compress-Archive` produces zips Python cannot unpack as a package.** It writes backslash
+  path separators, so `zipfile` extracts files literally named `autocircuit\__init__.py` and
+  the failure only shows up as `ModuleNotFoundError`. Build such archives with Python
+  (`benchmarks/pyodide/make_zip.py`).
 - **Long benchmarks must be launched detached.** A backgrounded shell command is killed after
   ten minutes, and the G1 gate takes about two hours. Use
   `Start-Process python -ArgumentList ... -RedirectStandardOutput <file> -PassThru` and watch
@@ -217,4 +223,8 @@ all three of which needed measurement to get right (§5.2 of the plan).
    right via its own nodal-analysis engine (`tests/test_spice.py`); a real simulator would
    also prove it is *dialect* right.
 3. Gamry `.DTA` and BioLogic `.mpt` readers, once real files exist to test against.
-4. Pyodide performance measurement — nothing has been run in a browser yet.
+4. ~~Pyodide performance measurement~~ — **done**, `benchmarks/pyodide/`. WASM costs 1.3–1.8×
+   on the numerical work, not the order of magnitude the plan feared, so no reduced web budget
+   and no Rust port are needed. What it does settle: `exhaustive_limit=4` is the browser
+   default at 2.8 min single-threaded, which makes progress streaming mandatory, and
+   `exhaustive_limit=5` is a ~30 min opt-in. Phase 6 can be planned on these numbers.

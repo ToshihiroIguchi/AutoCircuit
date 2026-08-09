@@ -370,9 +370,33 @@ return a common `Spectrum` (f [Hz], Z [complex], metadata). Export: CSV and ZVie
 - Extras: fit report export (JSON/CSV/netlist download), dark/light theme, example datasets
   bundled. Plotting: Plotly.js initially (fast to ship), replaceable.
 - Risk controls: Pyodide initial load (~15 MB) mitigated by lazy load + cache + a visible
-  loading stage; if in-browser topology search proves too slow, options are (a) reduced
-  default budgets, (b) Rust/WASM port of the fitness inner loop — core API is designed so
-  only `fit_budget()` would move.
+  loading stage.
+
+**[measured] The WASM performance risk is much smaller than this section assumed**
+(`benchmarks/pyodide/`, the same `bench.py` run under CPython and under Pyodide 314 / Python
+3.14, both single-threaded):
+
+| operation | CPython | Pyodide | ratio |
+|-----------|--------:|--------:|------:|
+| `fit`, 6 parameters | 0.704 s | 0.906 s | 1.3× |
+| `screen`, 4 elements | 32.2 ms | 45.1 ms | 1.4× |
+| enumerate + feasibility, n ≤ 5 | 0.200 s | 0.316 s | 1.6× |
+| `import autocircuit` | 0.40 s | 1.58 s | 3.9× |
+| `discover`, component pool, n ≤ 4 | 127.5 s | 169.1 s | 1.33× |
+
+The penalty on numerical work is 1.3–1.8×, because the cost sits in numpy and scipy compiled to
+WASM rather than in interpreted Python; only interpreter-bound paths pay ~4×, and that is a
+one-off 1.6 s import. Consequences, all now measured rather than guessed:
+
+- **Neither fallback in the old risk line is needed.** No reduced web budget — and cutting the
+  screening budget is separately known to lose the answer (§6.1). No Rust/WASM port of the
+  inner loop; `fit_budget()` stays put.
+- **Cold start to the first fit is ~4 s** (1.2 s boot + 1.1 s cached numpy/scipy + 1.6 s
+  import), so the loading stage is a UI state, not an architectural problem.
+- **`exhaustive_limit=4` is the web default and costs 2.8 min single-threaded.** A browser has
+  no `multiprocessing`, so `--workers` has no analogue there. That makes progress streaming
+  through the existing `on_progress` callback mandatory, not decorative.
+- **`exhaustive_limit=5` stays an explicit opt-in** at roughly half an hour.
 
 ## 10. Milestones
 
