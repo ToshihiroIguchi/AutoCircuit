@@ -47,7 +47,9 @@ static-site Web UI running the same core via WASM (Pyodide).
    be re-derived or accidentally "fixed".
 2. `docs/IMPLEMENTATION_PLAN.md` — the overall design. Claims marked **[measured]** are
    backed by `benchmarks/`; do not contradict them without re-running the benchmark.
-3. `docs/DISCOVERY_V2_PLAN.md` — the approved next task (exhaustive-first topology discovery).
+3. `docs/DISCOVERY_V2_PLAN.md` — exhaustive-first topology discovery. **Implemented**; kept
+   because its corrections record why several obvious-looking choices are wrong.
+4. `docs/WEB_UI_PLAN.md` — the next task (phase 6, web UI). **Draft awaiting approval.**
 
 Update these when decisions change.
 

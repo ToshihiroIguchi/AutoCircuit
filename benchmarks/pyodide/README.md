@@ -52,16 +52,49 @@ What this settles for phase 6:
 - **Cold start to the first fit is about 4 s**: 1.2 s boot, 1.1 s numpy/scipy from cache
   (2.2 s the first time, when the wheels are fetched), 1.6 s importing the package. That needs
   a loading state, not an architecture.
-- **`exhaustive_limit=4` is the right web default, and it is 2.8 minutes**, not seconds. So
-  progress streaming through the existing `on_progress` callback is not a nicety, it is
-  required; and the CLI's 8-worker parity is not available, so the browser is doing what a
-  single core does.
+- **`exhaustive_limit=4` is the right web default, and it is 2.8 minutes** single-threaded, or
+  roughly 1.5 min across a four-worker pool (see below). Not seconds either way, so progress
+  streaming through the existing `on_progress` callback is required, not a nicety.
 - **`exhaustive_limit=5` is not a default.** The same search over 6,598 candidates costs ~22
-  min single-core on CPython, so ~30 min here. It stays available as an explicit choice.
+  min single-core on CPython, so ~30 min here, and a worker pool only takes that to ~12 min.
+  It stays available as an explicit choice.
 - **The fitter does not need a separate web budget.** `restarts=5, popsize=20` and the
   `8×40` screen run 1.3–1.6× slower and are otherwise unchanged, and the screening budget is
   already known to have no headroom (`benchmarks/README.md`, `screen-rank`). Cutting it for the
   browser would trade the answer for the clock in exactly the way that experiment measured.
+
+## Does it scale across Web Workers?
+
+The browser has no `multiprocessing`, so the CLI's `--workers` has no direct analogue — but it
+does have Web Workers, and each can hold its own Pyodide instance. Screening is embarrassingly
+parallel and `core/discover.py`'s tier-1 worker already takes a circuit string and re-parses
+it, so nothing but strings and arrays would have to cross the boundary. Whether that actually
+buys anything decides what the web UI can offer.
+
+```powershell
+node benchmarks/pyodide/run_workers.mjs src.zip "1,2,4,6,8"
+```
+
+Screening the whole capacitor n ≤ 4 space (741 candidates) on a 12-core machine, one Pyodide
+instance per Node worker thread — the same isolation shape as a browser worker:
+
+| workers | start-up | screen | speed-up |
+|--------:|---------:|-------:|---------:|
+| 1 | 4.7 s | 94 s | 1.00× |
+| 2 | 6.4 s | 59 s | 1.6× |
+| 4 | 9.3 s | 41 s | 2.3× |
+| 6 | 11.4 s | 37 s | 2.5× |
+| **8** | 13.5 s | **44 s** | **2.2×** |
+
+**Parallelism helps, but far less than on CPython, and it stops helping at about four
+workers.** Eight is slower than six. Treat the ratios as the *shape* rather than as precise
+figures: a repeat of the single-worker case came out 30% apart (94 s and 124 s) run to run, so
+these are single-run numbers with real error bars. The shape is clear enough to design
+against, and it is the opposite of the CLI's, where `--workers 8` is the main lever.
+
+Start-up grows roughly 1.5 s per worker, since each instance loads its own copy of numpy and
+scipy. Four workers cost ~9 s of start-up to save ~50 s of screening on this workload, so the
+pool is worth having but wants creating once and keeping.
 
 `src.zip` is a build artifact (gitignored); `make_zip.py` regenerates it. It exists because
 PowerShell's `Compress-Archive` writes backslash separators that Python's `zipfile` unpacks

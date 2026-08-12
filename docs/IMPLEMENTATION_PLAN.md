@@ -358,6 +358,9 @@ return a common `Spectrum` (f [Hz], Z [complex], metadata). Export: CSV and ZVie
 
 ## 9. Web application (after CLI is solid)
 
+> Superseded in detail by **`docs/WEB_UI_PLAN.md`** (draft awaiting approval), which is built
+> on the measurements below rather than on the estimates this section originally carried.
+
 - **Static site** (deployable on GitHub Pages): Vite + TypeScript + React; the Python core
   wheel runs in **Pyodide inside a Web Worker** (UI never blocks; progress messages stream
   from the worker). No server.

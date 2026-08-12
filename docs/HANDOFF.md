@@ -218,7 +218,12 @@ all three of which needed measurement to get right (§5.2 of the plan).
    it, and the small sizes are the cheapest fits), while raising `exhaustive_min` deliberately
    clears `complete_up_to` — "all topologies up to N" is not true when the smaller sizes were
    skipped. `exhaustive_min` stays available to anyone who wants that trade explicitly.
-1. Web UI (phase 6) — the biggest remaining piece; see `docs/IMPLEMENTATION_PLAN.md` §9.
+1. **Web UI (phase 6)** — the biggest remaining piece. `docs/WEB_UI_PLAN.md` is a **draft
+   awaiting approval**, written on the Pyodide measurements rather than on guesses. It carries
+   one genuinely open design question that wants a prototype, not a decision on paper: whether
+   the browser fans the tier-1 screen out from JavaScript (which moves the per-size shortlist
+   quota that gate G1 depends on into untested JS) or keeps orchestration in Python and calls
+   back into JS per chunk. Start there.
 2. ngspice round-trip in CI. The test suite already proves the netlist is *electrically*
    right via its own nodal-analysis engine (`tests/test_spice.py`); a real simulator would
    also prove it is *dialect* right.
