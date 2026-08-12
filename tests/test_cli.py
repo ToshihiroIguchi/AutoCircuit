@@ -234,6 +234,49 @@ def test_discover_with_an_invalid_mode_exits_non_zero(tmp_path: Path) -> None:
         main(["discover", str(data), "--mode", "bogus"] + _DISCOVER_KWARGS)
 
 
+def test_discover_with_skeleton_prints_the_pre_run_arithmetic_and_named_coverage(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``--skeleton`` prints the size-to-limit arithmetic before the search runs (a total
+    element count is not what a user thinking in "elements I'm adding" expects), and the
+    coverage line that follows the search must name the skeleton -- an unconstrained-looking
+    "Coverage:" line under a skeleton run would be exactly the misleading report
+    docs/PARTIAL_TOPOLOGY_PLAN.md section 3 warns about.
+    """
+    data = _simulate_discover_csv(tmp_path)
+
+    rc = main(
+        ["discover", str(data), "--mode", "exhaustive", "--skeleton", "R1-C1"]
+        + _DISCOVER_KWARGS
+    )
+    assert rc == 0
+
+    out = capsys.readouterr().out
+    assert "Skeleton" in out
+    assert "i.e. up to" in out
+    assert "that contains R1-C1" in out
+
+
+def test_discover_json_report_with_skeleton_has_skeleton_and_named_coverage(
+    tmp_path: Path,
+) -> None:
+    data = _simulate_discover_csv(tmp_path)
+    report_path = tmp_path / "discover_skeleton.json"
+
+    rc = main(
+        [
+            "discover", str(data), "--mode", "exhaustive", "--skeleton", "R1-C1",
+            "--json", str(report_path),
+        ]
+        + _DISCOVER_KWARGS
+    )
+    assert rc == 0
+
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["skeleton"] == "R1-C1"
+    assert "that contains" in report["coverage"]
+
+
 # =============================================================================================
 # Error handling
 # =============================================================================================

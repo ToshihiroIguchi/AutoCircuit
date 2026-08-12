@@ -21,6 +21,7 @@ from autocircuit.core.enumerate import (
     contains_skeleton,
     enumerate_topologies,
     grow_from_skeleton,
+    grow_up_to,
     is_plausible_node,
 )
 
@@ -240,3 +241,67 @@ def test_a_smaller_topology_does_not_contain_a_larger_one() -> None:
     small = Circuit.parse("R1").root
     large = Circuit.parse("R1-C1").root
     assert contains_skeleton(small, large) is False
+
+
+# =============================================================================================
+# 7. grow_up_to -- the level-by-level closure
+# =============================================================================================
+
+
+def test_grow_up_to_yields_levels_matching_grow_from_skeleton() -> None:
+    """This is the core contract: the incremental driver must not be a second, different
+    enumeration. discover() (docs/PARTIAL_TOPOLOGY_PLAN.md) relies on ``grow_up_to`` to stop
+    between levels rather than call ``grow_from_skeleton`` once per size, so if the two ever
+    disagreed on what a level *is*, the search would silently cover a different space than
+    ``grow_from_skeleton`` -- and the two files' exact-count tables above -- describe.
+    """
+    skeleton = Circuit.parse("R1-C1-L1").root
+    pool = ("R", "C", "L")
+    levels = list(grow_up_to(skeleton, pool, 5))
+    assert [n for n, _ in levels] == [3, 4, 5]
+    for n, level in levels:
+        got = {canonical_form(node) for node in level}
+        expected = {canonical_form(node) for node in grow_from_skeleton(skeleton, pool, n)}
+        assert got == expected
+
+
+def test_grow_up_to_max_frontier_stops_early_without_truncating_a_level() -> None:
+    """A completeness claim may only rest on whole levels; a clamp that truncated a level in
+    place would silently turn a complete claim into a false one. ``max_frontier`` must abort
+    *between* levels, so every level this function ever yields stays a genuine subset of the
+    unbounded run -- never a partial, cheaper approximation of one.
+    """
+    skeleton = Circuit.parse("R1-C1-L1").root
+    pool = ("R", "C", "L")
+    full = list(grow_up_to(skeleton, pool, 5))
+    clamped = list(grow_up_to(skeleton, pool, 5, max_frontier=50))
+
+    assert len(clamped) < len(full), "fixture assumes max_frontier=50 actually cuts the run short"
+    assert [n for n, _ in clamped] == [n for n, _ in full[: len(clamped)]]
+    for n, level in clamped:
+        got = {canonical_form(node) for node in level}
+        expected = {canonical_form(node) for node in grow_from_skeleton(skeleton, pool, n)}
+        assert got == expected
+
+
+def test_grow_up_to_n_max_below_skeleton_size_yields_nothing() -> None:
+    skeleton = Circuit.parse("R1-C1-L1").root
+    assert list(grow_up_to(skeleton, ("R", "C", "L"), 2)) == []
+
+
+@pytest.mark.parametrize("skeleton_text", ["R1-R2", "p(R1,R2)"])
+def test_grow_up_to_redundant_skeleton_raises_value_error_eagerly(skeleton_text: str) -> None:
+    # Not wrapped in list()/next(): the call itself must raise, matching
+    # test_redundant_skeleton_raises_value_error above for grow_from_skeleton.
+    skeleton = Circuit.parse(skeleton_text).root
+    with pytest.raises(ValueError) as excinfo:
+        grow_up_to(skeleton, ("R", "C"), 3)
+    assert "R" in str(excinfo.value)
+    assert "reduces to" in str(excinfo.value)
+
+
+def test_grow_up_to_unknown_element_code_in_pool_raises_key_error_eagerly() -> None:
+    # Not wrapped in list()/next(): the call itself must raise.
+    skeleton = Circuit.parse("R1").root
+    with pytest.raises(KeyError):
+        grow_up_to(skeleton, ("Q",), 2)

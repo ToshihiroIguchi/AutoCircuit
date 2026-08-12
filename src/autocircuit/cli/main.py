@@ -18,7 +18,7 @@ import numpy as np
 
 from autocircuit import __version__
 from autocircuit.core.circuit import Circuit
-from autocircuit.core.discover import discover
+from autocircuit.core.discover import discover, exhaustive_limit_for
 from autocircuit.core.drt import DRTResult, drt
 from autocircuit.core.elements import (
     COMPONENT_POOL,
@@ -199,6 +199,27 @@ def _progress_reporter() -> Callable[[int, int, str | None], None]:
     return on_progress
 
 
+def _skeleton_plan(skeleton: str, exhaustive_limit: int | None, max_candidates: int) -> str:
+    """State the arithmetic of a skeleton run before it starts.
+
+    ``--exhaustive-limit`` is a *total* element count, which is not what a user with a
+    ten-element model asking "what am I missing?" is thinking in. Printing the subtraction
+    once is cheaper than a flag that means something different in each mode.
+    """
+    size = len(Circuit.parse(skeleton).leaves)
+    limit = exhaustive_limit_for(size, exhaustive_limit)
+    return "\n".join(
+        [
+            f"Skeleton      : {skeleton} ({size} elements, asserted -- the search adds to it "
+            "and never removes from it)",
+            f"Totals        : {size} to {limit} elements, i.e. up to {limit - size} added",
+            f"                stopping sooner if a level would pass --max-candidates "
+            f"({max_candidates});",
+            "                the coverage line in the report says where it actually stopped",
+        ]
+    )
+
+
 def cmd_discover(args: argparse.Namespace) -> int:
     spectrum = _load(args)
     print(_describe(spectrum))
@@ -210,9 +231,14 @@ def cmd_discover(args: argparse.Namespace) -> int:
     if unknown:
         raise SystemExit(f"error: unknown element codes in pool: {', '.join(unknown)}")
 
+    if args.skeleton:
+        print(_skeleton_plan(args.skeleton, args.exhaustive_limit, args.max_candidates))
+        print()
+
     result = discover(
         spectrum,
         pool=pool,
+        skeleton=args.skeleton,
         mode=args.mode,
         exhaustive_limit=args.exhaustive_limit,
         max_candidates=args.max_candidates,
@@ -243,7 +269,9 @@ def cmd_discover(args: argparse.Namespace) -> int:
         payload = {
             "pool": list(result.pool),
             "mode": result.mode,
+            "skeleton": result.skeleton,
             "complete_up_to": result.complete_up_to,
+            "coverage": result.completeness(),
             "n_evaluated": result.n_evaluated,
             "generations": result.generations,
             "elapsed_s": result.elapsed_s,
@@ -472,8 +500,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     p_disc.add_argument(
-        "--exhaustive-limit", type=int, default=5,
-        help="largest element count to enumerate",
+        "--skeleton", metavar="CIRCUIT",
+        help="assert part of the circuit and search only topologies that contain it, e.g. "
+        "'C1-R1-L1'; elements are added to it and never removed, --pool then governs the "
+        "added elements only, and the report says so wherever it states what was covered",
+    )
+    p_disc.add_argument(
+        "--exhaustive-limit", type=int, default=None,
+        help="largest *total* element count to enumerate (default 5, or the skeleton's own "
+        "size plus 5 when --skeleton is given; either way a level that would pass "
+        "--max-candidates is dropped and the reported coverage falls with it)",
     )
     p_disc.add_argument(
         "--max-candidates", type=int, default=20000,

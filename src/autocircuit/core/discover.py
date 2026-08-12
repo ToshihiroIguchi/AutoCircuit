@@ -27,7 +27,7 @@ import math
 import multiprocessing
 import multiprocessing.pool
 import time
-from collections.abc import Callable, Generator, Iterator, Sequence
+from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, NamedTuple
 
@@ -51,7 +51,9 @@ from .elements import DEFAULT_POOL
 from .enumerate import (
     DEFAULT_DEGENERACY_BUDGET,
     EndpointBehaviour,
+    contains_skeleton,
     enumerate_topologies,
+    grow_up_to,
     is_feasible,
     # The structural plausibility filter now lives with the enumerator, which is what applies
     # it in bulk; it is re-exported here because it was this module's public surface first.
@@ -134,6 +136,34 @@ EQUIVALENCE_RTOL = 1e-6
 #: "as well as" the best one, and is then preferred if it is simpler.
 PARSIMONY_CHI2_FACTOR = 2.0
 
+#: Largest element count the exhaustive stage enumerates when the caller names no limit.
+DEFAULT_EXHAUSTIVE_LIMIT = 5
+
+#: How many elements a skeleton run reaches for beyond the skeleton itself, by default.
+#:
+#: This is a *reach*, not a budget, and the difference is the whole point. [measured,
+#: docs/PARTIAL_TOPOLOGY_PLAN.md section 4.1] A fixed offset used as the limit would be wrong
+#: in both directions: +2 is the affordable ceiling for a ten-element skeleton (11,418
+#: candidates) while a three-element one reaches +3 comfortably (9,857). What varies is the
+#: skeleton's shape, not a number anyone can pick in advance -- so the run simply reaches high
+#: and lets ``max_candidates`` and the frontier clamp stop it where the space actually gets
+#: expensive, reporting where that was through :attr:`DiscoveryResult.complete_up_to`.
+SKELETON_REACH = 5
+
+#: How much larger than ``max_candidates`` a skeleton's frontier may grow before growth stops.
+#:
+#: [measured] The frontier holds every grown tree; the level holds only those that survive
+#: simplification and the plausibility rules, and the ratio between them rises level by level --
+#: 1.3, 1.6, 1.9 at +1, +2, +3 from ``C1-R1-L1`` on the component pool, and 1.5, 2.4, 3.9 from
+#: ``R1-C1-L1`` on R,C,L. Bounding the frontier at ``max_candidates`` itself would therefore
+#: stop short of the budget it exists to enforce: six elements from ``C1-R1-L1`` is 9,857
+#: candidates grown from a frontier of 18,682, so a run allowed 20,000 candidates would lose
+#: the level that brings six elements into range at all -- and it is the first level a
+#: skeleton makes affordable that an unconstrained search never could (section 1 of
+#: docs/PARTIAL_TOPOLOGY_PLAN.md). Four covers the measured ratios with room to spare while
+#: still stopping the 40-70x jump to the next level.
+FRONTIER_HEADROOM = 4
+
 
 @dataclass
 class Candidate:
@@ -189,6 +219,13 @@ class DiscoveryResult:
     every plausible topology with up to five elements from this pool was fitted, so a
     topology absent from the report is absent because it does not fit -- not because the
     search happened to miss it. The genetic search can never set this.
+    """
+    skeleton: str | None = None
+    """The circuit the user asserted, when the search was constrained to contain it.
+
+    Its presence narrows every claim this object makes, which is why it is stored beside them
+    rather than left with the caller: nothing outside the skeleton was evaluated, so nothing
+    in the report is evidence for or against it. See :meth:`completeness`.
     """
 
     @property
@@ -253,11 +290,33 @@ class DiscoveryResult:
         ]
 
     def completeness(self) -> str:
-        """One line stating exactly how much of the topology space was covered."""
+        """Exactly how much of the topology space was covered, and of *which* space.
+
+        Under a skeleton the unconstrained sentence is simply false: "every plausible
+        topology with up to N elements" was not evaluated, only the ones containing the
+        skeleton were. The claim is still a completeness claim and a more useful one inside
+        its own space, but it is a different one, and the difference goes on the same line
+        rather than into a footnote -- a reader who skims past the constraint has been misled
+        by a true sentence, which is this mode's central risk
+        (docs/PARTIAL_TOPOLOGY_PLAN.md sections 3.1 and 7).
+        """
         if self.complete_up_to is None or self.complete_up_to < 1:
+            if self.skeleton is not None:
+                return (
+                    "Coverage: sampled, not exhaustive, and restricted to topologies "
+                    f"containing {self.skeleton} -- absence from this report is not evidence "
+                    "against a topology."
+                )
             return (
                 "Coverage: sampled, not exhaustive -- absence from this report is not "
                 "evidence against a topology."
+            )
+        if self.skeleton is not None:
+            return (
+                f"Coverage: every plausible topology with up to {self.complete_up_to} "
+                f"elements that contains {self.skeleton} was evaluated, with the added "
+                "elements taken from this pool. Topologies without that skeleton were never "
+                "considered, so this report is not evidence against them."
             )
         return (
             f"Coverage: every plausible topology with up to {self.complete_up_to} elements "
@@ -271,6 +330,10 @@ class DiscoveryResult:
         lines = [
             f"Evaluated {self.n_evaluated} distinct topologies {scope} (mode: {self.mode})",
             f"Element pool: {', '.join(self.pool)}",
+        ]
+        if self.skeleton is not None:
+            lines.append(f"Skeleton     : {self.skeleton} (asserted by you, not discovered)")
+        lines += [
             self.completeness(),
             "",
             "Pareto front (accuracy versus complexity):",
@@ -494,8 +557,9 @@ def discover(
     spectrum: Spectrum,
     *,
     pool: Sequence[str] = DEFAULT_POOL,
+    skeleton: str | None = None,
     mode: Mode = "auto",
-    exhaustive_limit: int = 5,
+    exhaustive_limit: int | None = None,
     exhaustive_min: int = 1,
     max_candidates: int = 20_000,
     feasibility_filter: bool = True,
@@ -531,15 +595,32 @@ def discover(
       residuals -- a runs test on the residual signs, the same criterion the Kramers-Kronig
       validator uses. Data that is already explained does not pay for a second search.
 
+    ``skeleton`` narrows the space to the topologies that contain a circuit the caller
+    asserts, which is a much sharper instrument than restricting the pool: [measured] at five
+    elements from the component pool, ``C1-R1-L1`` cuts 10,214 candidates to 601. It is also
+    the only argument here that can remove the right answer while leaving the report looking
+    healthy, so what the result is allowed to claim changes with it -- see
+    :meth:`DiscoveryResult.completeness` and docs/PARTIAL_TOPOLOGY_PLAN.md section 3.
+
     Args:
         spectrum: The measured data.
         pool: Element codes the search may use. Restricting this is the main way to inject
             physical knowledge -- e.g. ``("R", "C", "L", "CPE", "SKINF")`` for components.
+        skeleton: A circuit every candidate must contain, e.g. ``"C1-R1-L1"``. The search
+            adds elements to it and never removes them, so it is an assertion rather than a
+            finding. ``pool`` governs the *added* elements only: the skeleton may use codes
+            outside it. Containment is deletion-and-collapse, not subtree matching
+            (:func:`~autocircuit.core.enumerate.contains_skeleton`). Only the exhaustive
+            stage can honour it, so ``mode="evolve"`` with a skeleton is an error and
+            ``mode="auto"`` runs the exhaustive stage alone.
         mode: ``auto``, ``exhaustive`` or ``evolve`` (see above).
-        exhaustive_limit: Largest element count to enumerate exhaustively. Clamped down
-            automatically when a level would push the candidate count past
-            ``max_candidates``; the resulting coverage is reported as
-            :attr:`DiscoveryResult.complete_up_to`, never silently.
+        exhaustive_limit: Largest *total* element count to enumerate exhaustively -- with a
+            skeleton too, so a limit below the skeleton's own size is an error rather than an
+            empty result. Clamped down automatically when a level would push the candidate
+            count past ``max_candidates``; the resulting coverage is reported as
+            :attr:`DiscoveryResult.complete_up_to`, never silently. Defaults to
+            :data:`DEFAULT_EXHAUSTIVE_LIMIT`, or to the skeleton's size plus
+            :data:`SKELETON_REACH` when one is given.
         exhaustive_min: Smallest element count to enumerate. Raise it only with an
             independent reason to believe the model is at least that big.
         max_candidates: Ceiling on how many topologies the exhaustive stage may screen.
@@ -564,7 +645,9 @@ def discover(
             per-mode default.
         time_limit: Wall-clock budget in seconds; the search stops cleanly when exceeded.
         seeds: Optional circuit strings to inject into the initial population, for example
-            textbook models worth testing alongside the evolved ones.
+            textbook models worth testing alongside the evolved ones. Under a skeleton every
+            seed must contain it, since a seed is a hint that adds to the candidate list while
+            a skeleton is a constraint on what that list may hold.
 
     Returns:
         A :class:`DiscoveryResult` holding every distinct topology evaluated, the
@@ -575,6 +658,28 @@ def discover(
     started = time.perf_counter()
     codes = tuple(pool)
     refine = REFINE_DEFAULT[mode] if n_refine is None else n_refine
+    frame = None if skeleton is None else Circuit.parse(skeleton)
+
+    if frame is not None and mode == "evolve":
+        raise ValueError(
+            "mode='evolve' cannot honour a skeleton: its mutation operator deletes and "
+            "retypes elements, so the population is not confined to circuits containing "
+            "one. Use mode='exhaustive'."
+        )
+    if frame is not None:
+        # A seed is a hint that adds a circuit to the candidate list; a skeleton is a
+        # constraint on what the list may contain. Asking for both is contradictory when the
+        # seed does not satisfy the constraint, and the harm is not hypothetical: the seed
+        # could be recommended, under a coverage line saying only topologies containing the
+        # skeleton were considered. Refuse before anything is fitted rather than choose for
+        # the user which of their two instructions to drop.
+        for text in seeds or ():
+            if not contains_skeleton(Circuit.parse(text).root, frame.root):
+                raise ValueError(
+                    f"seed circuit {text!r} does not contain the skeleton {skeleton!r}, so it "
+                    "cannot be evaluated under it. Drop one of the two."
+                )
+    limit = exhaustive_limit_for(None if frame is None else len(frame.leaves), exhaustive_limit)
 
     if mode == "evolve":
         return _evolve(
@@ -600,7 +705,11 @@ def discover(
     candidates, complete_up_to, n_screened = _exhaustive(
         spectrum,
         pool=codes,
-        limit=min(exhaustive_limit, max_elements),
+        skeleton=None if frame is None else frame.root,
+        # ``max_elements`` caps the genetic search, which never runs under a skeleton, so
+        # letting it clamp the enumeration there would silently cut a ten-element skeleton
+        # off below its own size.
+        limit=limit if frame is not None else min(limit, max_elements),
         floor=max(1, exhaustive_min),
         max_candidates=max_candidates,
         feasibility_filter=feasibility_filter,
@@ -617,7 +726,15 @@ def discover(
     )
     generations_run = 0
 
-    if mode == "auto" and _is_underfitted(candidates) and max_elements > (complete_up_to or 0):
+    # The genetic fallback is skipped under a skeleton rather than filtered: its operators can
+    # delete the asserted elements, and a report that mixed constrained and unconstrained
+    # candidates could not state which space it had covered.
+    if (
+        mode == "auto"
+        and frame is None
+        and _is_underfitted(candidates)
+        and max_elements > (complete_up_to or 0)
+    ):
         remaining = None if time_limit is None else time_limit - (time.perf_counter() - started)
         if remaining is None or remaining > 0.0:
             evolved = _evolve(
@@ -653,7 +770,27 @@ def discover(
         pool=codes,
         mode=mode,
         complete_up_to=complete_up_to,
+        skeleton=None if frame is None else frame.to_string(),
     )
+
+
+def exhaustive_limit_for(skeleton_size: int | None, requested: int | None) -> int:
+    """Resolve ``exhaustive_limit`` into a total element count, defaults included.
+
+    Split out because the CLI has to print the arithmetic before the search starts -- a total
+    is not what a user with a ten-element skeleton is thinking in -- and a second copy of the
+    default would be a second thing to get wrong.
+    """
+    if skeleton_size is None:
+        return DEFAULT_EXHAUSTIVE_LIMIT if requested is None else requested
+    limit = skeleton_size + SKELETON_REACH if requested is None else requested
+    if limit < skeleton_size:
+        raise ValueError(
+            f"exhaustive_limit={limit} is below the skeleton's own {skeleton_size} elements, "
+            "so nothing could be evaluated. It is a total element count, not a count of "
+            f"added ones: pass {skeleton_size + 1} to allow one added element."
+        )
+    return limit
 
 
 def _is_underfitted(candidates: Sequence[Candidate]) -> bool:
@@ -752,6 +889,7 @@ def _exhaustive(
     spectrum: Spectrum,
     *,
     pool: tuple[str, ...],
+    skeleton: Node | None,
     limit: int,
     floor: int,
     max_candidates: int,
@@ -772,14 +910,27 @@ def _exhaustive(
         EndpointBehaviour.from_spectrum(spectrum) if feasibility_filter else None
     )
 
+    # Both level sources yield whole element counts in ascending order; the constrained one
+    # grows the skeleton outwards and stops itself before materialising a level too large to
+    # hold, which is the limit that binds first (docs/PARTIAL_TOPOLOGY_PLAN.md section 4.1).
+    levels: Iterable[tuple[int, Iterable[Node]]]
+    if skeleton is None:
+        levels = ((n, enumerate_topologies(pool, n)) for n in range(floor, limit + 1))
+    else:
+        levels = grow_up_to(
+            skeleton, pool, limit, max_frontier=max_candidates * FRONTIER_HEADROOM
+        )
+
     texts: list[str] = []
     # (element count, how many topologies have been queued once that level is complete), used
     # to work out afterwards how far the coverage really got if the screen ran out of time.
     boundaries: list[tuple[int, int]] = []
-    for n in range(floor, limit + 1):
+    for n, nodes in levels:
+        if n < floor:
+            continue
         level: list[str] = []
         overflowed = False
-        for node in enumerate_topologies(pool, n):
+        for node in nodes:
             if behaviour is not None and not is_feasible(
                 node, behaviour, budget=feasibility_budget
             ):
@@ -824,7 +975,9 @@ def _exhaustive(
         )
     # Topologies are screened in size order, so a truncated screen still covers whole levels.
     # Starting above one element forfeits the claim entirely: "all topologies up to N" is only
-    # true when the smaller sizes were looked at too.
+    # true when the smaller sizes were looked at too. A skeleton is not such a start, even
+    # though its levels begin at its own size: no topology smaller than the skeleton can
+    # contain it, so the sizes below it are empty rather than skipped.
     complete_up_to = (
         next((n for n, end in reversed(boundaries) if end <= len(scored)), None)
         if floor == 1

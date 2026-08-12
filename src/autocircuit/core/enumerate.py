@@ -64,6 +64,7 @@ __all__ = [
     "enumerate_up_to",
     "feasible_topologies",
     "grow_from_skeleton",
+    "grow_up_to",
     "integer_partitions",
     "is_feasible",
     "is_plausible",
@@ -354,6 +355,14 @@ def grow_from_skeleton(skeleton: Node, pool: Sequence[str], n: int) -> Iterator[
     element code or a redundant skeleton raises here, not on the first ``next``.
     """
     codes = _normalise_pool(pool)
+    size = _skeleton_size(skeleton)
+    if n < size:
+        return iter(())
+    return _grow(skeleton, codes, size, n)
+
+
+def _skeleton_size(skeleton: Node) -> int:
+    """Element count of a skeleton, rejecting one that ``simplify`` would collapse."""
     size = count_elements(skeleton)
     if count_elements(simplify(skeleton)) != size:
         raise ValueError(
@@ -361,24 +370,102 @@ def grow_from_skeleton(skeleton: Node, pool: Sequence[str], n: int) -> Iterator[
             f"({canonical_form(skeleton)} reduces to {canonical_form(simplify(skeleton))}). "
             "State the circuit it actually describes instead."
         )
-    if n < size:
-        return iter(())
-    return _grow(skeleton, codes, size, n)
+    return size
+
+
+def _grow_one_level(
+    frontier: dict[str, Node], codes: tuple[str, ...], max_frontier: int | None
+) -> dict[str, Node] | None:
+    """One insertion step over a whole frontier; ``None`` if it exceeds ``max_frontier``.
+
+    The size check is made *while* the level is built, not after it, which is the only place
+    it can be made safely: each level is 40-70x the one before it, so a frontier discovered to
+    be over budget after the fact has already cost the memory that the budget existed to
+    protect.
+    """
+    grown: dict[str, Node] = {}
+    for node in frontier.values():
+        for candidate in _insertions(node, codes):
+            grown.setdefault(canonical_form(candidate), candidate)
+            if max_frontier is not None and len(grown) > max_frontier:
+                return None
+    return grown
 
 
 def _grow(skeleton: Node, codes: tuple[str, ...], size: int, n: int) -> Iterator[Node]:
     """The insertion closure itself; see :func:`grow_from_skeleton` for the contract."""
     frontier: dict[str, Node] = {canonical_form(skeleton): skeleton}
     for _ in range(n - size):
-        grown: dict[str, Node] = {}
-        for node in frontier.values():
-            for candidate in _insertions(node, codes):
-                grown.setdefault(canonical_form(candidate), candidate)
+        grown = _grow_one_level(frontier, codes, None)
+        assert grown is not None  # unbounded growth never reports an overflow
         frontier = grown
     for node in frontier.values():
         reduced = _survives(node, n)
         if reduced is not None:
             yield reduced
+
+
+def grow_up_to(
+    skeleton: Node,
+    pool: Sequence[str],
+    n_max: int,
+    *,
+    max_frontier: int | None = None,
+) -> Iterator[tuple[int, list[Node]]]:
+    """Grow ``skeleton`` one element at a time, yielding each whole level as it is reached.
+
+    Args:
+        skeleton: As :func:`grow_from_skeleton`.
+        pool: Element codes the *added* elements may use.
+        n_max: Largest total element count to reach for.
+        max_frontier: Stop before completing any level that would hold more than this many
+            trees. ``None`` means unbounded.
+
+    Yields:
+        ``(n, topologies)`` for each total element count from the skeleton's own size upwards,
+        smallest first. Each list is a complete level -- the same set
+        :func:`grow_from_skeleton` returns for that ``n`` -- so a caller that stops partway
+        through still knows exactly which sizes it covered in full.
+
+    Calling :func:`grow_from_skeleton` once per size instead would recompute the whole
+    insertion closure each time, and -- more importantly -- would give the caller no way to
+    stop before an unaffordable level is *built*. [measured, docs/PARTIAL_TOPOLOGY_PLAN.md
+    section 1.1] Growing a ten-element skeleton costs 167 candidates at +1, 11,418 at +2 and
+    521,438 at +3, and enumeration memory runs out before compute time does. A budget check
+    made after materialising a level is a budget check made too late, so ``max_frontier``
+    aborts a level while it is being built and simply ends the iteration: the levels already
+    yielded remain complete, which is what a completeness claim is allowed to rest on.
+    """
+    codes = _normalise_pool(pool)
+    size = _skeleton_size(skeleton)
+    if n_max < size:
+        return iter(())
+    return _grow_levels(skeleton, codes, size, n_max, max_frontier)
+
+
+def _grow_levels(
+    skeleton: Node,
+    codes: tuple[str, ...],
+    size: int,
+    n_max: int,
+    max_frontier: int | None,
+) -> Iterator[tuple[int, list[Node]]]:
+    """The level-by-level closure; see :func:`grow_up_to` for the contract."""
+    frontier: dict[str, Node] = {canonical_form(skeleton): skeleton}
+    n = size
+    while True:
+        level = [
+            reduced
+            for reduced in (_survives(node, n) for node in frontier.values())
+            if reduced is not None
+        ]
+        yield n, level
+        if n >= n_max:
+            return
+        grown = _grow_one_level(frontier, codes, max_frontier)
+        if grown is None:
+            return
+        frontier, n = grown, n + 1
 
 
 # -- Structural feasibility filter ---------------------------------------------------------

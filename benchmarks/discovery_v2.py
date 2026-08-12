@@ -1,6 +1,6 @@
 """Does exhaustive-first discovery actually work, and what does it cost?
 
-Three measurements, selected by the first command-line argument:
+Five measurements, selected by the first command-line argument:
 
 ``gate``
     Acceptance gate **G1** of ``docs/DISCOVERY_V2_PLAN.md``: on each reference spectrum,
@@ -12,6 +12,13 @@ Three measurements, selected by the first command-line argument:
     part that matters -- whether the truth survives it. This is the number quoted in
     ``benchmarks/README.md``; section 3.2 of the plan guessed at it, so it is measured here
     rather than assumed.
+
+``skeleton``
+    Acceptance gate **P1** of ``docs/PARTIAL_TOPOLOGY_PLAN.md``: with the *true* skeleton
+    asserted, ``discover(skeleton=...)`` must still report the truth or an exact equivalent,
+    on every reference and every seed. Recovery is the gate. The speed-up over the
+    unconstrained run (``--compare``) is a recorded observation, not a target -- G1 records
+    what happens when a time target is chased.
 
 ``screen``
     Tuning evidence for the tier-1 screening budget: for a range of (popsize, maxiter)
@@ -38,6 +45,7 @@ Run with the package on the path (it is not pip-installed on the dev machine)::
     python benchmarks/discovery_v2.py screen
     python benchmarks/discovery_v2.py screen-rank --workers 8
     python benchmarks/discovery_v2.py gate --workers 8
+    python benchmarks/discovery_v2.py skeleton --workers 8 --compare
 
 ``gate`` and ``screen-rank`` are the slow ones: both fit every plausible topology up to five
 elements, several times over. Use ``--seeds 1`` and ``--limit 4`` for a sanity run.
@@ -71,6 +79,7 @@ from autocircuit.core.discover import (
 )
 from autocircuit.core.enumerate import (
     EndpointBehaviour,
+    contains_skeleton,
     enumerate_topologies,
     is_feasible,
 )
@@ -95,6 +104,12 @@ class Reference:
     #: gate G3 uses (``tests/test_feasibility.py``): a screening budget that keeps the truth but
     #: drops its equivalents has quietly destroyed the equivalence-class report.
     equivalents: tuple[str, ...] = ()
+    #: A *true* skeleton for this reference: the part of the circuit a user of this kind of
+    #: sample would already know, and which the truth really does contain. Gate P1 asserts it
+    #: and checks the truth still comes back. Each one is a claim someone would actually make
+    #: -- a capacitor's C with its ESR and ESL, one relaxation of a two-block dielectric, the
+    #: electrolyte resistance and double layer of a cell -- not a sub-circuit chosen to be easy.
+    skeleton: str = ""
 
     def spectrum(self, seed: int = 0, noise: float | None = None) -> Spectrum:
         return simulate(
@@ -122,6 +137,7 @@ REFERENCES = [
         ("R", "C", "L", "CPE", "SKINF"),
         1e2,
         1e9,
+        skeleton="C1-R1-L1",
     ),
     Reference(
         "Maxwell-Wagner (two blocks)",
@@ -131,6 +147,7 @@ REFERENCES = [
         1e-1,
         1e7,
         equivalents=("p(R1-C1,R2,C2)", "p(p(R1,C1)-C2,R2)", "p(p(R1,C1)-R2,C2)"),
+        skeleton="p(R1,C1)",
     ),
     Reference(
         "Randles (with Warburg)",
@@ -139,6 +156,7 @@ REFERENCES = [
         ("R", "C", "CPE", "W"),
         1e-2,
         1e5,
+        skeleton="R1-p(C1,R2)",
     ),
 ]
 
@@ -218,6 +236,94 @@ def report_gate(seeds: int, limit: int, workers: int) -> None:
             f" it is the recommendation: {recommended_count}/{seeds};"
             f" mean {elapsed_total / max(seeds, 1) / 60:.1f} min"
         )
+
+
+def report_skeleton(seeds: int, limit: int, workers: int, compare: bool) -> None:
+    """Gate P1: assert the true skeleton and check the truth survives the constraint.
+
+    The failure this is watching for is not "the search got slower answers". It is that a
+    skeleton *removes* topologies from the space, so an asserted skeleton that the truth does
+    contain must leave the truth reachable -- and if the enumeration or the growth had a hole
+    in it, the report would still come back looking healthy, ranked front and all, exactly the
+    shape of every trap this project has already measured.
+    """
+    print("=" * 92)
+    print("P1: with the TRUE skeleton asserted, is the truth still reported?")
+    print("=" * 92)
+    for reference in REFERENCES:
+        if not reference.skeleton:
+            continue
+        # A skeleton the truth does not contain would make the gate vacuous, so the fixture is
+        # checked against the same predicate that defines the space.
+        if not contains_skeleton(
+            Circuit.parse(reference.circuit).root, Circuit.parse(reference.skeleton).root
+        ):
+            raise SystemExit(
+                f"error: {reference.label}: {reference.circuit} does not contain the skeleton"
+                f" {reference.skeleton}; the fixture, not the search, is wrong"
+            )
+        print(
+            f"\n{reference.label}: {reference.circuit}   pool {','.join(reference.pool)}"
+            f"\n  skeleton {reference.skeleton}"
+        )
+        passes = on_front = 0
+        constrained_s = free_s = 0.0
+        constrained_n = free_n = 0
+        for seed in range(seeds):
+            data = reference.spectrum(seed)
+            started = time.perf_counter()
+            result = discover(
+                data,
+                pool=reference.pool,
+                skeleton=reference.skeleton,
+                mode="exhaustive",
+                exhaustive_limit=limit,
+                workers=workers,
+                seed=seed,
+            )
+            elapsed = time.perf_counter() - started
+            constrained_s += elapsed
+            constrained_n += result.n_evaluated
+            verdict = _truth_verdict(result, reference)
+            passes += int(verdict.reported)
+            on_front += int(verdict.on_front)
+            line = (
+                f"  seed {seed}: {'PASS' if verdict.reported else 'FAIL'}"
+                f"  on-front={verdict.on_front} recommended={verdict.is_recommendation}"
+                f"  complete<={result.complete_up_to}"
+                f"  screened={result.n_evaluated:,}  {elapsed / 60:.1f} min"
+                f"  -> {verdict.recommendation}"
+            )
+            if compare:
+                started = time.perf_counter()
+                free = discover(
+                    data,
+                    pool=reference.pool,
+                    mode="exhaustive",
+                    exhaustive_limit=limit,
+                    workers=workers,
+                    seed=seed,
+                )
+                free_s += time.perf_counter() - started
+                free_n += free.n_evaluated
+                line += f"  (unconstrained {free.n_evaluated:,} in {free_s / 60:.1f} min)"
+            print(line, flush=True)
+        summary = (
+            f"  ==> P1 (truth reported): {passes}/{seeds};"
+            f" on the Pareto front: {on_front}/{seeds};"
+            f" mean {constrained_s / max(seeds, 1) / 60:.1f} min"
+            f" over {constrained_n // max(seeds, 1):,} candidates"
+        )
+        if compare and constrained_s > 0.0 and constrained_n > 0:
+            summary += (
+                f"; {free_n / constrained_n:.1f}x fewer candidates and"
+                f" {free_s / constrained_s:.1f}x faster than unconstrained"
+            )
+        print(summary)
+    print(
+        "\nRecovery is the gate. The speed-up is an observation: tuning towards it is how the\n"
+        "screening budget nearly lost the Maxwell-Wagner truth (docs/HANDOFF.md section 3)."
+    )
 
 
 def report_filter() -> None:
@@ -453,15 +559,24 @@ def report_screen_rank(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("what", choices=["gate", "filter", "screen", "screen-rank"])
     parser.add_argument(
-        "--seeds", type=int, default=10, help="seeds per reference (gate, screen-rank)"
+        "what", choices=["gate", "skeleton", "filter", "screen", "screen-rank"]
     )
     parser.add_argument(
-        "--limit", type=int, default=5, help="exhaustive element limit (gate, screen-rank)"
+        "--seeds", type=int, default=10,
+        help="seeds per reference (gate, skeleton, screen-rank)",
     )
     parser.add_argument(
-        "--workers", type=int, default=1, help="screening processes (gate, screen-rank)"
+        "--limit", type=int, default=5,
+        help="exhaustive element limit (gate, skeleton, screen-rank)",
+    )
+    parser.add_argument(
+        "--workers", type=int, default=1,
+        help="screening processes (gate, skeleton, screen-rank)",
+    )
+    parser.add_argument(
+        "--compare", action="store_true",
+        help="skeleton: also run each reference unconstrained, to record the speed-up",
     )
     parser.add_argument("--sample", type=int, default=60, help="topologies sampled (screen)")
     parser.add_argument(
@@ -487,6 +602,8 @@ def main() -> None:
 
     if args.what == "gate":
         report_gate(args.seeds, args.limit, args.workers)
+    elif args.what == "skeleton":
+        report_skeleton(args.seeds, args.limit, args.workers, args.compare)
     elif args.what == "filter":
         report_filter()
     elif args.what == "screen":

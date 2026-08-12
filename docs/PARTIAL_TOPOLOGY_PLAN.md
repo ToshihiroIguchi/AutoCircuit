@@ -1,7 +1,7 @@
 # Partial Topology — Skeleton-Constrained Discovery
 
-Status: **step 1 (enumeration) is implemented and measured**; steps 2–5 are a draft for
-approval. Written 2026-08-12.
+Status: **steps 1–2 are implemented and measured** (enumeration, and the search wired to it);
+steps 3–5 are a draft for approval. Written 2026-08-12.
 Prerequisite reading: `docs/DISCOVERY_V2_PLAN.md` (especially the corrections in §3.2, §3.4 and
 §5.1 — this design repeats their shape), `docs/HANDOFF.md` §3, and `CLAUDE.md`'s three modes.
 
@@ -134,6 +134,12 @@ The `complete_up_to` arithmetic itself is unaffected: sizes below the skeleton's
 count contain nothing that contains the skeleton, so the level-by-level accounting still starts
 at 1 and `exhaustive_min` keeps its existing meaning.
 
+**Implemented.** Two details the draft had not spelled out, both decided the same way:
+`summary()` prints the skeleton on its own line above the coverage sentence, marked *asserted
+by you, not discovered*; and the `--json` report carries the whole `coverage` sentence beside
+`complete_up_to`, because a machine reader given only the integer would reconstruct exactly the
+unconstrained claim this section exists to prevent.
+
 ### 3.2 A wrong skeleton must be visible — and how visible is not yet measured
 
 **This is the gate the mode has to pass before it ships, and it has not been run.** The
@@ -230,6 +236,28 @@ keeps the frontier between levels and stops on the frontier size, not only on th
 
 CLI: `autocircuit discover data.csv --skeleton "C1-R1-L1" --pool component`.
 
+**Implemented, with three points the draft above left open.**
+
+- **The clamp aborts a level while it is being built, not after.** Stopping *on* the frontier
+  size, as written above, still means the offending level is the one that gets built — the
+  check only bites on the level after it, and the argument that the next level is always larger
+  is empirical, not a theorem. `grow_up_to(max_frontier=...)` instead abandons a level the
+  moment it passes the bound and ends the iteration there, so peak memory is bounded by the
+  bound itself and the levels already yielded are whole. `discover()` passes `max_candidates`.
+- **The default reach is `len(skeleton) + 5`** (`discover.SKELETON_REACH`), with
+  `exhaustive_limit=None` meaning "reach, then let the clamps decide". Five added elements is
+  past the affordable range at every skeleton size in §1.1 — deliberately, since the point is
+  that the clamp, not the constant, chooses where a given skeleton stops.
+- **A skeleton and the genetic search do not compose, so they are not allowed to.**
+  `mode="evolve"` with a skeleton raises, and `mode="auto"` runs the exhaustive stage alone
+  rather than falling back. `mutate()` deletes and retypes elements, so an evolved population
+  is not confined to circuits containing the skeleton; filtering its offspring instead would
+  reject nearly all of them, and letting it run unfiltered would produce a report whose
+  candidates came from two different spaces while `completeness()` could only name one. That is
+  §3.1's failure in a new place. For the same reason `max_elements`, which caps the genetic
+  search only, no longer clamps the enumeration limit when a skeleton is given — otherwise its
+  default of 7 would silently cut a ten-element skeleton off below its own size.
+
 ### 4.2 Where this leaves the web UI
 
 The circuit canvas of `docs/WEB_UI_PLAN.md` §3 step 3 is already a skeleton editor — "draw part
@@ -243,7 +271,7 @@ has to change; step 3 gains a second button.
 | step | contents | size | status |
 |------|----------|------|--------|
 | 1 | `contains_skeleton`, `grow_from_skeleton`, cross-check tests | M | **done** — `tests/test_skeleton.py`, 89 tests; see §2 |
-| 2 | `grow_up_to()`, `discover(skeleton=...)`, `DiscoveryResult.skeleton`, completeness wording, CLI flag | M | |
+| 2 | `grow_up_to()`, `discover(skeleton=...)`, `DiscoveryResult.skeleton`, completeness wording, CLI flag | M | **done** — see the notes in §3.1 and §4.1 |
 | 3 | Report: excluded equivalents (§3.3), unresolved-across-the-board (§3.4), placement multiplicity (§3.5) | M | |
 | 4 | Gate P2 — the wrong-skeleton experiment (§3.2), and whatever it forces | M | |
 | 5 | Docs: this file, `IMPLEMENTATION_PLAN.md` §6, `HANDOFF.md`, README | S | |
