@@ -96,6 +96,37 @@ Start-up grows roughly 1.5 s per worker, since each instance loads its own copy 
 scipy. Four workers cost ~9 s of start-up to save ~50 s of screening on this workload, so the
 pool is worth having but wants creating once and keeping.
 
+## Does the browser get the same answer as the CLI?
+
+`run_orchestrated.mjs` is the prototype of the architecture `docs/WEB_UI_PLAN.md` §2.1 settles
+on: orchestration stays in Python — `discover.screen_plan()` yields batches of screening work
+and receives their costs — while JavaScript does nothing but carry those batches out to
+workers. Nothing that gate G1 depends on is reimplemented in JS.
+
+```powershell
+node benchmarks/pyodide/run_orchestrated.mjs src.zip 4
+```
+
+Capacitor reference, `exhaustive_limit=4`, four Pyodide workers, against CPython with four
+processes:
+
+| | browser | CPython |
+|---|---|---|
+| candidates screened | 741 | 741 |
+| `complete_up_to` | 4 | 4 |
+| refitted candidates | 37, same order | 37 |
+| worst AICc difference | **0.0** | — |
+| recommendation | `[C-L-R-SKINF]` (the truth) | same |
+| tier 1 | 55 s | — |
+| tier 2 | 232 s | — |
+| total | 287 s | 90 s |
+
+Identical results, which is the point. The timing is the finding: **tier 2 is 80% of the
+browser's run**, because a refit returns a `FitResult` that cannot cross a worker boundary
+without a lossless serialisation, so it stays in the orchestrator while CPython fans it out
+too. That, not WASM, is what makes the browser 3.2× slower here when the single-threaded
+penalty is 1.3×.
+
 `src.zip` is a build artifact (gitignored); `make_zip.py` regenerates it. It exists because
 PowerShell's `Compress-Archive` writes backslash separators that Python's `zipfile` unpacks
 into files literally named `autocircuit\__init__.py`, which fails only at the import.

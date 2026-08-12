@@ -27,7 +27,7 @@ import math
 import multiprocessing
 import multiprocessing.pool
 import time
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Generator, Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, NamedTuple
 
@@ -1002,35 +1002,110 @@ def _screen_all(
             budget=budget,
         )
 
+    # Chunk of one: in-process, every candidate is judged against everything screened before it.
+    plan = screen_plan(texts, chunk=1)
+    tracker = _BestTracker()
+    scored: list[tuple[float, str]] = []
+    try:
+        tasks = next(plan)
+        while True:
+            costs = [
+                _screen_one(task, spectrum, weighting=weighting, seed=seed, budget=budget)
+                for task in tasks
+            ]
+            tracker.update(costs, tasks)
+            scored.extend(zip(costs, (task.text for task in tasks), strict=True))
+            if on_progress is not None:
+                on_progress(len(scored), len(texts), tracker.best_text)
+            if time_limit is not None and time.perf_counter() - started > time_limit:
+                return scored
+            tasks = plan.send(costs)
+    except StopIteration as done:
+        return list(done.value)
+
+
+def _screen_one(
+    task: ScreenTask,
+    spectrum: Spectrum,
+    *,
+    weighting: Weighting,
+    seed: int,
+    budget: ScreenBudget,
+) -> float:
+    """One screening fit. A candidate that cannot be fitted at all scores infinity, not an
+    exception: it is a hopeless topology, which is an answer."""
+    try:
+        return screen(
+            task.text,
+            spectrum,
+            weighting=weighting,
+            seed=seed,
+            popsize=budget.popsize,
+            maxiter=budget.maxiter,
+            tol=SCREEN_TOL,
+            abandon_above=task.abandon_above,
+        )
+    except (ValueError, CircuitError, np.linalg.LinAlgError):
+        return math.inf
+
+
+class _BestTracker:
+    """Best-scoring topology seen so far, for the progress callback only."""
+
+    def __init__(self) -> None:
+        self.best_cost = math.inf
+        self.best_text: str | None = None
+
+    def update(self, costs: Sequence[float], tasks: Sequence[ScreenTask]) -> None:
+        for cost, task in zip(costs, tasks, strict=True):
+            if cost < self.best_cost:
+                self.best_cost, self.best_text = cost, task.text
+
+
+class ScreenTask(NamedTuple):
+    """One tier-1 screening job: a topology, and the cost above which to skip its polish."""
+
+    text: str
+    abandon_above: float
+
+
+def screen_plan(
+    texts: Sequence[str], *, chunk: int = 1
+) -> Generator[list[ScreenTask], Sequence[float], list[tuple[float, str]]]:
+    """The tier-1 screen with the *running* of it left to the caller.
+
+    Yields a batch of :class:`ScreenTask`, expects the matching costs back through ``send``,
+    and finally returns the ``(cost, circuit)`` pairs the shortlist is built from. Every
+    decision that has to be made *between* batches lives here: which candidates go in a batch,
+    and what early-abandon threshold each one carries, which depends on the best cost seen so
+    far at that complexity and therefore cannot be computed up front.
+
+    The point of the inversion is that there is exactly one copy of that logic. In-process the
+    driver is :func:`_screen_all`; across processes it is :func:`_screen_parallel`; in a
+    browser it is JavaScript fanning batches across Web Workers, and none of those get to hold
+    their own opinion about ordering or abandonment. Gate G1 rests on this stage feeding the
+    per-element-count quota in :func:`_shortlist` correctly, and a second implementation of it
+    in another language is a second thing that can be wrong.
+
+    ``chunk=1`` reproduces a strictly sequential screen, where every candidate is judged
+    against everything before it. Larger chunks let a batch run concurrently at the cost of a
+    slightly stale threshold within it -- which can waste time but cannot change a result,
+    since abandoning only ever skips a polish that was already 100x off the pace.
+    """
     scored: list[tuple[float, str]] = []
     best_by_complexity: dict[float, float] = {}
-    best_overall = math.inf
-    best_text: str | None = None
-    for done, text in enumerate(texts, start=1):
-        circuit = Circuit.parse(text)
-        complexity = circuit.complexity
-        try:
-            cost = screen(
-                circuit,
-                spectrum,
-                weighting=weighting,
-                seed=seed,
-                popsize=budget.popsize,
-                maxiter=budget.maxiter,
-                tol=SCREEN_TOL,
-                abandon_above=_abandon_at(best_by_complexity, complexity),
-            )
-        except (ValueError, CircuitError, np.linalg.LinAlgError):
-            cost = math.inf
-        scored.append((cost, text))
-        if cost < best_by_complexity.get(complexity, math.inf):
-            best_by_complexity[complexity] = cost
-        if cost < best_overall:
-            best_overall, best_text = cost, text
-        if on_progress is not None:
-            on_progress(done, len(texts), best_text)
-        if time_limit is not None and time.perf_counter() - started > time_limit:
-            break
+    complexity_of = {text: Circuit.parse(text).complexity for text in texts}
+    for start in range(0, len(texts), max(chunk, 1)):
+        window = list(texts[start : start + max(chunk, 1)])
+        costs = yield [
+            ScreenTask(text, _abandon_at(best_by_complexity, complexity_of[text]))
+            for text in window
+        ]
+        for cost, text in zip(costs, window, strict=True):
+            scored.append((float(cost), text))
+            complexity = complexity_of[text]
+            if cost < best_by_complexity.get(complexity, math.inf):
+                best_by_complexity[complexity] = float(cost)
     return scored
 
 
@@ -1057,23 +1132,16 @@ def _init_worker(f: Any, z: Any, weighting: Weighting) -> None:
     _WORKER["weighting"] = weighting
 
 
-def _screen_worker(task: tuple[str, int, float, int, int]) -> tuple[float, str]:
+def _screen_worker(task: tuple[str, int, float, int, int]) -> float:
     """Screen one topology in a worker process; the task carries only strings and numbers."""
     text, seed, abandon, popsize, maxiter = task
-    try:
-        cost = screen(
-            text,
-            _WORKER["spectrum"],
-            weighting=_WORKER["weighting"],
-            seed=seed,
-            popsize=popsize,
-            maxiter=maxiter,
-            tol=SCREEN_TOL,
-            abandon_above=abandon,
-        )
-    except (ValueError, CircuitError, np.linalg.LinAlgError):
-        cost = math.inf
-    return cost, text
+    return _screen_one(
+        ScreenTask(text, abandon),
+        _WORKER["spectrum"],
+        weighting=_WORKER["weighting"],
+        seed=seed,
+        budget=ScreenBudget(popsize, maxiter),
+    )
 
 
 def _screen_parallel(
@@ -1086,40 +1154,38 @@ def _screen_parallel(
     started: float,
     budget: ScreenBudget = SCREEN_BUDGET,
 ) -> list[tuple[float, str]]:
-    """The same screen fanned across processes.
+    """The same screen, and the same :func:`screen_plan`, fanned across processes.
 
-    Tasks are submitted in chunks rather than all at once so that the early-abandon threshold
-    can be refreshed between chunks; within a chunk it is necessarily stale, which costs a
-    little time but can never change a result.
+    Tasks are submitted a chunk at a time rather than all at once so that the early-abandon
+    threshold can be refreshed between chunks; within a chunk it is necessarily stale, which
+    costs a little time but can never change a result.
     """
+    plan = screen_plan(texts, chunk=WORKER_CHUNK)
+    tracker = _BestTracker()
     scored: list[tuple[float, str]] = []
-    complexity_of = {text: Circuit.parse(text).complexity for text in texts}
-    best_by_complexity: dict[float, float] = {}
-    best_overall = math.inf
-    best_text: str | None = None
-    for start in range(0, len(texts), WORKER_CHUNK):
-        tasks = [
-            (
-                text,
-                seed,
-                _abandon_at(best_by_complexity, complexity_of[text]),
-                budget.popsize,
-                budget.maxiter,
+    try:
+        tasks = next(plan)
+        while True:
+            # ``map`` and not ``imap_unordered``: the plan wants costs back in task order, and
+            # buying an unordered stream would mean sorting them again on this side.
+            costs = list(
+                executor.map(
+                    _screen_worker,
+                    [
+                        (task.text, seed, task.abandon_above, budget.popsize, budget.maxiter)
+                        for task in tasks
+                    ],
+                )
             )
-            for text in texts[start : start + WORKER_CHUNK]
-        ]
-        for cost, text in executor.imap_unordered(_screen_worker, tasks):
-            scored.append((cost, text))
-            complexity = complexity_of[text]
-            if cost < best_by_complexity.get(complexity, math.inf):
-                best_by_complexity[complexity] = cost
-            if cost < best_overall:
-                best_overall, best_text = cost, text
-        if on_progress is not None:
-            on_progress(len(scored), len(texts), best_text)
-        if time_limit is not None and time.perf_counter() - started > time_limit:
-            break
-    return scored
+            tracker.update(costs, tasks)
+            scored.extend(zip(costs, (task.text for task in tasks), strict=True))
+            if on_progress is not None:
+                on_progress(len(scored), len(texts), tracker.best_text)
+            if time_limit is not None and time.perf_counter() - started > time_limit:
+                return scored
+            tasks = plan.send(costs)
+    except StopIteration as done:
+        return list(done.value)
 
 
 def _unique_best(candidates: Sequence[Candidate]) -> list[Candidate]:

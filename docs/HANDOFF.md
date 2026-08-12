@@ -70,6 +70,12 @@ Four things worth knowing before touching this code:
 - **The feasibility filter is conservative by construction and therefore modest**: 1.75× on
   the capacitor sweep, 1.15–1.18× elsewhere, against the 2–5× the plan hoped for. The lever
   that actually matters is `--workers`.
+- **`discover.screen_plan()` is a generator on purpose, and it is the browser's seam.** It
+  yields batches of screening work and receives their costs, so the batching and the
+  early-abandon thresholds — the decisions gate G1 rests on — have exactly one implementation
+  no matter who runs the work: in-process, a process pool, or JavaScript fanning batches across
+  Web Workers. Do not "simplify" it back into the loop it came from; that would put a second
+  copy of that logic in JavaScript, untested.
 - **`core/drt.py` is deliberately not wired into the search.** The CLI prints it beside the
   discovery report and `core/discover.py` does not import it at all. That is a decision, not
   an omission — see `docs/DISCOVERY_V2_PLAN.md` §3.4 and §6 item 0 below.
@@ -219,11 +225,12 @@ all three of which needed measurement to get right (§5.2 of the plan).
    clears `complete_up_to` — "all topologies up to N" is not true when the smaller sizes were
    skipped. `exhaustive_min` stays available to anyone who wants that trade explicitly.
 1. **Web UI (phase 6)** — the biggest remaining piece. `docs/WEB_UI_PLAN.md` is a **draft
-   awaiting approval**, written on the Pyodide measurements rather than on guesses. It carries
-   one genuinely open design question that wants a prototype, not a decision on paper: whether
-   the browser fans the tier-1 screen out from JavaScript (which moves the per-size shortlist
-   quota that gate G1 depends on into untested JS) or keeps orchestration in Python and calls
-   back into JS per chunk. Start there.
+   awaiting approval**, written on the Pyodide measurements rather than on guesses. Its
+   architecture question is already settled and prototyped (§2.1): orchestration stays in
+   Python behind `discover.screen_plan()`, and the browser reproduces the CLI's discovery
+   output to an AICc difference of 0.0. What it left standing is step 1 of its work order —
+   getting a `FitResult` across a worker boundary losslessly, so tier 2 can be fanned out too.
+   [measured] Tier 2 is 80% of the browser's run time today.
 2. ngspice round-trip in CI. The test suite already proves the netlist is *electrically*
    right via its own nodal-analysis engine (`tests/test_spice.py`); a real simulator would
    also prove it is *dialect* right.

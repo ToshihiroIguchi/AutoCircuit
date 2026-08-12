@@ -1,6 +1,8 @@
 # Web UI — Phase 6 Plan
 
-Status: draft for approval (2026-08-09). Nothing here is implemented.
+Status: draft for approval (2026-08-09). No UI exists yet. The one architectural question it
+carried is settled and prototyped — see §2.1 — and that prototype changed §2.2 and the work
+order, which is what prototypes are for.
 Prerequisite reading: `docs/IMPLEMENTATION_PLAN.md` §9 (the original sketch, now partly
 superseded by measurement), `benchmarks/pyodide/README.md` (every performance number below),
 and `docs/HANDOFF.md` §3.
@@ -18,13 +20,15 @@ budgets, (b) Rust/WASM port of the fitness inner loop". Both hedges can be dropp
 | Rust port of the inner loop? | **No** | the cost is already in WASM-compiled numpy/scipy |
 | Cold start to first fit | ~4 s (1.2 boot + 1.1 packages + 1.6 import) | same |
 | `discover` at `exhaustive_limit=4`, 1 thread | 169 s | same |
-| Worker pool speed-up | ~2.3× at 4 workers, saturating; 8 is worse than 6 | `run_workers.mjs` |
+| Worker pool speed-up (tier 1) | ~2.3× at 4 workers, saturating; 8 is worse than 6 | `run_workers.mjs` |
+| Does the browser get the CLI's answer? | **Yes, to an AICc difference of 0.0** | `run_orchestrated.mjs` |
 
 Two consequences shape the whole design:
 
-1. **A real search takes minutes, not seconds.** 169 s single-threaded, ~75 s across four
-   workers. There is no arrangement of this software that makes topology discovery feel
-   instant in a browser, so the UI has to be built around a long-running job — streamed
+1. **A real search takes minutes, not seconds.** 169 s single-threaded; 287 s as prototyped
+   across four workers, which is worse than it sounds and is explained in §2.2, and ~90 s once
+   the fix there lands. There is no arrangement of this software that makes topology discovery
+   feel instant in a browser, so the UI has to be built around a long-running job — streamed
    progress, partial results, and a cancel button — rather than around a request/response.
 2. **`fit` on a known topology takes under a second**, and that is the interactive path. The
    two modes deserve different treatment in the UI: manual fitting is live, discovery is a job.
@@ -39,14 +43,17 @@ instead: that costs *coverage*, which `complete_up_to` reports honestly.
 ## 2. Architecture
 
 ```
-  main thread (React)                    worker pool (N Pyodide instances)
-  ┌───────────────────────┐              ┌──────────────────────────────┐
-  │ file import, plots,   │  postMessage │ autocircuit.core             │
-  │ circuit canvas,       │─────────────>│  read / validate / fit       │
-  │ Pareto front, report  │<─────────────│  screen (tier 1, fanned out) │
-  └───────────────────────┘   progress   │  discover (tier 2)           │
-                                         └──────────────────────────────┘
+  main thread (React)        orchestrator worker         screening pool (N workers)
+  ┌────────────────────┐     ┌───────────────────┐       ┌───────────────────────┐
+  │ import, plots,     │     │ enumerate+filter  │ batch │ screen(text, abandon) │
+  │ circuit canvas,    │────>│ screen_plan()     │──────>│                       │
+  │ Pareto, report     │<────│ _shortlist()      │<──────│  -> costs             │
+  └────────────────────┘     │ tier-2 refit      │ costs └───────────────────────┘
+                   progress  └───────────────────┘
 ```
+
+Every decision sits in the middle box, in Python. The right-hand boxes are told what to screen
+and against what threshold; JavaScript only moves batches and costs between them.
 
 - **Static site, no server.** Vite + TypeScript + React, deployable to GitHub Pages. Confirmed
   viable: everything the CLI does runs in Pyodide unchanged.
@@ -57,25 +64,66 @@ instead: that costs *coverage*, which `complete_up_to` reports honestly.
   measured speed-up saturates there and eight workers were *slower* than six. Each worker costs
   ~1.5 s of start-up and its own copy of numpy/scipy, so the pool is created once at load and
   kept.
-- **Nothing but strings and typed arrays crosses the boundary.** `core/discover.py`'s tier-1
-  worker already re-parses a circuit string by design, so the same contract works here
-  unchanged. This is the one place where the existing code was built for the browser in
-  advance and it should be kept that way.
+- **Nothing but strings and numbers crosses the boundary.** `core/discover.py`'s tier-1 worker
+  already re-parses a circuit string by design, so the same contract works here unchanged.
+  This is the one place where the existing code was built for the browser in advance and it
+  should be kept that way. One wrinkle: JSON has no infinity, JS rejects Python's bare
+  `Infinity` and silently turns its own into `null` — so `null` is the wire representation in
+  both directions, and both an infinite abandon threshold and an infinite cost are routine
+  values here, not edge cases.
 
-**Open design question for the planning session:** the parallel screen currently lives inside
-`discover()`, which uses `multiprocessing`. In the browser the fan-out has to happen in
-JavaScript instead. Two options:
+### 2.1 Where the screen is orchestrated — decided, and prototyped
 
-- (a) Expose the stages separately (`enumerate_feasible()`, `screen_many(texts)`,
-  `refit_shortlist(scored)`) so the JS side orchestrates. Honest, but it moves the two-tier
-  logic — including the per-size quota that gate G1 depends on — into JavaScript, where it is
-  untested and can drift from the Python one.
-- (b) Keep orchestration in Python, run `discover(workers=1)` in **one** worker, and have that
-  worker delegate its screen through a callback into JS. Keeps a single implementation of the
-  logic that G1 covers; costs a round trip per chunk.
+The parallel screen lives inside `discover()`, which uses `multiprocessing`; in the browser the
+fan-out has to happen in JavaScript. The choice was between exposing the stages so JS
+orchestrates them — which moves the per-element-count shortlist quota that gate G1 depends on
+into untested JavaScript — and keeping orchestration in Python. **Orchestration stays in
+Python.**
 
-(b) is the safer default given how much of this project's value sits in that shortlist logic,
-but it needs a prototype before committing. Neither option is a code change to make blind.
+The obvious way to implement that (Python awaiting a JS callback) needs either `async` all
+through the core or `SharedArrayBuffer` + `Atomics.wait`, and the latter needs COOP/COEP
+headers that GitHub Pages cannot send. So the transport is inverted instead:
+`discover.screen_plan()` is a **generator that yields batches of screening work and receives
+their costs back**, holding every between-batch decision — batching, and each candidate's
+early-abandon threshold — while knowing nothing about how the work runs. `_screen_all` and
+`_screen_parallel` are now thin drivers over it, and so is the browser.
+
+**[measured] The refactor changed nothing.** Discovery output on the Maxwell-Wagner and Randles
+references, at one and four workers, is identical before and after — every candidate, every
+AICc to nine decimals.
+
+**[measured] The browser reproduces the CLI exactly.** `benchmarks/pyodide/run_orchestrated.mjs`
+drives that generator from JavaScript across four Pyodide workers on the capacitor reference at
+`exhaustive_limit=4`, and against CPython with four processes: same 741 candidates screened,
+same `complete_up_to`, same 37 refitted candidates in the same order, **same AICc to a
+difference of 0.0**, same Pareto front, same recommendation (the true `C-R-L-SKINF`). That is
+gate W1 demonstrated in advance of the UI, and it is only true because there is one
+implementation of the logic rather than two.
+
+### 2.2 What the prototype found that the plan had wrong
+
+| stage | browser, 4 workers | CPython, 4 processes |
+|-------|-------------------:|---------------------:|
+| tier 1 screen (741 candidates) | 55 s | — |
+| tier 2 refit (37 candidates) | 232 s | — |
+| **total** | **287 s** | **90 s** |
+
+Tier 1 parallelises and is no longer the problem. **Tier 2 is 80% of the browser's time**, not
+the ~25% assumed above, because it runs serially in the orchestrator while CPython fans it
+across its pool as well. The single-threaded WASM penalty is 1.3×; the gap here is 3.2×, and
+all of the difference is that one serial stage.
+
+Tier 2 was left serial for a reason: a refit returns a whole `FitResult` — covariance,
+statistics, restart spread — which is a Python object, and handing back only the fitted values
+is precisely the shortcut that discards the restart spread a non-identifiable model uses to
+announce itself (`docs/DISCOVERY_V2_PLAN.md` §5.1). Fanning it out therefore needs a lossless
+serialisation of `FitResult` across the worker boundary. `FitResult.to_dict()` exists for the
+CLI's `--json` and is the obvious starting point, but whether it is lossless enough to
+rebuild a `Candidate` — `pareto_front`, `recommended` and the equivalence classes all need the
+fitted response, not just the numbers — has not been checked.
+
+**That is now the first piece of work, and it is a bigger one than "prototype the harness".**
+Until it is done the browser default is a ~5 minute search rather than a ~1.5 minute one.
 
 ## 3. Screens
 
@@ -88,10 +136,11 @@ Following ZView's workflow, which is what the target users know:
    live model preview overlaid on the data before fitting. This is the differentiator and it
    should feel like the point of the app: no initial values, press Fit, get parameters with
    honest standard errors. Sub-second, so no progress UI needed.
-3. **Discover** — the job screen. Pool selection, `exhaustive_limit`, live progress
-   (`on_progress` already reports `done/total/best`), streamed partial Pareto front, cancel.
-   The completeness line (`complete_up_to`) is displayed as a first-class result, not a
-   footnote — it is the thing the genetic search could never say.
+3. **Discover** — the job screen. Pool selection, `exhaustive_limit`, live progress, streamed
+   partial Pareto front, cancel. Progress comes from the batch loop itself rather than from
+   `on_progress`: the driver knows how many candidates each batch carried, which is what the
+   prototype already prints. The completeness line (`complete_up_to`) is displayed as a
+   first-class result, not a footnote — it is the thing the genetic search could never say.
 4. **Report** — equivalence classes shown as classes, never as a ranked list with a winner;
    JSON / CSV / netlist download; the DRT structure probe beside the search as the CLI already
    prints it.
@@ -113,7 +162,8 @@ Plots: linked Nyquist / Bode(|Z|, θ) / residuals, zoom-synced, log axes. Plotly
 
 | step | contents | size |
 |------|----------|------|
-| 1 | Pyodide worker harness + the §2 orchestration decision, prototyped both ways | M |
+| 0 | ~~Pyodide worker harness, orchestration decision~~ | **done** — §2.1, `benchmarks/pyodide/run_orchestrated.mjs` |
+| 1 | Lossless `FitResult` across a worker boundary, so tier 2 fans out too (§2.2) | M |
 | 2 | Vite/React scaffold, data import, plots, Lin-KK panel | M |
 | 3 | Circuit canvas + live preview + manual fit | L |
 | 4 | Discovery job screen: progress, streaming, cancel, completeness | M |
@@ -126,8 +176,9 @@ Plots: linked Nyquist / Bode(|Z|, θ) / residuals, zoom-synced, log axes. Plotly
   synthetic corpus, to the last reported digit. Same code, so any difference is a bug in the
   bridge.
 - **W2** — `discover` at `exhaustive_limit=4` on the capacitor reference completes in the
-  browser, streams progress at least once a second, and reports the same
-  `complete_up_to` and equivalence classes as the CLI.
+  browser, streams progress at least once a second, and reports the same `complete_up_to` and
+  equivalence classes as the CLI. *(The result half of this already passes headlessly, §2.1;
+  what the UI adds is the streaming and the display.)*
 - **W3** — cold load to an interactive first fit under 10 s on a mid-range laptop.
 - **W4** — cancel actually stops the work (not just the UI), and a cancelled run reports the
   coverage it reached rather than a wrong number.

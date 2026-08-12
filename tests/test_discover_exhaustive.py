@@ -9,16 +9,24 @@ it drops to a smaller number (never a false one) when a budget cuts the run shor
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 
 from autocircuit.core.circuit import Circuit
 from autocircuit.core.discover import (
+    ABANDON_FACTOR,
     MIN_REFINE_PER_SIZE,
     REFINE_CEILING_FACTOR,
+    SCREEN_BUDGET,
+    ScreenTask,
+    _screen_all,
+    _screen_one,
     _screening_aicc,
     _shortlist,
     discover,
+    screen_plan,
 )
 from autocircuit.core.enumerate import count_topologies, enumerate_topologies
 from autocircuit.core.simulate import log_frequencies, simulate
@@ -243,3 +251,84 @@ def test_seed_circuits_are_evaluated_in_exhaustive_mode() -> None:
     assert target in {c.circuit.canonical_form() for c in result.candidates}
     # ...without inflating the completeness claim, which only covers the enumerated sizes.
     assert result.complete_up_to == 2
+
+
+# =============================================================================================
+# screen_plan -- the tier-1 stage with its transport removed
+# =============================================================================================
+#
+# This is the seam the web UI screens through (docs/WEB_UI_PLAN.md): the browser cannot use
+# multiprocessing, so JavaScript fans batches across Web Workers -- but the decisions between
+# batches, which are the ones gate G1 depends on, must stay in exactly one place. These tests
+# pin that contract down, because a second implementation of it in another language is a second
+# thing that can be wrong.
+
+
+def _drive(plan, cost_of):
+    """Run a screen plan to completion with a caller-supplied cost function."""
+    seen = []
+    try:
+        tasks = next(plan)
+        while True:
+            seen.append(list(tasks))
+            tasks = plan.send([cost_of(task.text) for task in tasks])
+    except StopIteration as done:
+        return done.value, seen
+
+
+def test_screen_plan_yields_every_text_exactly_once() -> None:
+    texts = [f"R{i}" for i in range(1, 10)]
+    scored, batches = _drive(screen_plan(texts, chunk=4), lambda text: 1.0)
+    assert [text for _, text in scored] == texts
+    assert [len(batch) for batch in batches] == [4, 4, 1]
+
+
+def test_screen_plan_chunk_size_does_not_change_what_is_scored() -> None:
+    texts = [f"R{i}" for i in range(1, 20)]
+    costs = {text: float(i) for i, text in enumerate(texts)}
+    one, _ = _drive(screen_plan(texts, chunk=1), costs.__getitem__)
+    many, _ = _drive(screen_plan(texts, chunk=7), costs.__getitem__)
+    assert one == many
+
+
+def test_screen_plan_tightens_the_abandon_threshold_as_costs_arrive() -> None:
+    """Within a complexity class, a cheap result makes the next batch's threshold stricter."""
+    texts = ["R1-C1", "R2-C2", "R3-C3", "R4-C4"]
+    costs = {"R1-C1": 10.0, "R2-C2": 1.0, "R3-C3": 5.0, "R4-C4": 5.0}
+    _, batches = _drive(screen_plan(texts, chunk=1), costs.__getitem__)
+    thresholds = [batch[0].abandon_above for batch in batches]
+    # Nothing to compare the first candidate against, then 10x100, then 1x100 and no looser.
+    assert thresholds[0] == math.inf
+    assert thresholds[1] == pytest.approx(10.0 * ABANDON_FACTOR)
+    assert thresholds[2] == pytest.approx(1.0 * ABANDON_FACTOR)
+    assert thresholds[3] == pytest.approx(1.0 * ABANDON_FACTOR)
+
+
+def test_screen_plan_never_abandons_against_an_exact_reference() -> None:
+    """The rule that keeps exact equivalents alive on noise-free data (see PERFECT_COST)."""
+    texts = ["R1-C1", "R2-C2"]
+    _, batches = _drive(screen_plan(texts, chunk=1), lambda text: 1e-30)
+    assert all(batch[0].abandon_above == math.inf for batch in batches)
+
+
+def test_screen_plan_matches_the_in_process_screen() -> None:
+    """Driving the plan by hand reproduces what discover's own sequential driver produces."""
+    spectrum = _semicircle(noise=0.0, points=8)
+    texts = [
+        Circuit(node).to_string()
+        for n in (1, 2, 3)
+        for node in enumerate_topologies(("R", "C"), n)
+    ]
+
+    def cost_of(text: str) -> float:
+        return _screen_one(
+            ScreenTask(text, math.inf), spectrum, weighting="modulus", seed=0,
+            budget=SCREEN_BUDGET,
+        )
+
+    driven, _ = _drive(screen_plan(texts, chunk=1), cost_of)
+    reference = _screen_all(
+        texts, spectrum, weighting="modulus", seed=0, executor=None,
+        on_progress=None, time_limit=None, started=0.0,
+    )
+    assert [text for _, text in driven] == [text for _, text in reference]
