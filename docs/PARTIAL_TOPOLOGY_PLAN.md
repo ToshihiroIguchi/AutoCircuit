@@ -44,6 +44,38 @@ the reduction is roughly geometric in how much structure the user is willing to 
 the right incentive. It also means the feature cannot be sold as "speed"; it is sold as
 *asserting what you know*, and the speed follows.
 
+### 1.1 How large a skeleton, and how many added elements
+
+The obvious next question — "I have a ten-element model of my device, add up to five more" —
+has a hard answer, so it is worth stating before anyone designs around the wrong one.
+
+[measured] A ten-element block-structured skeleton
+(`R1-L1-p(R2,C1)-p(R3,C2)-p(R4,C3)-p(R5,CPE1)`) against the component pool, with the tier-1
+screen timed on this machine at 135 ms per thirteen-element candidate (four-element candidates
+cost 30 ms):
+
+| added | total | candidates | tier-1, 1 core | tier-1, 8 workers |
+|------:|------:|-----------:|---------------:|------------------:|
+| +1 | 11 | 167 | 23 s | seconds |
+| **+2** | **12** | **11,418** | **~23 min** | **~3–5 min** |
+| +3 | 13 | 521,438 | ~20 h | ~3 h |
+| +4 | 14 | ~2·10⁷ (extrapolated) | days | ~4 days |
+| +5 | 15 | ~8·10⁸ (extrapolated) | years | months |
+
+Each level costs 40–70× the one before it. **Adding one or two elements to a large skeleton is
+practical; adding five is not, by roughly six orders of magnitude.** That is the good news it
+looks like: "what is my ten-element model missing?" is nearly always a one- or two-element
+question, so the affordable range and the interesting range coincide.
+
+[measured] **The skeleton's *shape* matters more than its size.** The same ten elements as one
+flat series node (`R1-C1-L1-CPE1-...`) gives 2,148,316 candidates at +2 against the block
+model's 11,418 — **188×** worse — because a flat node with c children has 2^c ways to group a
+proper subset of them. Real device models are chains of blocks, so this usually falls the right
+way, but a user who writes their skeleton as one long series chain pays for it.
+
+Enumeration memory is the binding constraint before compute is: +3 materialises 780k trees in
+33 s, and +4 would hold ~2·10⁷ of them.
+
 ## 2. What "contains the skeleton" means — decided and implemented
 
 **Containment is deletion-and-collapse, not subtree matching.** A candidate contains the
@@ -129,7 +161,26 @@ So: the report states which members of each reported equivalence class the skele
 This is cheap to compute, because the unconstrained equivalents are exactly the topologies of
 the same size that fit identically, and the search already groups by fitted response.
 
-### 3.4 Which element is "yours" can be genuinely ambiguous
+### 3.4 Past a certain size the data is the limit, not the search
+
+A thirteen-element candidate carries 14–15 parameters against the 142 real residuals of a
+71-point spectrum. This project has already measured what happens well below that: on that same
+capacitor spectrum, minimum-AICc selected a **nine**-parameter circuit two of whose parameters
+had standard errors larger than their own values (`HANDOFF.md` §3), which is why
+`DiscoveryResult.recommended` applies parsimony instead of taking the AICc winner.
+
+So a search that grows a ten-element skeleton by three or four does not fail by returning
+nothing. It fails by returning a wall of candidates that all fit essentially perfectly and none
+of which are identifiable — every one with a large `n_unresolved`, the parsimony rule rejecting
+all of them, and a Pareto front carrying no information. **No amount of enumeration speed fixes
+that**, because the missing constraint is measurement, not compute. If large skeletons turn out
+to matter, the answer is more data (wider frequency window, multiple bias points), not a bigger
+search.
+
+This is worth saying in the report too: when the shortlist's candidates are uniformly
+unresolved, that is a finding about the experiment, and it should be stated as one.
+
+### 3.5 Which element is "yours" can be genuinely ambiguous
 
 Dedup is by canonical form, so each topology is fitted once, but a skeleton can map into the
 same topology in more than one way. From skeleton `R1`, both "insert C in parallel, then R in
@@ -154,15 +205,28 @@ discover(spectrum, *, skeleton="C1-R1-L1", pool=("R", "C", "L", "CPE"), exhausti
 - **`pool` governs the added elements only.** The skeleton may use codes outside it: it is an
   assertion, not a search result. (Implemented this way already.)
 - `exhaustive_limit` stays a **total** element count, consistent with everything else in the
-  system — but a 4-element skeleton with the default limit of 5 leaves the search exactly one
-  free element, which is not what a user asking for "the default search" means. Proposal, and
-  the one decision here worth confirming before it is built: **when a skeleton is given, the
-  default `exhaustive_limit` becomes `len(skeleton) + 2`**, and the CLI prints the arithmetic
-  ("skeleton has 4 elements; evaluating totals 4 to 6, i.e. up to 2 added"). A limit below the
-  skeleton's size is an error rather than an empty result.
-- Everything else composes unchanged: the feasibility filter, `max_candidates` clamping, the
-  two-tier screen, `workers`, `on_progress`, and the `screen_plan()` generator the browser
-  drives.
+  system, and a limit below the skeleton's own size is an error rather than an empty result.
+  The CLI prints the arithmetic ("skeleton has 10 elements; evaluating totals 10 to 12, i.e. up
+  to 2 added"), because a total is not what the user was thinking in.
+- **The default limit is whatever `max_candidates` allows, not a fixed number of added
+  elements.** [measured — corrects this document's first draft] The first draft proposed
+  defaulting to `len(skeleton) + 2`, which is right for a ten-element skeleton and wrong for a
+  three-element one: §1.1 measures +2 as the affordable ceiling at k = 10 (11,418 candidates),
+  while at k = 3 the same budget reaches +3 comfortably (9,857). A fixed offset ignores the
+  thing that actually varies. `discover()` already clamps `exhaustive_limit` down when a level
+  would push the count past `max_candidates` (default 20,000) and already reports the result
+  honestly through `complete_up_to` — so the default is simply a generous limit, and the
+  existing machinery lands on +2 for k = 10 and +3 for k = 3 with no new rule and no new way to
+  be wrong.
+- Everything else composes unchanged: the feasibility filter, the two-tier screen, `workers`,
+  `on_progress`, and the `screen_plan()` generator the browser drives.
+
+One implementation note that falls out of §1.1: levels must be grown **incrementally**. Calling
+`grow_from_skeleton(skeleton, pool, n)` once per size recomputes the whole insertion closure
+each time, and the clamping check has to run *before* the next frontier is materialised — at
+k = 10 the +4 frontier is ~2·10⁷ trees, so a `max_candidates` test applied after building it
+would run out of memory to enforce a limit that was already exceeded. `grow_up_to()` therefore
+keeps the frontier between levels and stops on the frontier size, not only on the kept count.
 
 CLI: `autocircuit discover data.csv --skeleton "C1-R1-L1" --pool component`.
 
@@ -179,8 +243,8 @@ has to change; step 3 gains a second button.
 | step | contents | size | status |
 |------|----------|------|--------|
 | 1 | `contains_skeleton`, `grow_from_skeleton`, cross-check tests | M | **done** — `tests/test_skeleton.py`, 89 tests; see §2 |
-| 2 | `discover(skeleton=...)`, `DiscoveryResult.skeleton`, completeness wording, CLI flag | M | |
-| 3 | Report: excluded equivalents (§3.3), placement multiplicity (§3.4) | M | |
+| 2 | `grow_up_to()`, `discover(skeleton=...)`, `DiscoveryResult.skeleton`, completeness wording, CLI flag | M | |
+| 3 | Report: excluded equivalents (§3.3), unresolved-across-the-board (§3.4), placement multiplicity (§3.5) | M | |
 | 4 | Gate P2 — the wrong-skeleton experiment (§3.2), and whatever it forces | M | |
 | 5 | Docs: this file, `IMPLEMENTATION_PLAN.md` §6, `HANDOFF.md`, README | S | |
 
@@ -213,10 +277,15 @@ at all. It is the step most likely to send steps 2–3 back for changes.
   which is the same call `complete_up_to` already got.
 - **Placement ambiguity looks like a bug.** A report that declines to say which resistor is the
   user's ESR will read as an omission unless it says *why*. Wording matters here.
-- **Skeleton growth at large `n`.** The frontier is materialised level by level, so a weak
-  skeleton on a wide pool at n = 6 is ~10⁵ trees in memory. `max_candidates` clamping already
-  covers the fitting cost, but not the enumeration memory; if it bites, the frontier becomes a
-  streamed level like `_compose` already is.
+- **Skeleton growth runs out of memory before it runs out of time.** [measured] The frontier is
+  materialised level by level: 780k trees at +3 from a ten-element skeleton, ~2·10⁷ at +4.
+  `max_candidates` clamping covers the fitting cost but not the enumeration memory, which is
+  why §4.1 has `grow_up_to()` stop on the frontier size as well. A user who writes their
+  skeleton as one flat series chain hits this 188× sooner than one who writes it as blocks.
+- **The mode invites a question it cannot answer.** "I have ten elements, add five" is a
+  perfectly reasonable thing to ask and the answer is no, twice over: ~10⁹ candidates (§1.1)
+  and, well before that, a model with more parameters than the data can resolve (§3.4). The CLI
+  should say which of the two limits it is hitting rather than simply grinding.
 
 ## 8. Out of scope
 
