@@ -232,7 +232,71 @@ def test_exhaustive_limit_below_skeleton_size_raises_value_error() -> None:
 
 
 # =============================================================================================
-# 8. A budget that bites lowers the claim instead of faking it
+# 8. What the report owes the user besides the coverage sentence
+# =============================================================================================
+
+
+def test_placement_ambiguity_is_reported_rather_than_resolved() -> None:
+    """A skeleton can sit inside one reported topology in more than one place, with the user's
+    element somewhere structurally different -- and a different fitted value -- each time
+    (docs/PARTIAL_TOPOLOGY_PLAN.md section 3.5). Picking one and printing it would read as a
+    finding; it is not one, and the data cannot produce one. So the report says how many ways
+    there are, in the summary and not only in an attribute nobody reads.
+    """
+    truth_values = {"R1.R": 20.0, "R2.R": 1000.0, "C1.C": 1e-8}
+    spectrum = simulate(
+        "R1-p(R2,C1)", log_frequencies(1e1, 1e5, 2), truth_values, noise=0.0, seed=0
+    )
+    result = discover(
+        spectrum, pool=POOL, skeleton="R1", mode="exhaustive", exhaustive_limit=3, seed=0
+    )
+    # The truth has two resistors and the skeleton asserts one of them; nothing in the fit
+    # says which. (Its exact equivalent p(R1-C1,R2) is the same statement about the same data.)
+    ambiguous = [c for c in result.pareto if result.placements_of(c) > 1]
+    assert ambiguous, "no reported candidate admitted the skeleton in more than one place"
+    assert "more than one place" in result.summary()
+
+    # Unconstrained runs have nothing to place, and must not grow a placement section.
+    free = discover(spectrum, pool=POOL, mode="exhaustive", exhaustive_limit=3, seed=0)
+    assert all(free.placements_of(c) == 0 for c in free.pareto)
+    assert "more than one place" not in free.summary()
+
+
+def test_a_report_where_nothing_is_identifiable_says_so() -> None:
+    """Section 3.4. A skeleton larger than the data can support does not fail loudly: it
+    returns candidates that fit essentially perfectly and pin down nothing, with the parsimony
+    rule left with nothing to prefer. Here a flat resistive spectrum is searched under a
+    skeleton asserting a capacitance and an inductance it cannot see, and the fit is excellent
+    -- chi2_reduced of order 1e-4 -- while two of the three parameters have standard errors
+    larger than their own values. That is a finding about the measurement, and a report that
+    printed only the fit quality would be inviting the reader to believe the opposite.
+    """
+    flat = simulate("R1", log_frequencies(1e2, 1e4, 3), {"R1.R": 100.0}, noise=0.02, seed=0)
+    result = discover(
+        flat, pool=POOL, skeleton="R1-C1-L1", mode="exhaustive", exhaustive_limit=3, seed=0
+    )
+    assert result.recommended is not None
+    assert result.recommended.n_unresolved > 0
+    assert result.unresolved_everywhere
+    assert "cannot" in result.summary() and "resolve" in result.summary()
+
+
+def test_a_resolved_report_carries_no_such_warning() -> None:
+    """The counterpart, so the warning is a finding and not decoration: noise-free data that
+    determines its circuit must not trip it.
+    """
+    truth_values = {"R1.R": 20.0, "R2.R": 1000.0, "C1.C": 1e-8}
+    spectrum = simulate(
+        "R1-p(R2,C1)", log_frequencies(1e1, 1e5, 2), truth_values, noise=0.0, seed=0
+    )
+    result = discover(
+        spectrum, pool=POOL, skeleton="R1", mode="exhaustive", exhaustive_limit=3, seed=0
+    )
+    assert not result.unresolved_everywhere
+
+
+# =============================================================================================
+# 9. A budget that bites lowers the claim instead of faking it
 # =============================================================================================
 
 
@@ -266,7 +330,7 @@ def test_a_clamped_budget_lowers_the_constrained_claim_rather_than_faking_it() -
 
 
 # =============================================================================================
-# 9. exhaustive_limit_for -- the arithmetic the CLI prints before the run
+# 10. exhaustive_limit_for -- the arithmetic the CLI prints before the run
 # =============================================================================================
 
 

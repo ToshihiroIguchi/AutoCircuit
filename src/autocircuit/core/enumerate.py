@@ -58,6 +58,7 @@ __all__ = [
     "DEFAULT_SLOPE_TOLERANCE",
     "EndpointBehaviour",
     "contains_skeleton",
+    "count_skeleton_placements",
     "count_topologies",
     "endpoint_exponents",
     "enumerate_topologies",
@@ -282,6 +283,51 @@ def contains_skeleton(candidate: Node, skeleton: Node) -> bool:
         if remaining is not None and canonical_form(simplify(remaining)) == target:
             return True
     return False
+
+
+def _mark_leaves(node: Node, keep: frozenset[int], cursor: list[int]) -> Node:
+    """A copy of ``node`` in which the leaves in ``keep`` carry a distinguishing code.
+
+    The marked tree is only ever fed to :func:`canonical_form`, which sorts sibling branches by
+    their own canonical strings, so two placements collapse to one string exactly when an
+    automorphism of the topology carries one to the other -- which is the sense in which two
+    placements are "the same claim".
+    """
+    if isinstance(node, ElementNode):
+        index = cursor[0]
+        cursor[0] = index + 1
+        return ElementNode(f"{node.code}*") if index in keep else node
+    children = tuple(_mark_leaves(child, keep, cursor) for child in node.children)
+    return Series(children) if isinstance(node, Series) else Parallel(children)
+
+
+def count_skeleton_placements(candidate: Node, skeleton: Node) -> int:
+    """How many structurally distinct ways ``skeleton`` maps into ``candidate``.
+
+    Zero means it does not: this agrees with :func:`contains_skeleton` everywhere, and is the
+    slower way to ask, since it cannot stop at the first placement it finds.
+
+    A count above one is not a defect in the search, and it is not something more computation
+    can settle. Topologies are deduplicated by canonical form, so each one is fitted once, but
+    a skeleton can sit inside the same topology in more than one place: from the skeleton
+    ``R1``, both "add C in parallel, then R in series with it" and "add C in series, then R in
+    parallel with the pair" arrive at ``p(R,[C-R])``, with the user's resistor somewhere
+    structurally different -- and a different fitted value -- each time. The data cannot say
+    which resistor is theirs, so the honest report says that rather than picking one, the same
+    reason an equivalence class is reported instead of one member of it.
+    """
+    target = canonical_form(simplify(skeleton))
+    n_keep = count_elements(skeleton)
+    total = count_elements(candidate)
+    if total < n_keep:
+        return 0
+    placements: set[str] = set()
+    for keep in itertools.combinations(range(total), n_keep):
+        kept = frozenset(keep)
+        remaining = _remove_leaves(candidate, kept, [0])
+        if remaining is not None and canonical_form(simplify(remaining)) == target:
+            placements.add(canonical_form(_mark_leaves(candidate, kept, [0])))
+    return len(placements)
 
 
 def _insertions(node: Node, codes: tuple[str, ...]) -> Iterator[Node]:

@@ -1,7 +1,8 @@
 # Partial Topology — Skeleton-Constrained Discovery
 
-Status: **steps 1–2 are implemented and measured** (enumeration, and the search wired to it);
-steps 3–5 are a draft for approval. Written 2026-08-12.
+Status: **steps 1–2 are implemented and measured** (enumeration, and the search wired to it),
+**step 3 is two thirds done** (§3.4 and §3.5; §3.3 is open and its cost estimate has been
+corrected); steps 4–5 are a draft for approval. Written 2026-08-12.
 Prerequisite reading: `docs/DISCOVERY_V2_PLAN.md` (especially the corrections in §3.2, §3.4 and
 §5.1 — this design repeats their shape), `docs/HANDOFF.md` §3, and `CLAUDE.md`'s three modes.
 
@@ -164,8 +165,34 @@ a physical electrode really does have an electrolyte resistance in series — bu
 the user made, and the report must not let it read as something the data supported.
 
 So: the report states which members of each reported equivalence class the skeleton excluded.
-This is cheap to compute, because the unconstrained equivalents are exactly the topologies of
-the same size that fit identically, and the search already groups by fitted response.
+
+**[corrected] "This is cheap to compute" was wrong, and it was wrong in the same way twice.**
+The first draft argued that the unconstrained equivalents are the same-size topologies that
+fit identically, and that the search already groups by fitted response. It does — *among the
+candidates it fitted*. The excluded ones are by definition the candidates it did not fit, so
+their equivalence is exactly the thing not known, and establishing it means screening the
+same-size topologies outside the skeleton: at five elements on the component pool that is
+10,214 − 601 ≈ 9,600 fits, which is the work the skeleton was asserted to avoid.
+
+Three honest options, in ascending cost, to be settled by measurement rather than by argument:
+
+1. **Report the size of the excluded space.** `grow_up_to` and `enumerate_topologies` already
+   produce both counts, so "your skeleton excluded 9,613 of the 10,214 five-element
+   topologies" costs one enumeration pass and no fitting. It states the price of the assertion
+   without naming what was bought.
+2. **Screen the excluded topologies against the reported model's own response**, not against
+   the data. An exact reparameterisation returns a cost around 1e-30 against a noise-free
+   target, so one tier-1 screen per excluded topology of that size identifies the excluded
+   equivalents exactly. This is the real §3.3, at roughly the cost of the unconstrained screen
+   at one size — minutes, not the whole search, and plausibly an opt-in flag rather than a
+   default.
+3. **Precompute the exact-equivalence partition of the enumerated space offline.** Exact
+   equivalence is algebraic and data-independent, so it could be a table computed once per
+   (pool, size) rather than per run. That is a benchmark-sized job and its own decision.
+
+Option 1 is free and belongs in the report either way. Which of 2 or 3 to build — if either —
+should wait for gate P2, since what a wrong skeleton actually looks like decides how much
+weight this section has to carry.
 
 ### 3.4 Past a certain size the data is the limit, not the search
 
@@ -186,6 +213,14 @@ search.
 This is worth saying in the report too: when the shortlist's candidates are uniformly
 unresolved, that is a finding about the experiment, and it should be stated as one.
 
+**Implemented** as `DiscoveryResult.unresolved_everywhere`, printed above the recommendation.
+It is deliberately not a skeleton-only warning — the condition is a property of the data and
+the front, and an unconstrained search can reach it too — but a skeleton is the systematic way
+to arrive there. [measured] A flat resistive spectrum searched under the skeleton `R1-C1-L1`
+returns `chi2_reduced` of 4e-4 with two of its three parameters carrying standard errors
+larger than their own values: a report that printed only the fit quality would be inviting
+exactly the wrong conclusion. That is also a preview of what §3.2 has to measure properly.
+
 ### 3.5 Which element is "yours" can be genuinely ambiguous
 
 Dedup is by canonical form, so each topology is fitted once, but a skeleton can map into the
@@ -198,6 +233,15 @@ The honest output is not to pick one. It is to report the placement count, and w
 one, to say that the data cannot attribute the assertion to a particular element. Fitting is
 unaffected; this is purely a labelling question, and pretending it has a unique answer would be
 the same error as reporting one member of an equivalence class as "the answer".
+
+**Implemented** as `enumerate.count_skeleton_placements()`, surfaced through
+`DiscoveryResult.placements_of()` and a summary section. Two placements count as one when an
+automorphism of the topology carries one to the other, which falls out of marking the
+skeleton's leaves and taking the canonical form of the marked tree — counting raw leaf subsets
+instead would invent an ambiguity for every symmetric circuit. The example above is not
+exotic: asserting `R1` against the recovered `R1-p(R2,C1)` gives two placements, so a user who
+asserts "there is a series ESR" is told that the fit cannot say which of the two resistors is
+theirs.
 
 ## 4. Design
 
@@ -272,7 +316,7 @@ has to change; step 3 gains a second button.
 |------|----------|------|--------|
 | 1 | `contains_skeleton`, `grow_from_skeleton`, cross-check tests | M | **done** — `tests/test_skeleton.py`, 89 tests; see §2 |
 | 2 | `grow_up_to()`, `discover(skeleton=...)`, `DiscoveryResult.skeleton`, completeness wording, CLI flag | M | **done** — see the notes in §3.1 and §4.1 |
-| 3 | Report: excluded equivalents (§3.3), unresolved-across-the-board (§3.4), placement multiplicity (§3.5) | M | |
+| 3 | Report: excluded equivalents (§3.3), unresolved-across-the-board (§3.4), placement multiplicity (§3.5) | M | §3.4 and §3.5 **done**; §3.3 open — its cost estimate was wrong, see the correction there |
 | 4 | Gate P2 — the wrong-skeleton experiment (§3.2), and whatever it forces | M | |
 | 5 | Docs: this file, `IMPLEMENTATION_PLAN.md` §6, `HANDOFF.md`, README | S | |
 

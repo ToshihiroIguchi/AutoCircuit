@@ -19,6 +19,7 @@ import pytest
 from autocircuit.core.circuit import Circuit, canonical_form, count_elements
 from autocircuit.core.enumerate import (
     contains_skeleton,
+    count_skeleton_placements,
     enumerate_topologies,
     grow_from_skeleton,
     grow_up_to,
@@ -244,7 +245,68 @@ def test_a_smaller_topology_does_not_contain_a_larger_one() -> None:
 
 
 # =============================================================================================
-# 7. grow_up_to -- the level-by-level closure
+# 7. count_skeleton_placements -- how many ways the assertion fits
+# =============================================================================================
+
+
+def test_the_skeleton_can_sit_in_two_places_in_one_topology() -> None:
+    """The case docs/PARTIAL_TOPOLOGY_PLAN.md section 3.5 is about, and the reason the report
+    declines to say which element is the user's. Deduplication is by canonical form, so
+    ``p(R,[C-R])`` is fitted once -- but the skeleton ``R1`` reaches it two structurally
+    different ways ("add C in parallel, then R in series with it" and "add C in series, then R
+    in parallel with the pair"), and the two put the user's resistor in different places with
+    different fitted values. Reporting one of them as *the* answer would be the same error as
+    reporting one member of an equivalence class.
+    """
+    candidate = Circuit.parse("p(R1,C1-R2)").root
+    assert canonical_form(candidate) == "p(R,[C-R])"
+    assert count_skeleton_placements(candidate, Circuit.parse("R1").root) == 2
+
+
+def test_placements_related_by_symmetry_count_once() -> None:
+    """Two placements exchanged by an automorphism of the topology are the same claim, not two.
+    In ``p(R1-C1,R2-C2)`` the branches are interchangeable, so asserting ``R1-C1`` picks out one
+    branch however you label it -- counting the raw leaf subsets instead would report a
+    fictitious ambiguity for every symmetric circuit.
+    """
+    candidate = Circuit.parse("p(R1-C1,R2-C2)").root
+    assert count_skeleton_placements(candidate, Circuit.parse("R1-C1").root) == 1
+
+
+@pytest.mark.parametrize(
+    "candidate_text,skeleton_text",
+    [
+        ("R1-C1-p(R2,L1)", "R1-C1"),
+        ("p(R1,C1)", "R1-C1"),
+        ("R1", "R1-C1"),
+        ("R1-p(R2,C1)", "p(R1,C1)"),
+    ],
+)
+def test_a_placement_exists_exactly_when_the_skeleton_is_contained(
+    candidate_text: str, skeleton_text: str
+) -> None:
+    """The two functions answer the same question, one by counting and one by early exit, so
+    they must never disagree about whether the answer is zero.
+    """
+    candidate = Circuit.parse(candidate_text).root
+    skeleton = Circuit.parse(skeleton_text).root
+    assert (count_skeleton_placements(candidate, skeleton) > 0) is contains_skeleton(
+        candidate, skeleton
+    )
+
+
+def test_every_grown_topology_has_at_least_one_placement() -> None:
+    """Growth adds elements around the skeleton, so every candidate it produces must admit at
+    least one placement of it -- a zero here would mean the enumeration had wandered outside
+    the space it claims to cover.
+    """
+    skeleton = Circuit.parse("R1-C1").root
+    for node in grow_from_skeleton(skeleton, ("R", "C", "L"), 4):
+        assert count_skeleton_placements(node, skeleton) >= 1
+
+
+# =============================================================================================
+# 8. grow_up_to -- the level-by-level closure
 # =============================================================================================
 
 

@@ -52,6 +52,7 @@ from .enumerate import (
     DEFAULT_DEGENERACY_BUDGET,
     EndpointBehaviour,
     contains_skeleton,
+    count_skeleton_placements,
     enumerate_topologies,
     grow_up_to,
     is_feasible,
@@ -246,18 +247,50 @@ class DiscoveryResult:
         """
         if not self.candidates:
             return None
-        best_chi2 = min(c.result.chi2_reduced for c in self.candidates)
-        threshold = best_chi2 * PARSIMONY_CHI2_FACTOR
-        viable = [
-            c
-            for c in self.pareto
-            if c.result.chi2_reduced <= threshold and c.n_unresolved == 0
-        ]
-        if not viable:
-            viable = [c for c in self.pareto if c.result.chi2_reduced <= threshold]
+        well_fitting = self._well_fitting()
+        viable = [c for c in well_fitting if c.n_unresolved == 0] or well_fitting
         if not viable:
             return self.best
         return min(viable, key=lambda c: (c.complexity, c.aicc))
+
+    def _well_fitting(self) -> list[Candidate]:
+        """Pareto candidates that fit essentially as well as the best one found."""
+        if not self.candidates:
+            return []
+        threshold = min(c.result.chi2_reduced for c in self.candidates) * PARSIMONY_CHI2_FACTOR
+        return [c for c in self.pareto if c.result.chi2_reduced <= threshold]
+
+    @property
+    def unresolved_everywhere(self) -> bool:
+        """True when *every* candidate that fits the data leaves parameters it cannot resolve.
+
+        This is a finding about the experiment rather than about the search, and it deserves to
+        be reported as one. When it holds, the parsimony rule in :attr:`recommended` has nothing
+        left to prefer: each model that fits carries at least one parameter whose standard error
+        exceeds its own value, so the report is a set of circuits that describe the data and
+        pin down nothing.
+
+        A large skeleton is the systematic way to arrive here -- a thirteen-element candidate
+        carries 14-15 parameters against the 142 real residuals of a 71-point spectrum -- but
+        the condition is not particular to one, and neither is the answer: no amount of
+        enumeration speed fixes it, because the missing constraint is measurement. More data
+        does (a wider frequency window, more points, several bias points).
+        """
+        well_fitting = self._well_fitting()
+        return bool(well_fitting) and all(c.n_unresolved > 0 for c in well_fitting)
+
+    def placements_of(self, candidate: Candidate) -> int:
+        """How many structurally distinct ways the skeleton sits inside ``candidate``.
+
+        Zero when the search was unconstrained. Above one means the fit cannot attribute the
+        user's assertion to particular elements of this topology; see
+        :func:`~autocircuit.core.enumerate.count_skeleton_placements`.
+        """
+        if self.skeleton is None:
+            return 0
+        return count_skeleton_placements(
+            candidate.circuit.root, Circuit.parse(self.skeleton).root
+        )
 
     def equivalence_classes(self) -> list[list[Candidate]]:
         """Group candidates whose fitted responses are numerically indistinguishable.
@@ -340,6 +373,7 @@ class DiscoveryResult:
             f"  {'circuit':<34}{'AICc':>11}{'chi2_red':>11}{'cplx':>7}{'free?':>7}",
         ]
         aliases: list[str] = []
+        ambiguous: list[str] = []
         for candidate in self.pareto[:limit]:
             unresolved = candidate.n_unresolved
             mark = "ok" if unresolved == 0 else f"{unresolved} bad"
@@ -352,12 +386,34 @@ class DiscoveryResult:
             if equivalents:
                 names = ", ".join(e.circuit.to_string() for e in equivalents[:4])
                 aliases.append(f"  {candidate.circuit.to_string()} == {names}")
+            placements = self.placements_of(candidate)
+            if placements > 1:
+                ambiguous.append(
+                    f"  {candidate.circuit.to_string()}: {placements} ways"
+                )
 
         if aliases:
             lines += [
                 "",
                 "Indistinguishable topologies (identical response; the data cannot choose):",
                 *aliases,
+            ]
+
+        if ambiguous:
+            lines += [
+                "",
+                f"Where {self.skeleton} sits in these (it fits in more than one place, and the",
+                "fit cannot say which elements are the ones you asserted):",
+                *ambiguous,
+            ]
+
+        if self.unresolved_everywhere:
+            lines += [
+                "",
+                "! Every candidate that fits this data leaves parameters the data cannot",
+                "  resolve -- their standard errors exceed their own values. That is a finding",
+                "  about the measurement, not about the search: a wider frequency window or",
+                "  more points would fix it, a longer search would not.",
             ]
 
         recommended = self.recommended

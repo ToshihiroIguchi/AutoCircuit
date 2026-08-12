@@ -272,6 +272,15 @@ def cmd_discover(args: argparse.Namespace) -> int:
             "skeleton": result.skeleton,
             "complete_up_to": result.complete_up_to,
             "coverage": result.completeness(),
+            # Both of these are findings a reader of the numbers alone would miss: that no
+            # candidate is identifiable, and that the asserted skeleton fits into a reported
+            # topology in more than one place.
+            "unresolved_everywhere": result.unresolved_everywhere,
+            "skeleton_placements": (
+                None
+                if result.skeleton is None
+                else {c.circuit.to_string(): result.placements_of(c) for c in result.pareto}
+            ),
             "n_evaluated": result.n_evaluated,
             "generations": result.generations,
             "elapsed_s": result.elapsed_s,
