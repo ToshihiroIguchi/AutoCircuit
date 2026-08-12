@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -316,6 +317,49 @@ def simplify(node: Node) -> Node:
 def count_elements(node: Node) -> int:
     """Number of element leaves in a topology."""
     return len(_walk(node))
+
+
+# -- Tree addressing -----------------------------------------------------------------------
+# A position in a topology is the path of child indices from the root, so that a caller can
+# name a subtree, read it and put a different one in its place. The genetic operators in
+# `discover.py` and the skeleton-growing enumerator in `enumerate.py` both work this way, which
+# is why these live here rather than in either of them.
+
+
+def subtree_paths(node: Node) -> list[tuple[int, ...]]:
+    """Every subtree position, as a path of child indices from the root (the root included)."""
+    out: list[tuple[int, ...]] = [()]
+    if not isinstance(node, ElementNode):
+        for index, child in enumerate(node.children):
+            out.extend((index, *rest) for rest in subtree_paths(child))
+    return out
+
+
+def subtree_at(node: Node, path: Sequence[int]) -> Node:
+    """The subtree addressed by ``path``."""
+    for index in path:
+        if isinstance(node, ElementNode):
+            raise CircuitError(f"path {tuple(path)!r} runs past a leaf")
+        node = node.children[index]
+    return node
+
+
+def replace_subtree(node: Node, path: Sequence[int], new: Node) -> Node:
+    """A copy of ``node`` with the subtree at ``path`` replaced by ``new``.
+
+    The rebuild goes through :func:`series`/:func:`parallel`, so nested nodes of the same type
+    are flattened exactly as they would be in a freshly parsed circuit. That matters for
+    deduplication: inserting an element beside a leaf of a series block and appending it to
+    that block have to produce the identical tree, or the same topology is counted twice.
+    """
+    if not path:
+        return new
+    if isinstance(node, ElementNode):
+        raise CircuitError(f"path {tuple(path)!r} runs past a leaf")
+    index, rest = path[0], path[1:]
+    children = list(node.children)
+    children[index] = replace_subtree(children[index], rest, new)
+    return series(*children) if isinstance(node, Series) else parallel(*children)
 
 
 def canonical_form(node: Node) -> str:

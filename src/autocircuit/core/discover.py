@@ -41,8 +41,11 @@ from .circuit import (
     Series,
     count_elements,
     parallel,
+    replace_subtree,
     series,
     simplify,
+    subtree_at,
+    subtree_paths,
 )
 from .elements import DEFAULT_POOL
 from .enumerate import (
@@ -317,15 +320,6 @@ class DiscoveryResult:
 # -- Tree utilities ------------------------------------------------------------------------
 
 
-def _paths(node: Node, prefix: tuple[int, ...] = ()) -> list[tuple[int, ...]]:
-    """Every subtree position, as a path of child indices from the root."""
-    out = [prefix]
-    if not isinstance(node, ElementNode):
-        for index, child in enumerate(node.children):
-            out.extend(_paths(child, (*prefix, index)))
-    return out
-
-
 def _element_paths(node: Node, prefix: tuple[int, ...] = ()) -> list[tuple[int, ...]]:
     if isinstance(node, ElementNode):
         return [prefix]
@@ -333,23 +327,6 @@ def _element_paths(node: Node, prefix: tuple[int, ...] = ()) -> list[tuple[int, 
     for index, child in enumerate(node.children):
         out.extend(_element_paths(child, (*prefix, index)))
     return out
-
-
-def _get(node: Node, path: Sequence[int]) -> Node:
-    for index in path:
-        assert not isinstance(node, ElementNode)
-        node = node.children[index]
-    return node
-
-
-def _replace(node: Node, path: Sequence[int], new: Node) -> Node:
-    if not path:
-        return new
-    assert not isinstance(node, ElementNode)
-    index, rest = path[0], path[1:]
-    children = list(node.children)
-    children[index] = _replace(children[index], rest, new)
-    return series(*children) if isinstance(node, Series) else parallel(*children)
 
 
 def _delete(node: Node, path: Sequence[int]) -> Node | None:
@@ -408,7 +385,7 @@ def mutate(
 
     if operation == "retype":
         path = _element_paths(node)[int(rng.integers(len(_element_paths(node))))]
-        return _replace(node, path, ElementNode(str(rng.choice(pool))))
+        return replace_subtree(node, path, ElementNode(str(rng.choice(pool))))
 
     if operation == "delete":
         paths = _element_paths(node)
@@ -416,23 +393,23 @@ def mutate(
         result = _delete(node, path)
         return result if result is not None else node
 
-    paths = _paths(node)
+    paths = subtree_paths(node)
     path = paths[int(rng.integers(len(paths)))]
-    subtree = _get(node, path)
+    subtree = subtree_at(node, path)
     fresh = ElementNode(str(rng.choice(pool)))
     combined = (
         series(subtree, fresh) if operation == "insert_series" else parallel(subtree, fresh)
     )
-    return _replace(node, path, combined)
+    return replace_subtree(node, path, combined)
 
 
 def crossover(a: Node, b: Node, rng: np.random.Generator) -> Node:
     """Graft a random subtree of ``b`` onto a random position of ``a``."""
-    a_paths = _paths(a)
-    b_paths = _paths(b)
+    a_paths = subtree_paths(a)
+    b_paths = subtree_paths(b)
     target = a_paths[int(rng.integers(len(a_paths)))]
-    donor = _get(b, b_paths[int(rng.integers(len(b_paths)))])
-    return _replace(a, target, donor)
+    donor = subtree_at(b, b_paths[int(rng.integers(len(b_paths)))])
+    return replace_subtree(a, target, donor)
 
 
 # -- Search --------------------------------------------------------------------------------

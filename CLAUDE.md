@@ -26,15 +26,32 @@ Fable and Opus are very expensive. Delegate work to cheaper models via subagents
 **AutoCircuit** analyzes frequency-characteristic (impedance) data of passive components and
 extracts equivalent circuit models.
 
-Two modes:
-1. **Manual topology**: the user supplies an equivalent circuit; AutoCircuit fits all parameters
-   **without any user-supplied initial values** (global optimization; this is the key
+Three modes, which differ only in how much of the topology the user fixes:
+1. **Manual topology**: the user supplies the whole equivalent circuit; AutoCircuit fits all
+   parameters **without any user-supplied initial values** (global optimization; this is the key
    differentiator vs. ZView).
-2. **Full auto**: both the circuit topology and its parameters are discovered automatically,
+2. **Partial topology** (planned, not yet implemented): the user supplies a *skeleton* — the
+   part they already know is there, such as a series ESR/ESL on a capacitor or an electrolyte
+   resistance on a cell — and the search adds the remaining elements. The candidate space is
+   defined generatively, as every topology that reduces to the skeleton once the added elements
+   are removed, so it is enumerated by growing the skeleton rather than by filtering the full
+   space. (A skeleton is a *constraint*; `discover(seeds=...)` is a *hint* that merely adds
+   circuits to the candidate list. They are not the same feature.)
+3. **Full auto**: both the circuit topology and its parameters are discovered automatically,
    reported as an accuracy-versus-complexity Pareto front plus equivalence classes — never as
    a single "the answer", because different topologies are frequently exact
-   reparameterisations of one another. Currently a genetic search; being replaced by
-   exhaustive enumeration up to 5 elements (see `docs/DISCOVERY_V2_PLAN.md`).
+   reparameterisations of one another. Exhaustive enumeration up to 5 elements, with the
+   genetic search as a fallback above that (see `docs/DISCOVERY_V2_PLAN.md`).
+
+**A user-supplied constraint narrows what the report is allowed to claim, and saying so is not
+optional.** Mode 2 is the same shape as two failures this project has already measured — a
+screening budget that drops the truth while its equivalents stay on the shortlist, and a DRT
+peak count that would delete the right answer from a search still calling itself exhaustive
+(`docs/HANDOFF.md` §3, `docs/DISCOVERY_V2_PLAN.md` §3.4). In all three the report still *looks*
+healthy. So a constrained search must state its constraint in `complete_up_to`'s sentence
+("every plausible topology up to N elements **that contains this skeleton**"), and must report
+which equivalence-class members the skeleton excluded: choosing between forms the data cannot
+distinguish is something the user did, never a finding.
 
 Other pillars: full ZView-equivalent element set plus skin-effect and Maxwell-Wagner support,
 SPICE netlist export (with RC/RL ladder synthesis for fractional elements), readers for common

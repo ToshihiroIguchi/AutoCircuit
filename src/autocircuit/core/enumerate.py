@@ -45,8 +45,11 @@ from .circuit import (
     canonical_form,
     count_elements,
     parallel,
+    replace_subtree,
     series,
     simplify,
+    subtree_at,
+    subtree_paths,
 )
 from .spectrum import Spectrum
 
@@ -54,11 +57,13 @@ __all__ = [
     "DEFAULT_DEGENERACY_BUDGET",
     "DEFAULT_SLOPE_TOLERANCE",
     "EndpointBehaviour",
+    "contains_skeleton",
     "count_topologies",
     "endpoint_exponents",
     "enumerate_topologies",
     "enumerate_up_to",
     "feasible_topologies",
+    "grow_from_skeleton",
     "integer_partitions",
     "is_feasible",
     "is_plausible",
@@ -224,6 +229,156 @@ def enumerate_up_to(pool: Sequence[str], n_max: int, n_min: int = 1) -> Iterator
 def count_topologies(pool: Sequence[str], n: int) -> int:
     """How many distinct plausible topologies exist at exactly ``n`` elements."""
     return sum(1 for _ in enumerate_topologies(pool, n))
+
+
+# -- Skeleton-constrained enumeration ------------------------------------------------------
+#
+# The user often knows part of the answer before the search starts: a capacitor has an ESR and
+# an ESL in series with it, a cell has an electrolyte resistance in series with everything.
+# Asserting that part -- the *skeleton* -- and letting the search supply the rest is a stronger
+# version of the knowledge injection that restricting the pool already provides.
+#
+# What must not be lost is that this is a *constraint*, so the completeness statement it
+# supports is narrower ("every plausible topology up to N elements that contains this
+# skeleton") and a wrong skeleton removes the truth from the space while leaving a report that
+# still looks healthy. Those obligations belong to the caller and the report; this module only
+# has to define the space exactly and enumerate it without gaps.
+
+
+def _remove_leaves(node: Node, keep: frozenset[int], cursor: list[int]) -> Node | None:
+    """Drop every leaf whose index is not in ``keep``; None if nothing is left."""
+    if isinstance(node, ElementNode):
+        index = cursor[0]
+        cursor[0] = index + 1
+        return node if index in keep else None
+    kept = [child for child in (_remove_leaves(c, keep, cursor) for c in node.children)
+            if child is not None]
+    if not kept:
+        return None
+    return series(*kept) if isinstance(node, Series) else parallel(*kept)
+
+
+def contains_skeleton(candidate: Node, skeleton: Node) -> bool:
+    """True when ``candidate`` reduces to ``skeleton`` once some of its elements are removed.
+
+    This *is* the definition of the constrained space, written out independently of how
+    :func:`grow_from_skeleton` generates it, so the two can be checked against each other.
+
+    Containment is deliberately not "the skeleton appears as a subtree". ``series`` and
+    ``parallel`` flatten nested nodes of the same type, so the skeleton ``R1-C1`` is nowhere to
+    be found as a subtree of ``R1-C1-p(R2,L1)`` -- that tree is one three-child series node.
+    Deletion-and-collapse is the notion that survives flattening, and it is also the one that
+    matches what the user means: *these components are in the circuit, connected like this,
+    and something else is there too.*
+    """
+    target = canonical_form(simplify(skeleton))
+    n_keep = count_elements(skeleton)
+    total = count_elements(candidate)
+    if total < n_keep:
+        return False
+    for keep in itertools.combinations(range(total), n_keep):
+        remaining = _remove_leaves(candidate, frozenset(keep), [0])
+        if remaining is not None and canonical_form(simplify(remaining)) == target:
+            return True
+    return False
+
+
+def _insertions(node: Node, codes: tuple[str, ...]) -> Iterator[Node]:
+    """Every way of adding one element from ``codes`` to ``node``, in series or in parallel.
+
+    Two families of move, and the second one is not optional. [measured]
+
+    1. **Attach at a position** -- any subtree, the root and the leaves included. This is the
+       move ``discover.mutate`` makes.
+    2. **Group a proper subset of a node's children and attach beside that group.** Series and
+       parallel nodes are n-ary and flattened, so a sub-group of their children is *not* an
+       addressable position: the skeleton ``R1-C1-L1`` is one three-child series node, and
+       putting a capacitor across only its ``C1-L1`` half is a real topology
+       (``[C-p(C,[L-R])]``) that no attachment to an existing position can build.
+
+    Leaving out family 2 is not a small loss. Cross-checked against
+    :func:`contains_skeleton` over the whole enumerated space, attachment alone found 7 of the
+    16 four-element topologies containing ``R1-C1-L1`` and 58 of 139 at five elements -- a
+    silent hole in exactly the completeness guarantee this mode exists to provide.
+
+    Wrapping a subset in a node of its *own* type just flattens back into the parent, so only
+    the opposite orientation yields anything new; family 1 already covers the whole-node and
+    single-child cases.
+    """
+    for path in subtree_paths(node):
+        subtree = subtree_at(node, path)
+        for code in codes:
+            fresh = ElementNode(code)
+            yield replace_subtree(node, path, series(subtree, fresh))
+            yield replace_subtree(node, path, parallel(subtree, fresh))
+        if isinstance(subtree, ElementNode):
+            continue
+        children = subtree.children
+        same = series if isinstance(subtree, Series) else parallel
+        opposite = parallel if isinstance(subtree, Series) else series
+        for size in range(2, len(children)):
+            for combo in itertools.combinations(range(len(children)), size):
+                chosen = [children[i] for i in combo]
+                rest = [children[i] for i in range(len(children)) if i not in combo]
+                for code in codes:
+                    block = opposite(same(*chosen), ElementNode(code))
+                    yield replace_subtree(node, path, same(*rest, block))
+
+
+def grow_from_skeleton(skeleton: Node, pool: Sequence[str], n: int) -> Iterator[Node]:
+    """Every distinct plausible topology with exactly ``n`` elements that contains ``skeleton``.
+
+    Args:
+        skeleton: The part of the circuit the user is asserting. It must not be redundant --
+            a skeleton that ``simplify`` collapses (``R1-R2``) is rejected rather than
+            silently reinterpreted as the smaller circuit it really is.
+        pool: Element codes the *added* elements may use. The skeleton may contain codes
+            outside the pool; it is an assertion, not a search result.
+        n: Total element count of the candidates. ``n`` below the skeleton's own size yields
+            nothing; ``n`` equal to it yields the skeleton alone.
+
+    Returns:
+        Bare topology trees in reduced form, each canonical form exactly once -- the same
+        contract as :func:`enumerate_topologies`, so the two are interchangeable downstream.
+
+    Growing the skeleton is not merely faster than enumerating the full space and keeping what
+    :func:`contains_skeleton` accepts; enumerate-then-filter also does redundant work that
+    grows with the pool, whereas the insertion closure is bounded by the skeleton's own shape.
+
+    **Intermediate trees are not filtered**, only the final level is. A partially grown tree
+    that ``simplify`` would collapse, or that :func:`is_plausible_node` would reject, may still
+    be on the only path to a valid larger candidate, and completeness is what this mode exists
+    to provide. Pruning them would be an optimisation that can only lose topologies.
+
+    The pool and the skeleton are validated eagerly, as in :func:`enumerate_topologies`: a bad
+    element code or a redundant skeleton raises here, not on the first ``next``.
+    """
+    codes = _normalise_pool(pool)
+    size = count_elements(skeleton)
+    if count_elements(simplify(skeleton)) != size:
+        raise ValueError(
+            "the skeleton is redundant: it contains elements that cancel exactly "
+            f"({canonical_form(skeleton)} reduces to {canonical_form(simplify(skeleton))}). "
+            "State the circuit it actually describes instead."
+        )
+    if n < size:
+        return iter(())
+    return _grow(skeleton, codes, size, n)
+
+
+def _grow(skeleton: Node, codes: tuple[str, ...], size: int, n: int) -> Iterator[Node]:
+    """The insertion closure itself; see :func:`grow_from_skeleton` for the contract."""
+    frontier: dict[str, Node] = {canonical_form(skeleton): skeleton}
+    for _ in range(n - size):
+        grown: dict[str, Node] = {}
+        for node in frontier.values():
+            for candidate in _insertions(node, codes):
+                grown.setdefault(canonical_form(candidate), candidate)
+        frontier = grown
+    for node in frontier.values():
+        reduced = _survives(node, n)
+        if reduced is not None:
+            yield reduced
 
 
 # -- Structural feasibility filter ---------------------------------------------------------
