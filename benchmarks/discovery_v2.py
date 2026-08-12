@@ -1,6 +1,6 @@
 """Does exhaustive-first discovery actually work, and what does it cost?
 
-Five measurements, selected by the first command-line argument:
+Six measurements, selected by the first command-line argument:
 
 ``gate``
     Acceptance gate **G1** of ``docs/DISCOVERY_V2_PLAN.md``: on each reference spectrum,
@@ -19,6 +19,13 @@ Five measurements, selected by the first command-line argument:
     on every reference and every seed. Recovery is the gate. The speed-up over the
     unconstrained run (``--compare``) is a recorded observation, not a target -- G1 records
     what happens when a time target is chased.
+
+``wrong-skeleton``
+    Acceptance gate **P2**, and the measurement section 3.2 of that plan deliberately leaves
+    unwritten: with a skeleton the reference does *not* contain, what does the report look
+    like? Reports the runs-test z on the residuals, whether the recommendation carries
+    unresolved parameters, and how far the constrained chi2 sits from the truth's own. The
+    gate's wording is written from these numbers, not before them.
 
 ``screen``
     Tuning evidence for the tier-1 screening budget: for a range of (popsize, maxiter)
@@ -46,6 +53,7 @@ Run with the package on the path (it is not pip-installed on the dev machine)::
     python benchmarks/discovery_v2.py screen-rank --workers 8
     python benchmarks/discovery_v2.py gate --workers 8
     python benchmarks/discovery_v2.py skeleton --workers 8 --compare
+    python benchmarks/discovery_v2.py wrong-skeleton --workers 8
 
 ``gate`` and ``screen-rank`` are the slow ones: both fit every plausible topology up to five
 elements, several times over. Use ``--seeds 1`` and ``--limit 4`` for a sanity run.
@@ -83,9 +91,10 @@ from autocircuit.core.enumerate import (
     enumerate_topologies,
     is_feasible,
 )
-from autocircuit.core.fit import screen
+from autocircuit.core.fit import fit, screen
 from autocircuit.core.simulate import log_frequencies, simulate
 from autocircuit.core.spectrum import Spectrum
+from autocircuit.core.validate import RUNS_Z_LIMIT, _runs_z
 
 
 @dataclass(frozen=True)
@@ -110,6 +119,11 @@ class Reference:
     #: -- a capacitor's C with its ESR and ESL, one relaxation of a two-block dielectric, the
     #: electrolyte resistance and double layer of a cell -- not a sub-circuit chosen to be easy.
     skeleton: str = ""
+    #: A skeleton this reference does *not* contain, for gate P2. Each is a mistake someone
+    #: would plausibly make -- a semicircle asserted for a capacitor that has none, a CPE
+    #: asserted where the sample has an ideal capacitance -- rather than a circuit chosen to be
+    #: obviously absurd. A wrong skeleton that is easy to spot measures nothing.
+    wrong_skeleton: str = ""
 
     def spectrum(self, seed: int = 0, noise: float | None = None) -> Spectrum:
         return simulate(
@@ -138,6 +152,7 @@ REFERENCES = [
         1e2,
         1e9,
         skeleton="C1-R1-L1",
+        wrong_skeleton="R1-p(R2,C1)",
     ),
     Reference(
         "Maxwell-Wagner (two blocks)",
@@ -148,6 +163,7 @@ REFERENCES = [
         1e7,
         equivalents=("p(R1-C1,R2,C2)", "p(p(R1,C1)-C2,R2)", "p(p(R1,C1)-R2,C2)"),
         skeleton="p(R1,C1)",
+        wrong_skeleton="p(R1,CPE1)-p(R2,C1)",
     ),
     Reference(
         "Randles (with Warburg)",
@@ -157,6 +173,7 @@ REFERENCES = [
         1e-2,
         1e5,
         skeleton="R1-p(C1,R2)",
+        wrong_skeleton="R1-p(CPE1,R2)",
     ),
 ]
 
@@ -323,6 +340,111 @@ def report_skeleton(seeds: int, limit: int, workers: int, compare: bool) -> None
     print(
         "\nRecovery is the gate. The speed-up is an observation: tuning towards it is how the\n"
         "screening budget nearly lost the Maxwell-Wagner truth (docs/HANDOFF.md section 3)."
+    )
+
+
+def _structure_z(result: DiscoveryResult) -> float:
+    """Runs-test z on the best-fitting candidate's residuals; below the limit means structure.
+
+    The same statistic ``mode="auto"`` uses to decide whether to keep searching, computed here
+    on its own so the number can be looked at rather than only acted on. Real and imaginary
+    residuals are separate halves of the vector, so each is tested and the worse one reported.
+    """
+    if not result.candidates:
+        return math.nan
+    best = min(result.candidates, key=lambda c: c.result.chi2_reduced)
+    residuals = best.result.residuals
+    if residuals.size < 4:
+        return math.nan
+    half = residuals.size // 2
+    return min(_runs_z(residuals[:half]), _runs_z(residuals[half:]))
+
+
+def report_wrong_skeleton(seeds: int, limit: int, workers: int) -> None:
+    """Gate P2: what does the report look like when the asserted skeleton is wrong?
+
+    This is the measurement section 3.2 of docs/PARTIAL_TOPOLOGY_PLAN.md refuses to guess at,
+    for a reason with three precedents in this project: every trap here so far has been a
+    report that stayed healthy-looking while the answer was gone. So the questions are asked
+    as numbers, not as a verdict --
+
+    * does the constrained fit leave residuals the runs test can see as structure?
+    * does the recommendation come with unresolved parameters, or does it look clean?
+    * how far is the constrained chi2 from what the truth itself achieves on the same data?
+
+    -- and the wording of gate P2 is written afterwards, from what comes out. Note the truth's
+    own chi2 is the right reference, not the unconstrained search's: it is what the data can be
+    fitted to at all, and it costs one fit instead of a second whole search.
+    """
+    print("=" * 92)
+    print("P2: what does a WRONG skeleton look like in the report?")
+    print("=" * 92)
+    for reference in REFERENCES:
+        if not reference.wrong_skeleton:
+            continue
+        if contains_skeleton(
+            Circuit.parse(reference.circuit).root,
+            Circuit.parse(reference.wrong_skeleton).root,
+        ):
+            raise SystemExit(
+                f"error: {reference.label}: {reference.circuit} does contain"
+                f" {reference.wrong_skeleton}, so it is not a wrong skeleton at all"
+            )
+        print(
+            f"\n{reference.label}: truth {reference.circuit}   pool {','.join(reference.pool)}"
+            f"\n  wrong skeleton {reference.wrong_skeleton}"
+        )
+        structure = unresolved = all_unresolved = 0
+        ratios: list[float] = []
+        for seed in range(seeds):
+            data = reference.spectrum(seed)
+            truth_fit = fit(Circuit.parse(reference.circuit), data, weighting="modulus", seed=seed)
+            result = discover(
+                data,
+                pool=reference.pool,
+                skeleton=reference.wrong_skeleton,
+                mode="exhaustive",
+                exhaustive_limit=limit,
+                workers=workers,
+                seed=seed,
+            )
+            if not result.candidates:
+                print(f"  seed {seed}: no candidate could be fitted at all", flush=True)
+                continue
+            best_chi2 = min(c.result.chi2_reduced for c in result.candidates)
+            ratio = best_chi2 / truth_fit.chi2_reduced if truth_fit.chi2_reduced > 0 else math.inf
+            ratios.append(ratio)
+            z = _structure_z(result)
+            has_structure = z < RUNS_Z_LIMIT
+            structure += int(has_structure)
+            recommended = result.recommended
+            n_bad = 0 if recommended is None else recommended.n_unresolved
+            unresolved += int(n_bad > 0)
+            all_unresolved += int(result.unresolved_everywhere)
+            name = "-" if recommended is None else recommended.circuit.to_string()
+            print(
+                f"  seed {seed}: chi2 {best_chi2:.3g} vs {truth_fit.chi2_reduced:.3g} for the"
+                f" truth ({ratio:.1f}x)  runs z={z:+.1f}"
+                f" (structure: {'yes' if has_structure else 'NO'})"
+                f"  -> {name} with {n_bad} unresolved"
+                f"{', nothing identifiable' if result.unresolved_everywhere else ''}",
+                flush=True,
+            )
+        if ratios:
+            ordered = sorted(ratios)
+            median = ordered[len(ordered) // 2]
+            print(
+                f"  ==> residual structure seen {structure}/{len(ratios)};"
+                f" recommendation carried unresolved parameters {unresolved}/{len(ratios)};"
+                f" nothing identifiable at all {all_unresolved}/{len(ratios)};"
+                f" chi2 ratio median {median:.1f}x (min {ordered[0]:.1f}x,"
+                f" max {ordered[-1]:.1f}x)"
+            )
+    print(
+        "\nP2 passes only if a wrong skeleton is visible in the report *without* knowing the\n"
+        "truth. A large chi2 ratio is not by itself enough -- the reader does not have the\n"
+        "truth's chi2 to compare against -- so the runs test and the unresolved counts are the\n"
+        "signals that have to carry it."
     )
 
 
@@ -560,7 +682,8 @@ def report_screen_rank(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "what", choices=["gate", "skeleton", "filter", "screen", "screen-rank"]
+        "what",
+        choices=["gate", "skeleton", "wrong-skeleton", "filter", "screen", "screen-rank"],
     )
     parser.add_argument(
         "--seeds", type=int, default=10,
@@ -604,6 +727,8 @@ def main() -> None:
         report_gate(args.seeds, args.limit, args.workers)
     elif args.what == "skeleton":
         report_skeleton(args.seeds, args.limit, args.workers, args.compare)
+    elif args.what == "wrong-skeleton":
+        report_wrong_skeleton(args.seeds, args.limit, args.workers)
     elif args.what == "filter":
         report_filter()
     elif args.what == "screen":
