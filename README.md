@@ -34,7 +34,7 @@ Designed for capacitor characterisation (C, ESR, ESL, skin effect), sintered cer
 pip install -e .
 ```
 
-Requires Python 3.11+. The only runtime dependencies are numpy and scipy, which is what allows
+Requires Python 3.12+. The only runtime dependencies are numpy and scipy, which is what allows
 the same code to run in a browser under Pyodide later.
 
 ## Quick start

@@ -77,7 +77,7 @@ Update these when decisions change.
 
 ## Stack and conventions
 
-- Python >= 3.11, package name `autocircuit`, layout `src/autocircuit/`.
+- Python >= 3.12, package name `autocircuit`, layout `src/autocircuit/`.
 - Tooling: `pytest`, `ruff` (lint + format), `mypy` (strict on core modules). Install with
   `pip install -e .` (`uv` is not available on this machine).
 - **`numpy` and `scipy` are the only runtime dependencies, and that is a hard rule** — it is

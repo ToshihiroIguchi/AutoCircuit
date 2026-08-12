@@ -27,7 +27,7 @@ Deliverables in order: core library → CLI → static-site Web UI (WASM).
 
 | # | Decision | Choice | Notes |
 |---|----------|--------|-------|
-| D1 | Core language | **Python 3.11+ (numpy/scipy)**, Web via **Pyodide** | User did not object to the recommendation. Core stays Pyodide-compatible; hot spots can move to Rust later if browser search speed becomes a real problem. |
+| D1 | Core language | **Python 3.12+ (numpy/scipy)**, Web via **Pyodide** | User did not object to the recommendation. Core stays Pyodide-compatible; hot spots can move to Rust later if browser search speed becomes a real problem. The floor was 3.11 until it was raised to match what is actually verified: mypy has to run as 3.12 because numpy's bundled stubs use 3.12 syntax, so nothing ever checked 3.11 and nothing ran it either. |
 | D2 | UI language | **English only** | Consistent with the "everything except conversation is English" rule. Revisit if a Japanese audience becomes a target. |
 | D3 | Test data | **Synthetic + public data** | User has no measurement files at hand. Synthetic round-trips are the backbone; vendor-published Touchstone/SPICE data (Murata, TDK) used as realistic smoke tests. |
 | D4 | CLI framework | **`argparse` (stdlib)** | Changed from `typer` during implementation: keeping numpy+scipy as the *only* runtime dependencies is what makes the Pyodide target painless, and the CLI is simple enough that a framework earns nothing. |

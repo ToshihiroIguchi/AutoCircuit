@@ -7,7 +7,7 @@ name = "autocircuit"
 version = "0.1.0"
 description = "Equivalent circuit analysis of passive-component frequency characteristics, without user-supplied initial values."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = { text = "MIT" }
 dependencies = ["numpy>=1.24", "scipy>=1.10"]
 
@@ -32,11 +32,11 @@ src = ["src", "tests"]
 select = ["E", "F", "I", "UP", "B", "SIM", "NPY"]
 
 [tool.mypy]
-# The package supports 3.11 (see requires-python), but mypy cannot be *told* 3.11 here: the
-# stubs shipped inside numpy >= 2.3 use `type X = ...` statements, which are 3.12 syntax, so
-# checking under 3.11 fails while parsing numpy itself rather than this project. The source
-# uses no 3.12-only syntax, and `from __future__ import annotations` is on everywhere, so
-# 3.11 support is a packaging claim tested by running the suite, not by this checker.
+# Matches requires-python. It did not always: the floor was 3.11 while this said 3.12, because
+# the stubs shipped inside numpy >= 2.3 use `type X = ...` statements and asking mypy for 3.11
+# fails while parsing *numpy*, before it reaches this project. Nothing was checking 3.11 and
+# nothing was running it either, so the claim came down to meet what is actually verified
+# rather than the type checker being argued up to meet the claim.
 python_version = "3.12"
 packages = ["autocircuit"]
 mypy_path = "src"
