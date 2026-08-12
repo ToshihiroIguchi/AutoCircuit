@@ -30,7 +30,8 @@ Three modes, which differ only in how much of the topology the user fixes:
 1. **Manual topology**: the user supplies the whole equivalent circuit; AutoCircuit fits all
    parameters **without any user-supplied initial values** (global optimization; this is the key
    differentiator vs. ZView).
-2. **Partial topology** (planned, not yet implemented): the user supplies a *skeleton* — the
+2. **Partial topology** (enumeration done, search not yet wired; see
+   `docs/PARTIAL_TOPOLOGY_PLAN.md`): the user supplies a *skeleton* — the
    part they already know is there, such as a series ESR/ESL on a capacitor or an electrolyte
    resistance on a cell — and the search adds the remaining elements. The candidate space is
    defined generatively, as every topology that reduces to the skeleton once the added elements
@@ -66,7 +67,11 @@ static-site Web UI running the same core via WASM (Pyodide).
    backed by `benchmarks/`; do not contradict them without re-running the benchmark.
 3. `docs/DISCOVERY_V2_PLAN.md` — exhaustive-first topology discovery. **Implemented**; kept
    because its corrections record why several obvious-looking choices are wrong.
-4. `docs/WEB_UI_PLAN.md` — the next task (phase 6, web UI). **Draft awaiting approval.**
+4. `docs/PARTIAL_TOPOLOGY_PLAN.md` — skeleton-constrained discovery (mode 2 above). Step 1
+   (enumeration) is **implemented and measured**; the rest is a draft. Its §3 is the part that
+   matters: what a constrained search is allowed to claim.
+5. `docs/WEB_UI_PLAN.md` — phase 6, web UI. **Draft awaiting approval.** Step 1 (a lossless
+   `FitResult` across a worker boundary) is designed but not started.
 
 Update these when decisions change.
 
