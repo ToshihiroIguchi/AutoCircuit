@@ -1,11 +1,11 @@
 # Partial Topology — Skeleton-Constrained Discovery
 
-Status: **steps 1–2 are implemented and measured** (enumeration, and the search wired to it),
-**step 3 is done** (§3.3's cost estimate was corrected on the way, and the feature is opt-in
-because of it), and **step 4 is done** — gates P1, P3 and P4 pass, P2 is written from
-the measurement rather than from a guess, and the signal that measurement pointed at is built
-(§3.2). Only the documentation sweep (step 5) is left. Written 2026-08-12, measured
-2026-08-13.
+Status: **all five steps are implemented, and gates P1–P4 are measured.** Written 2026-08-12,
+measured 2026-08-13. Two of this document's own claims were corrected by those measurements and
+are kept as corrections rather than edited away: §3.2's guess at what a wrong skeleton looks
+like (it is invisible in the residuals, and the escape valve proposed here would never have
+fired), and §3.3's claim that naming the excluded equivalents is cheap (it costs about what the
+search does, which is why it is opt-in).
 Prerequisite reading: `docs/DISCOVERY_V2_PLAN.md` (especially the corrections in §3.2, §3.4 and
 §5.1 — this design repeats their shape), `docs/HANDOFF.md` §3, and `CLAUDE.md`'s three modes.
 
@@ -378,7 +378,7 @@ has to change; step 3 gains a second button.
 | 2 | `grow_up_to()`, `discover(skeleton=...)`, `DiscoveryResult.skeleton`, completeness wording, CLI flag | M | **done** — see the notes in §3.1 and §4.1 |
 | 3 | Report: excluded equivalents (§3.3), unresolved-across-the-board (§3.4), placement multiplicity (§3.5) | M | **done** — §3.3 opt-in on the measured cost, after correcting the estimate that called it cheap |
 | 4 | Gate P2 — the wrong-skeleton experiment (§3.2), and whatever it forces | M | **done** — experiment measured, gate written from it, and the signal it pointed at (naming the neutralised element) built |
-| 5 | Docs: this file, `IMPLEMENTATION_PLAN.md` §6, `HANDOFF.md`, README | S | |
+| 5 | Docs: this file, `IMPLEMENTATION_PLAN.md` §6, `HANDOFF.md`, README | S | **done** — also `benchmarks/README.md` and `CLAUDE.md`'s mode-2 status |
 
 Step 4 is not last because it is least important; it is last because it needs steps 2–3 to run
 at all. It is the step most likely to send steps 2–3 back for changes.

@@ -1,7 +1,7 @@
 # Handoff — state of AutoCircuit as of 2026-08-13
 
 Written at the end of the session that built the backend, updated after discovery v2 steps
-1–5, and again after the skeleton-constrained mode (steps 1–3 of
+1–5, and again after the skeleton-constrained mode (all of
 `docs/PARTIAL_TOPOLOGY_PLAN.md`). Read this first, then `CLAUDE.md`, then the plan for
 whichever part you are touching.
 
