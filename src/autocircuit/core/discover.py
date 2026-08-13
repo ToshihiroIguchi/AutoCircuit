@@ -898,6 +898,122 @@ def discover(
     )
 
 
+@dataclass(frozen=True)
+class ExcludedEquivalents:
+    """What a skeleton removed from the report, at the size of one reported candidate."""
+
+    circuit: str
+    """The reported candidate this was computed for."""
+    skeleton: str
+    size: int
+    kept: int
+    """Topologies of that size that contain the skeleton -- the ones the search evaluated."""
+    excluded: int
+    """Topologies of that size that do not, and were therefore never fitted."""
+    equivalents: tuple[str, ...]
+    """Excluded topologies found to reproduce ``circuit``'s fitted response exactly."""
+    elapsed_s: float
+
+    def summary(self) -> str:
+        if not self.equivalents:
+            return (
+                f"Your skeleton {self.skeleton} excluded {self.excluded} of the "
+                f"{self.kept + self.excluded} topologies with {self.size} elements, and none "
+                f"of them reproduces {self.circuit} exactly on this frequency window. Nothing "
+                "the data could not already distinguish was lost."
+            )
+        names = ", ".join(self.equivalents)
+        return (
+            f"Your skeleton {self.skeleton} excluded {self.excluded} of the "
+            f"{self.kept + self.excluded} topologies with {self.size} elements, and "
+            f"{len(self.equivalents)} of them fit {self.circuit} exactly on this frequency "
+            f"window: {names}. The data cannot tell these apart from the reported one -- "
+            "choosing between them is something you did, not something the fit found."
+        )
+
+
+def excluded_equivalents(
+    candidate: Candidate,
+    skeleton: str,
+    spectrum: Spectrum,
+    *,
+    pool: Sequence[str] = DEFAULT_POOL,
+    weighting: Weighting = "modulus",
+    seed: int = 0,
+    workers: int = 1,
+    budget: ScreenBudget = SCREEN_BUDGET,
+) -> ExcludedEquivalents:
+    """Which topologies the skeleton removed that would have fitted identically.
+
+    A skeleton chooses among forms the data cannot distinguish: `R1-p(R2,C1)` and
+    `p(R1,C1-R2)` fit any single semicircle to 1.2e-15, and asserting a series resistance keeps
+    the first and excludes the second. That is legitimate -- a physical electrode really does
+    have an electrolyte resistance -- but it is a choice the *user* made, and the report must
+    not let it read as something the data supported (docs/PARTIAL_TOPOLOGY_PLAN.md section
+    3.3).
+
+    The excluded topologies are, by definition, the ones the search never fitted, so their
+    equivalence has to be established here rather than read off the search. **The target is
+    ``candidate``'s fitted response, not the measured data**: an exact reparameterisation
+    reaches a noise-free target to machine precision, which noise would otherwise mask, and it
+    turns the question from "does this fit the sample?" into the algebraic one actually being
+    asked. Every excluded topology of the same size gets one tier-1 screen against it, and
+    those reaching :data:`PERFECT_COST` are reported.
+
+    [measured] On the capacitor reference at four elements this is 1,132 screens, 137 s on one
+    core (121 ms each) or well under a minute across eight workers, and it finds exactly one
+    excluded equivalent: `R1-L1-CPE1-SKINF1`, because a CPE with n = -1 *is* a capacitor. Two
+    consequences, both deliberate. It is **opt-in**, since a size-5 pass is ~20 min single-core
+    and the search it accompanies takes one. And the list is what the screen *found*: a tier-1
+    budget can miss an exact equivalent, so the count is a floor, never a proof that nothing
+    else was lost.
+    """
+    started = time.perf_counter()
+    frame = Circuit.parse(skeleton).root
+    size = len(candidate.circuit.leaves)
+    # Noise-free: the question is whether the algebra can reach this response, not whether the
+    # topology also happens to absorb this sample's noise.
+    target = Spectrum(spectrum.f, candidate.result.z_model)
+
+    outside: list[str] = []
+    kept = 0
+    for node in enumerate_topologies(pool, size):
+        if contains_skeleton(node, frame):
+            kept += 1
+        else:
+            outside.append(Circuit(node).to_string())
+
+    with _worker_pool(workers, target, weighting) as executor:
+        if executor is not None and len(outside) > 1:
+            costs = list(
+                executor.map(
+                    _screen_worker,
+                    [(text, seed, math.inf, budget.popsize, budget.maxiter) for text in outside],
+                )
+            )
+        else:
+            costs = [
+                _screen_one(
+                    ScreenTask(text, math.inf), target, weighting=weighting, seed=seed,
+                    budget=budget,
+                )
+                for text in outside
+            ]
+
+    found = sorted(
+        (cost, text) for cost, text in zip(costs, outside, strict=True) if cost <= PERFECT_COST
+    )
+    return ExcludedEquivalents(
+        circuit=candidate.circuit.to_string(),
+        skeleton=skeleton,
+        size=size,
+        kept=kept,
+        excluded=len(outside),
+        equivalents=tuple(text for _, text in found),
+        elapsed_s=time.perf_counter() - started,
+    )
+
+
 def exhaustive_limit_for(skeleton_size: int | None, requested: int | None) -> int:
     """Resolve ``exhaustive_limit`` into a total element count, defaults included.
 

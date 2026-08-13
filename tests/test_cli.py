@@ -257,6 +257,37 @@ def test_discover_with_skeleton_prints_the_pre_run_arithmetic_and_named_coverage
     assert "that contains R1-C1" in out
 
 
+def test_discover_excluded_equivalents_requires_a_skeleton(tmp_path: Path) -> None:
+    """Without a skeleton nothing was excluded, so the flag has nothing to compute -- and
+    silently doing nothing would look like "nothing was excluded", which is a different claim.
+
+    It must also fail *before* the search: this test runs in milliseconds only because the
+    check happens up front, and a user given the same message after a multi-minute enumeration
+    would have waited for nothing.
+    """
+    data = _simulate_discover_csv(tmp_path)
+    with pytest.raises(SystemExit, match="needs --skeleton"):
+        main(["discover", str(data), "--excluded-equivalents"] + _DISCOVER_KWARGS)
+
+
+def test_discover_excluded_equivalents_reports_what_the_assertion_removed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The opt-in pass of section 3.3, end to end. It is opt-in because it costs about as much
+    as the search itself (1,132 screens and 137 s on one core at four elements), so the flag
+    existing and doing the work is the thing to check.
+    """
+    data = _simulate_discover_csv(tmp_path)
+    rc = main(
+        ["discover", str(data), "--mode", "exhaustive", "--skeleton", "p(R1,C1)",
+         "--excluded-equivalents"] + _DISCOVER_KWARGS
+    )
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "What the skeleton excluded" in out
+    assert "topologies with" in out
+
+
 def test_discover_json_report_with_skeleton_has_skeleton_and_named_coverage(
     tmp_path: Path,
 ) -> None:

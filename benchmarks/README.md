@@ -156,6 +156,33 @@ element it had to neutralise is exactly the one that will not resolve. **A wrong
 data can refute announces itself as an asserted element the fit had to switch off** — not as a
 worse fit. That is the signal P2 should be written on, and it is not the one anyone guessed.
 
+### `discovery_v2.py excluded` — what the skeleton removed that fits identically
+
+With the *true* skeleton asserted, every same-size topology outside it is screened against the
+reported model's own (noise-free) response; those reaching `PERFECT_COST` are exact
+reparameterisations the constraint removed. Four elements, seed 0, 8 workers.
+
+| reference | skeleton | excluded / all at that size | screened in | exact equivalents excluded |
+|-----------|----------|----------------------------:|------------:|----------------------------|
+| capacitor | `C1-R1-L1` | 1,132 / 1,163 | 43 s | `R1-L1-CPE1-SKINF1` |
+| Maxwell-Wagner | `p(R1,C1)` | 273 / 376 | 22 s | `p(R1,CPE1)-p(R2,CPE2)`, `p(p(R1,CPE1)-CPE2,R2)` |
+| Randles | `R1-p(C1,R2)` | 510 / 527 | 13 s | `p(R1-W1,CPE1)-R2`, `p(R1-CPE1,CPE2)-R2` |
+
+**Every excluded equivalent, on every reference, is a CPE standing in for an ideal element** —
+a capacitor at n = -1, an inductor at n = +1, a Warburg at n = -0.5. That is what a skeleton
+actually costs: not a lost topology the data preferred, but a commitment to an *ideal* element
+where a distributed one fits the same points exactly. It is also the same phenomenon gate P2
+ran into from the other side, where a CPE-flavoured wrong skeleton could not be falsified.
+
+The cost is why the feature is opt-in rather than part of every report: 1,132 screens is 137 s
+on one core (121 ms each) and 43 s across eight, against a search that takes about a minute,
+and a five-element pass is ~20 min single-core. The yield is why it exists at all — one or two
+circuits per run, named, that the user's assertion chose against on evidence the data does not
+contain.
+
+The list is a floor. A tier-1 budget that misses an exact equivalent under-reports it, so this
+says "these were excluded", never "only these were".
+
 ### `discovery_v2.py filter` — structural feasibility filter
 
 How much of the enumerated space the endpoint-behaviour screen removes before any fitting,

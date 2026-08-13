@@ -18,7 +18,11 @@ import numpy as np
 
 from autocircuit import __version__
 from autocircuit.core.circuit import Circuit
-from autocircuit.core.discover import discover, exhaustive_limit_for
+from autocircuit.core.discover import (
+    discover,
+    excluded_equivalents,
+    exhaustive_limit_for,
+)
 from autocircuit.core.drt import DRTResult, drt
 from autocircuit.core.elements import (
     COMPONENT_POOL,
@@ -231,6 +235,12 @@ def cmd_discover(args: argparse.Namespace) -> int:
     if unknown:
         raise SystemExit(f"error: unknown element codes in pool: {', '.join(unknown)}")
 
+    # Argument checks belong before the search, not after it: a run that enumerates and fits
+    # for minutes and then exits on a flag combination is a run the user did not need to wait
+    # for.
+    if args.excluded_equivalents and not args.skeleton:
+        raise SystemExit("error: --excluded-equivalents needs --skeleton")
+
     if args.skeleton:
         print(_skeleton_plan(args.skeleton, args.exhaustive_limit, args.max_candidates))
         print()
@@ -259,6 +269,24 @@ def cmd_discover(args: argparse.Namespace) -> int:
     # DRT relaxation count would save under 1% of the screen and cost the completeness claim
     # (docs/DISCOVERY_V2_PLAN.md section 3.4), so the two analyses stay independent and the
     # reader compares them.
+    # Opt-in, and only under a skeleton: without one nothing was excluded, and the pass costs
+    # about as much as the search it follows (a size-5 sweep is ~20 min on one core).
+    excluded = None
+    if args.excluded_equivalents:
+        if result.recommended is None:
+            raise SystemExit("error: no candidate was fitted, so nothing was excluded from one")
+        excluded = excluded_equivalents(
+            result.recommended,
+            args.skeleton,
+            spectrum,
+            pool=pool,
+            weighting=args.weighting,
+            seed=args.seed,
+            workers=args.workers,
+        )
+        print(f"\nWhat the skeleton excluded (screened in {excluded.elapsed_s:.1f} s):")
+        print(f"  {excluded.summary()}")
+
     probe = None if args.no_drt else _probe_structure(spectrum)
     if probe is not None:
         print("\nStructure probe (independent of the search above):")
@@ -276,6 +304,17 @@ def cmd_discover(args: argparse.Namespace) -> int:
             # candidate is identifiable, and that the asserted skeleton fits into a reported
             # topology in more than one place.
             "unresolved_everywhere": result.unresolved_everywhere,
+            "excluded_equivalents": (
+                None
+                if excluded is None
+                else {
+                    "size": excluded.size,
+                    "kept": excluded.kept,
+                    "excluded": excluded.excluded,
+                    "equivalents": list(excluded.equivalents),
+                    "summary": excluded.summary(),
+                }
+            ),
             "unsupported_assertion": (
                 None
                 if result.skeleton is None or result.recommended is None
@@ -537,6 +576,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_disc.add_argument(
         "--no-feasibility-filter", action="store_true",
         help="keep every enumerated topology, skipping the endpoint-behaviour screen",
+    )
+    p_disc.add_argument(
+        "--excluded-equivalents", action="store_true",
+        help="after the search, screen the same-size topologies the skeleton excluded against "
+        "the recommended model and report the ones that fit it exactly; needs --skeleton, and "
+        "costs about as much as the search itself",
     )
     p_disc.add_argument(
         "--progress", action="store_true",

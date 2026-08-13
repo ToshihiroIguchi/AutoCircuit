@@ -1,6 +1,6 @@
 """Does exhaustive-first discovery actually work, and what does it cost?
 
-Six measurements, selected by the first command-line argument:
+Seven measurements, selected by the first command-line argument:
 
 ``gate``
     Acceptance gate **G1** of ``docs/DISCOVERY_V2_PLAN.md``: on each reference spectrum,
@@ -26,6 +26,11 @@ Six measurements, selected by the first command-line argument:
     like? Reports the runs-test z on the residuals, whether the recommendation carries
     unresolved parameters, and how far the constrained chi2 sits from the truth's own. The
     gate's wording is written from these numbers, not before them.
+
+``excluded``
+    Section 3.3 of the same plan: with the true skeleton asserted, which same-size topologies
+    did it exclude that reproduce the reported model exactly? Measures the cost (which is why
+    the feature is opt-in) and the yield (which is why it exists).
 
 ``screen``
     Tuning evidence for the tier-1 screening budget: for a range of (popsize, maxiter)
@@ -54,6 +59,7 @@ Run with the package on the path (it is not pip-installed on the dev machine)::
     python benchmarks/discovery_v2.py gate --workers 8
     python benchmarks/discovery_v2.py skeleton --workers 8 --compare
     python benchmarks/discovery_v2.py wrong-skeleton --workers 8
+    python benchmarks/discovery_v2.py excluded --seeds 1 --workers 8
 
 ``gate`` and ``screen-rank`` are the slow ones: both fit every plausible topology up to five
 elements, several times over. Use ``--seeds 1`` and ``--limit 4`` for a sanity run.
@@ -84,6 +90,7 @@ from autocircuit.core.discover import (
     _shortlist,
     _worker_pool,
     discover,
+    excluded_equivalents,
 )
 from autocircuit.core.enumerate import (
     EndpointBehaviour,
@@ -448,6 +455,61 @@ def report_wrong_skeleton(seeds: int, limit: int, workers: int) -> None:
     )
 
 
+def report_excluded(seeds: int, limit: int, workers: int) -> None:
+    """What a *true* skeleton removed that would have fitted identically, and what it costs.
+
+    Section 3.3 of docs/PARTIAL_TOPOLOGY_PLAN.md, whose first draft called this cheap. It is
+    not: the excluded topologies are by definition the ones the search never fitted, so each
+    needs a screen of its own. This measures both halves of the decision -- the cost, which
+    made it opt-in, and the yield, which is what makes it worth having at all.
+    """
+    print("=" * 92)
+    print("Section 3.3: which indistinguishable topologies did the skeleton exclude?")
+    print("=" * 92)
+    for reference in REFERENCES:
+        if not reference.skeleton:
+            continue
+        print(
+            f"\n{reference.label}: truth {reference.circuit}"
+            f"\n  skeleton {reference.skeleton}"
+        )
+        for seed in range(seeds):
+            data = reference.spectrum(seed)
+            result = discover(
+                data,
+                pool=reference.pool,
+                skeleton=reference.skeleton,
+                mode="exhaustive",
+                exhaustive_limit=limit,
+                workers=workers,
+                seed=seed,
+            )
+            recommended = result.recommended
+            if recommended is None or result.skeleton is None:
+                print(f"  seed {seed}: nothing was fitted", flush=True)
+                continue
+            report = excluded_equivalents(
+                recommended,
+                result.skeleton,
+                data,
+                pool=reference.pool,
+                seed=seed,
+                workers=workers,
+            )
+            names = ", ".join(report.equivalents) if report.equivalents else "-"
+            print(
+                f"  seed {seed}: {recommended.circuit.to_string()}"
+                f"  {report.excluded} excluded of {report.kept + report.excluded}"
+                f" at {report.size} elements, screened in {report.elapsed_s:.0f} s"
+                f"  -> {len(report.equivalents)} exact: {names}",
+                flush=True,
+            )
+    print(
+        "\nThe list is what the tier-1 screen found: a budget that misses an exact equivalent\n"
+        "makes this a floor, never a proof that nothing else was excluded."
+    )
+
+
 def report_filter() -> None:
     print("=" * 92)
     print("Feasibility filter: how much is removed, and does the truth survive?")
@@ -683,7 +745,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "what",
-        choices=["gate", "skeleton", "wrong-skeleton", "filter", "screen", "screen-rank"],
+        choices=[
+            "gate", "skeleton", "wrong-skeleton", "excluded", "filter", "screen", "screen-rank"
+        ],
     )
     parser.add_argument(
         "--seeds", type=int, default=10,
@@ -729,6 +793,8 @@ def main() -> None:
         report_skeleton(args.seeds, args.limit, args.workers, args.compare)
     elif args.what == "wrong-skeleton":
         report_wrong_skeleton(args.seeds, args.limit, args.workers)
+    elif args.what == "excluded":
+        report_excluded(args.seeds, args.limit, args.workers)
     elif args.what == "filter":
         report_filter()
     elif args.what == "screen":

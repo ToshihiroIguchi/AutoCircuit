@@ -1,10 +1,10 @@
 # Partial Topology — Skeleton-Constrained Discovery
 
 Status: **steps 1–2 are implemented and measured** (enumeration, and the search wired to it),
-**step 3 is two thirds done** (§3.4 and §3.5; §3.3 is open and its cost estimate has been
-corrected), and **step 4 is done** — gates P1, P3 and P4 pass, P2 is written from
+**step 3 is done** (§3.3's cost estimate was corrected on the way, and the feature is opt-in
+because of it), and **step 4 is done** — gates P1, P3 and P4 pass, P2 is written from
 the measurement rather than from a guess, and the signal that measurement pointed at is built
-(§3.2). Only §3.3 and the documentation sweep are left. Written 2026-08-12, measured
+(§3.2). Only the documentation sweep (step 5) is left. Written 2026-08-12, measured
 2026-08-13.
 Prerequisite reading: `docs/DISCOVERY_V2_PLAN.md` (especially the corrections in §3.2, §3.4 and
 §5.1 — this design repeats their shape), `docs/HANDOFF.md` §3, and `CLAUDE.md`'s three modes.
@@ -227,9 +227,32 @@ Three honest options, in ascending cost, to be settled by measurement rather tha
    equivalence is algebraic and data-independent, so it could be a table computed once per
    (pool, size) rather than per run. That is a benchmark-sized job and its own decision.
 
-Option 1 is free and belongs in the report either way. Which of 2 or 3 to build — if either —
-should wait for gate P2, since what a wrong skeleton actually looks like decides how much
-weight this section has to carry.
+**Implemented as option 2**, `discover.excluded_equivalents()` and
+`--excluded-equivalents`, which turned out to include option 1 for free: the same enumeration
+pass that finds the topologies outside the skeleton also counts them, so the report gives both
+the size of what was excluded and the names of what was indistinguishable.
+
+[measured, `benchmarks/discovery_v2.py excluded`] At four elements, seed 0, 8 workers:
+
+| reference | skeleton | excluded / all | screened in | exact equivalents excluded |
+|-----------|----------|---------------:|------------:|----------------------------|
+| capacitor | `C1-R1-L1` | 1,132 / 1,163 | 43 s | `R1-L1-CPE1-SKINF1` |
+| Maxwell-Wagner | `p(R1,C1)` | 273 / 376 | 22 s | `p(R1,CPE1)-p(R2,CPE2)`, `p(p(R1,CPE1)-CPE2,R2)` |
+| Randles | `R1-p(C1,R2)` | 510 / 527 | 13 s | `p(R1-W1,CPE1)-R2`, `p(R1-CPE1,CPE2)-R2` |
+
+Two things fall out of that table.
+
+**Every excluded equivalent, on every reference, is a CPE standing in for an ideal element** —
+a capacitor at n = -1, an inductor at n = +1, a Warburg at n = -0.5. So what a skeleton
+actually costs is not a topology the data preferred; it is a commitment to an *ideal* element
+where a distributed one fits the same points exactly. That is the same phenomenon §3.2 met from
+the other side, and it makes this section's output far more specific than "some equivalents
+were lost": it names the CPE the user's ideal element ruled out.
+
+**It is opt-in, on the cost.** 1,132 screens is 137 s on one core and 43 s on eight, against a
+search of about a minute, and five elements is ~20 min single-core. And the list is a floor,
+not a proof: a tier-1 budget that misses an exact equivalent under-reports it, so the report
+says these *were* excluded, never that only these were.
 
 ### 3.4 Past a certain size the data is the limit, not the search
 
@@ -353,7 +376,7 @@ has to change; step 3 gains a second button.
 |------|----------|------|--------|
 | 1 | `contains_skeleton`, `grow_from_skeleton`, cross-check tests | M | **done** — `tests/test_skeleton.py`, 89 tests; see §2 |
 | 2 | `grow_up_to()`, `discover(skeleton=...)`, `DiscoveryResult.skeleton`, completeness wording, CLI flag | M | **done** — see the notes in §3.1 and §4.1 |
-| 3 | Report: excluded equivalents (§3.3), unresolved-across-the-board (§3.4), placement multiplicity (§3.5) | M | §3.4 and §3.5 **done**; §3.3 open — its cost estimate was wrong, see the correction there |
+| 3 | Report: excluded equivalents (§3.3), unresolved-across-the-board (§3.4), placement multiplicity (§3.5) | M | **done** — §3.3 opt-in on the measured cost, after correcting the estimate that called it cheap |
 | 4 | Gate P2 — the wrong-skeleton experiment (§3.2), and whatever it forces | M | **done** — experiment measured, gate written from it, and the signal it pointed at (naming the neutralised element) built |
 | 5 | Docs: this file, `IMPLEMENTATION_PLAN.md` §6, `HANDOFF.md`, README | S | |
 

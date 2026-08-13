@@ -7,7 +7,7 @@ whichever part you are touching.
 
 ## 1. Where things stand
 
-The command-line backend is **complete and verified**: 554 tests pass
+The command-line backend is **complete and verified**: 559 tests pass
 (`python -m pytest tests -q`, ~4-5 min). Phases 0–5 of `docs/IMPLEMENTATION_PLAN.md` are done;
 phase 6 (web UI) is untouched.
 
@@ -16,14 +16,15 @@ three reference spectra, G2 exactly reproducing the measured counts table, G3 wi
 and every known exact equivalent surviving the feasibility filter, G4 with DRT counting 1, 2
 and 3 relaxations 10/10 at both 0% and 1% noise, and G5 with the whole suite green.
 
-**Skeleton-constrained discovery (mode 2 of `CLAUDE.md`) is implemented through step 3** —
+**Skeleton-constrained discovery (mode 2 of `CLAUDE.md`) is implemented through step 4** —
 `discover(skeleton=...)` and `--skeleton` work end to end, the completeness sentence names the
-constraint, and the report states placement ambiguity and total non-identifiability. What is
-*not* done is §3.3 (which equivalents the skeleton excluded — its cost estimate turned out to
-be wrong, see the correction in that section). **Gates P1, P3 and P4 pass; P2's experiment has
-been run and rewrote the gate** — a wrong skeleton turns out to be invisible in the residuals
-and in chi², and the one place it does surface is an asserted element the fit had to switch
-off, which the report now names. Only §3.3 is left. See §7.
+constraint, and the report states placement ambiguity and total non-identifiability. §3.3 —
+naming the indistinguishable topologies the skeleton excluded — is opt-in rather than
+automatic, because the plan's estimate that it was cheap was wrong and the corrected cost is
+about that of the search itself. **Gates P1, P3 and P4 pass; P2's experiment has been run and
+rewrote the gate** — a wrong skeleton turns out to be invisible in the residuals and in chi²,
+and the one place it does surface is an asserted element the fit had to switch off, which the
+report now names. See §7.
 
 Working end to end today:
 
@@ -368,5 +369,13 @@ reading is reported as supported. It says the data does not *test* that part of 
 rather than that the assertion is wrong, which is both weaker and true, and is what keeps it
 silent for a skeleton that merely generalises the truth.
 
-**What is left in this mode:** §3.3 (which excluded equivalents to report, and at what cost),
-and nothing else.
+§3.3 is built too, as an opt-in pass: `excluded_equivalents()` and `--excluded-equivalents`
+screen the same-size topologies the skeleton removed against the reported model's own response
+and name the ones that reproduce it exactly. [measured] Every equivalent it found, on all three
+references, is a CPE standing in for an ideal element -- a capacitor at n = -1, an inductor at
+n = +1, a Warburg at n = -0.5. What a skeleton costs is a commitment to an ideal element where
+a distributed one fits identically. Opt-in because 1,132 screens is 137 s on one core (43 s on
+eight) against a search of about a minute, and five elements is ~20 min single-core.
+
+**What is left in this mode:** nothing but the documentation sweep, which this file is part
+of.

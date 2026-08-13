@@ -158,10 +158,20 @@ It is the sharpest instrument here: at five elements from the component pool, as
 at all. It is also the only option that can remove the right answer while leaving a report
 that looks healthy, so the coverage line changes with it and says so in the same sentence —
 *every plausible topology with up to 6 elements **that contains C1-R1-L1** was evaluated* —
-and the report adds two things a constrained search owes you: when your skeleton fits into a
-reported circuit in more than one place, it says so instead of picking one, and when every
-candidate that fits leaves parameters the data cannot resolve, it says that too, because that
-is a fact about the measurement rather than about the search.
+and the report adds what a constrained search owes you: when your skeleton fits into a reported
+circuit in more than one place, it says so instead of picking one; when the fit could only work
+by switching one of your asserted elements off, it names that element, because that — and not a
+worse fit — is what a wrong skeleton actually looks like; and when every candidate that fits
+leaves parameters the data cannot resolve, it says that too, since that is a fact about the
+measurement rather than about the search.
+
+`--excluded-equivalents` answers the remaining question: *what did my assertion rule out that
+would have fitted just as well?* It screens the same-size topologies the skeleton removed
+against the recommended model and names the ones that reproduce it exactly. It is opt-in
+because it costs about as much as the search. On every reference measured so far the answer has
+the same shape — a CPE standing in for an ideal element — which is a useful thing to be told:
+what a skeleton really commits you to is an *ideal* capacitor or inductor where a distributed
+one fits the same points.
 
 **Data validation is not optional.** A spectrum that drifted during the sweep will still fit a
 circuit, and will still report small error bars. The Lin-KK pre-check exists to catch that

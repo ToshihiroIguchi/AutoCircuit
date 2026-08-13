@@ -16,8 +16,17 @@ from __future__ import annotations
 import pytest
 
 from autocircuit.core.circuit import Circuit
-from autocircuit.core.discover import DiscoveryResult, discover, exhaustive_limit_for
-from autocircuit.core.enumerate import contains_skeleton, grow_from_skeleton
+from autocircuit.core.discover import (
+    DiscoveryResult,
+    discover,
+    excluded_equivalents,
+    exhaustive_limit_for,
+)
+from autocircuit.core.enumerate import (
+    contains_skeleton,
+    count_topologies,
+    grow_from_skeleton,
+)
 from autocircuit.core.simulate import log_frequencies, simulate
 
 POOL = ("R", "C")
@@ -366,7 +375,100 @@ def test_a_resolved_report_carries_no_such_warning() -> None:
 
 
 # =============================================================================================
-# 9. A budget that bites lowers the claim instead of faking it
+# 9. What the skeleton excluded that would have fitted identically
+# =============================================================================================
+
+
+def test_excluded_equivalents_names_what_the_assertion_chose_between() -> None:
+    """Section 3.3, and the reason it cannot be read off the search: the excluded topologies
+    are exactly the ones never fitted, so their equivalence has to be established here.
+
+    The case is small but it is the real phenomenon. `C1-R1-L1` and `R1-L1-CPE1` are the same
+    circuit whenever the CPE exponent is -1, because a CPE with n = -1 *is* a capacitor. A user
+    who asserts a capacitor has chosen one of the two, and no measurement on this frequency
+    window can support that choice -- so the report says which alternative the choice removed
+    rather than letting the skeleton's survivor read as a finding. (The same pass on the
+    capacitor reference at four elements screens 1,132 topologies and finds exactly one:
+    `R1-L1-CPE1-SKINF1`, the same substitution.)
+    """
+    pool = ("R", "C", "L", "CPE")
+    data = simulate(
+        "C1-R1-L1",
+        log_frequencies(1e2, 1e9, 4),
+        {"C1.C": 1e-6, "R1.R": 1e-2, "L1.L": 5e-10},
+        noise=0.0,
+        seed=0,
+    )
+    result = discover(
+        data, pool=pool, skeleton="C1-R1-L1", mode="exhaustive", exhaustive_limit=3, seed=0
+    )
+    assert result.recommended is not None
+    assert result.skeleton is not None
+    report = excluded_equivalents(result.recommended, result.skeleton, data, pool=pool, seed=0)
+
+    assert report.kept + report.excluded == count_topologies(pool, 3)
+    assert report.excluded > 0
+    excluded_forms = {Circuit.parse(text).canonical_form() for text in report.equivalents}
+    assert Circuit.parse("R1-L1-CPE1").canonical_form() in excluded_forms
+    assert "choosing between them is something you did" in report.summary()
+
+
+def test_the_semicircle_twin_is_reported_as_excluded() -> None:
+    """The example section 3.3 opens with, and it is not hypothetical. `R1-p(R2,C1)` and
+    `p(R1-C1,R2)` describe exactly the same set of Nyquist semicircles and fit any of them to
+    1.2e-15; they are different topologies of the same size, so asserting either as a skeleton
+    excludes the other outright. A user asserting a series electrolyte resistance is entitled
+    to do that -- a physical electrode really has one -- but the report must not let the
+    survivor read as something the data preferred.
+    """
+    pool = ("R", "C")
+    data = simulate(
+        "R1-p(R2,C1)",
+        log_frequencies(1e1, 1e5, 2),
+        {"R1.R": 20.0, "R2.R": 1000.0, "C1.C": 1e-8},
+        noise=0.0,
+        seed=0,
+    )
+    result = discover(
+        data, pool=pool, skeleton="R1-p(R2,C1)", mode="exhaustive", exhaustive_limit=3, seed=0
+    )
+    assert result.recommended is not None
+    assert result.skeleton is not None
+    report = excluded_equivalents(result.recommended, result.skeleton, data, pool=pool, seed=0)
+    assert Circuit.parse("p(R1-C1,R2)").canonical_form() in {
+        Circuit.parse(text).canonical_form() for text in report.equivalents
+    }
+
+
+def test_excluded_equivalents_reports_plainly_when_nothing_was_lost() -> None:
+    """The other outcome has to be sayable too, or the feature only ever produces warnings.
+
+    `C1-R1-L1` is *unique* among the 56 three-element topologies over R, C, L -- measured
+    independently by `benchmarks/topology_space.py` (b) -- so asserting it excludes 55 others
+    and none of them can reproduce it. The honest report is that the assertion cost nothing the
+    data could have distinguished, and saying so is what makes the warning case meaningful.
+    """
+    pool = ("R", "C", "L")
+    data = simulate(
+        "C1-R1-L1",
+        log_frequencies(1e2, 1e9, 4),
+        {"C1.C": 1e-6, "R1.R": 1e-2, "L1.L": 5e-10},
+        noise=0.0,
+        seed=0,
+    )
+    result = discover(
+        data, pool=pool, skeleton="C1-R1-L1", mode="exhaustive", exhaustive_limit=3, seed=0
+    )
+    assert result.recommended is not None
+    assert result.skeleton is not None
+    report = excluded_equivalents(result.recommended, result.skeleton, data, pool=pool, seed=0)
+    assert report.excluded > 0
+    assert report.equivalents == ()
+    assert "Nothing the data could not already distinguish was lost" in report.summary()
+
+
+# =============================================================================================
+# 10. A budget that bites lowers the claim instead of faking it
 # =============================================================================================
 
 
@@ -400,7 +502,7 @@ def test_a_clamped_budget_lowers_the_constrained_claim_rather_than_faking_it() -
 
 
 # =============================================================================================
-# 10. exhaustive_limit_for -- the arithmetic the CLI prints before the run
+# 11. exhaustive_limit_for -- the arithmetic the CLI prints before the run
 # =============================================================================================
 
 
