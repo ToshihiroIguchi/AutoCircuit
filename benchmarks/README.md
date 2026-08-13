@@ -2,7 +2,8 @@
 
 Measurements, not tests. The test suite asserts that things *work*; these scripts say *how
 well*, and they are the evidence behind every claim marked **[measured]** in
-`docs/IMPLEMENTATION_PLAN.md` and `docs/DISCOVERY_V2_PLAN.md`.
+`docs/IMPLEMENTATION_PLAN.md`, `docs/DISCOVERY_V2_PLAN.md` and
+`docs/PARTIAL_TOPOLOGY_PLAN.md`.
 
 Run with the package on the path (it is not pip-installed on the dev machine):
 
@@ -16,6 +17,8 @@ python benchmarks/discovery_v2.py filter
 python benchmarks/discovery_v2.py screen
 python benchmarks/discovery_v2.py screen-rank --workers 8   # slow: ~1 h
 python benchmarks/discovery_v2.py gate --workers 8      # slow: hours
+python benchmarks/discovery_v2.py skeleton --workers 8       # gate P1, ~20 min
+python benchmarks/discovery_v2.py wrong-skeleton --workers 8 # gate P2, ~20 min
 python benchmarks/pyodide/bench.py                      # CPython baseline for the web numbers
 ```
 
@@ -24,7 +27,7 @@ python benchmarks/pyodide/bench.py                      # CPython baseline for t
 Re-run the relevant script after touching the optimizer, the element library or the
 discovery filters, and update the numbers below if they move.
 
-## Results as of 2026-08-08
+## Results as of 2026-08-13
 
 ### `topology_space.py` (a) — search space
 
@@ -89,6 +92,69 @@ The plan's time budget was ≤ 3 min per run with 8 workers. The capacitor case 
 Single core it is ~22 min of screening for that reference, over the plan's 15 min figure.
 `benchmarks/README.md` records what was measured rather than what was hoped for; the budget
 line in `docs/DISCOVERY_V2_PLAN.md` has been corrected to match.
+
+### `discovery_v2.py skeleton` — acceptance gate P1
+
+The same three references, with the *true* skeleton asserted: the part of each circuit a user
+of that kind of sample would already know. Element limit 5, 1% noise, 10 seeds, 8 workers.
+
+| reference | skeleton | candidates | vs unconstrained | reported | on the front | it is the recommendation | time / run |
+|-----------|----------|-----------:|-----------------:|---------:|-------------:|-------------------------:|-----------:|
+| capacitor `C-R-L-SKINF` | `C1-R1-L1` | 534 | 12.4× fewer | **10/10** | 10/10 | 10/10 | 0.8 min |
+| Maxwell-Wagner `p(R,C)-p(R,C)` | `p(R1,C1)` | 972 | 2.7× fewer | **10/10** | 10/10 | 10/10 | 0.7 min |
+| Randles `R-p(C,R-W)` | `R1-p(C1,R2)` | 241 | 15.4× fewer | **10/10** | 10/10 | 10/10 | 0.4 min |
+
+**P1 passes 30/30**, and the constrained run is 1.7–6× faster in wall clock (the candidate
+reduction is larger than the time reduction because the levels a skeleton removes are the
+cheap small ones). Recovery is the gate; the speed-up is an observation.
+
+One row is worth more than the pass count. *Unconstrained, the capacitor truth is the
+recommendation 9/10 — with the true skeleton it is 10/10.* The seed that dropped it was the
+one where the 10 mΩ ESR is not resolvable at 1% noise, so the parsimony rule preferred the
+three-element model. Asserting `C1-R1-L1` says the ESR is there, and parsimony can no longer
+drop it. A skeleton is not only a way to search less; it puts prior knowledge where the
+model-selection rule can use it.
+
+Measured with `--compare` on the capacitor reference (5 seeds, and the unconstrained side is
+what makes that mode slow): 534 candidates in 0.4–0.8 min against 6,598 in 5.4–7.9 min.
+
+### `discovery_v2.py wrong-skeleton` — acceptance gate P2
+
+The same references under a skeleton the truth does *not* contain. Same budget and seeds.
+"Structure" is the runs test on the best fit's residual signs — the criterion `mode="auto"`
+uses; "unresolved" counts seeds where the recommendation carried a parameter whose standard
+error exceeds its own value; chi² is against what the truth itself achieves on that data.
+
+| reference | wrong skeleton | residual structure | recommendation unresolved | nothing identifiable | chi² vs the truth |
+|-----------|----------------|-------------------:|--------------------------:|---------------------:|------------------:|
+| capacitor | `R1-p(R2,C1)` | 0/10 | **9/10** | 9/10 | 1.0× |
+| Maxwell-Wagner | `p(R1,CPE1)-p(R2,C1)` | 0/10 | 0/10 | 0/10 | 1.0× |
+| Randles | `R1-p(CPE1,R2)` | 0/10 | 0/10 | 0/10 | 1.0× |
+
+**A wrong skeleton is invisible in the residuals. 0/30, and the chi² is the truth's own to two
+figures in every seed.** The escape valve §3.2 of `docs/PARTIAL_TOPOLOGY_PLAN.md` proposed —
+screen a small unconstrained sample and report when something outside the skeleton fits
+materially better — is dead on this evidence: nothing outside fits better, because the
+constrained best already fits as well as the generating circuit does.
+
+Reading the recommendations explains why, and splits the three cases into two kinds:
+
+*Two of the three "wrong" skeletons are not falsifiable at all.* `p(R1,CPE1)` is a **strict
+generalisation** of `p(R1,C1)` — a CPE with n = 1 *is* a capacitor — so the Maxwell-Wagner and
+Randles skeletons contain the truth's behaviour even though `contains_skeleton` correctly says
+they do not contain its topology. Both return the skeleton itself with every parameter
+resolved, chi² equal to the truth's, and a fitted exponent sitting at n ≈ 1. Nothing is wrong
+with that report; the fitted exponent is the finding. **Wrong at the level of element codes is
+not the same as wrong at the level of what the data can express**, and this measurement is
+where that distinction was learned.
+
+*The capacitor case is a genuinely different topology, and there the report does say
+something* — 9/10 seeds with an unresolved parameter, and `unresolved_everywhere` true on the
+same 9. The reason is visible in the recommendation `R1-p(R2,C1-L1-SKINF1)`: sending R2 to an
+open turns it back into the truth, so the fit neutralises the asserted parallel branch and the
+element it had to neutralise is exactly the one that will not resolve. **A wrong skeleton the
+data can refute announces itself as an asserted element the fit had to switch off** — not as a
+worse fit. That is the signal P2 should be written on, and it is not the one anyone guessed.
 
 ### `discovery_v2.py filter` — structural feasibility filter
 

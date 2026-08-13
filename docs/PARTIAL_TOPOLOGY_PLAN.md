@@ -2,7 +2,9 @@
 
 Status: **steps 1–2 are implemented and measured** (enumeration, and the search wired to it),
 **step 3 is two thirds done** (§3.4 and §3.5; §3.3 is open and its cost estimate has been
-corrected); steps 4–5 are a draft for approval. Written 2026-08-12.
+corrected), and **step 4's experiment has been run** — gates P1, P3 and P4 pass, and P2 is
+written from the measurement rather than from a guess (§3.2). Written 2026-08-12, measured
+2026-08-13.
 Prerequisite reading: `docs/DISCOVERY_V2_PLAN.md` (especially the corrections in §3.2, §3.4 and
 §5.1 — this design repeats their shape), `docs/HANDOFF.md` §3, and `CLAUDE.md`'s three modes.
 
@@ -141,21 +143,46 @@ by you, not discovered*; and the `--json` report carries the whole `coverage` se
 `complete_up_to`, because a machine reader given only the integer would reconstruct exactly the
 unconstrained claim this section exists to prevent.
 
-### 3.2 A wrong skeleton must be visible — and how visible is not yet measured
+### 3.2 A wrong skeleton must be visible — measured, and not where anyone expected
 
-**This is the gate the mode has to pass before it ships, and it has not been run.** The
-experiment: fit the capacitor reference (truth `C-R-L-SKINF`) under a skeleton that is wrong
-for it, such as the Randles-flavoured `R1-p(R2,C1)`, and record what the report says. The
-questions are all empirical, and guessing at them is how the traps above got built:
+The experiment is `benchmarks/discovery_v2.py wrong-skeleton`: each reference under a skeleton
+its truth does not contain, 10 seeds, the three questions asked as numbers. The answers, in
+full, are in `benchmarks/README.md`. They are worth stating here because two of the three
+overturn what this section originally assumed.
 
-- does the best constrained fit leave residuals the runs test can see as structure?
-- does the parsimony recommendation come with unresolved parameters, or does it look clean?
-- is `chi2_reduced` far enough from the unconstrained best to be worth reporting as a warning?
+**[measured] The residuals say nothing. 0/30.** Not "less than hoped" — nothing at all: the
+runs test sees noise in every seed, and `chi2_reduced` equals what the *truth itself* achieves
+on the same data to two figures, on every reference. The escape valve proposed above — screen
+a small unconstrained sample and report when something outside the skeleton fits materially
+better — is therefore dead on the evidence, and it would have looked reasonable forever if it
+had been built instead of measured. Nothing outside fits better because the constrained best
+already fits as well as the generating circuit.
 
-If the answer is "the constrained report is indistinguishable from a good one", the mode needs
-an explicit escape valve — the cheapest being to screen a small unconstrained sample alongside
-and report when something outside the skeleton fits materially better. That is a real design
-decision and it should be made on the measurement, not before it.
+**[measured] Two of the three "wrong" skeletons were not falsifiable at all, and finding that
+out is the result.** `p(R1,CPE1)` is a strict *generalisation* of `p(R1,C1)`: a CPE with n = 1
+is a capacitor. So the Maxwell-Wagner and Randles skeletons contain the truth's *behaviour*
+while `contains_skeleton` correctly reports that they do not contain its *topology*. Both come
+back as the skeleton itself, every parameter resolved, and the fitted exponent sitting at
+n ≈ 1 — which is the finding, and it is already in the report as a parameter value. **Wrong at
+the level of element codes is not the same as wrong at the level of what the data can
+express**, and no report can be asked to refute an assertion the data cannot refute.
+
+**[measured] Where the skeleton *is* falsifiable, the report does say something — and the
+signal is not the fit quality.** Asserting `R1-p(R2,C1)` against the capacitor truth returns
+`R1-p(R2,C1-L1-SKINF1)`, which becomes the truth exactly when R2 goes to an open. The fit
+neutralises the asserted parallel branch, and the element it had to neutralise is precisely
+the one that will not resolve: 9/10 seeds carry an unresolved parameter and
+`unresolved_everywhere` is true on the same 9. So:
+
+> **A wrong skeleton that the data can refute announces itself as an asserted element the fit
+> had to switch off, not as a worse fit.**
+
+That is what P2 should be written on, and what §3.4's warning was already half-detecting by
+accident. What it forces is small and specific: the report should say *which* of the user's
+asserted elements the fit had to neutralise, rather than reporting an unresolved parameter
+somewhere in the circuit and leaving them to notice it is one of theirs. Placement ambiguity
+(§3.5) is part of the same computation — if every placement of the skeleton has a neutralised
+element, the assertion is doing no work anywhere.
 
 ### 3.3 The skeleton chooses among forms the data cannot distinguish
 
@@ -317,7 +344,7 @@ has to change; step 3 gains a second button.
 | 1 | `contains_skeleton`, `grow_from_skeleton`, cross-check tests | M | **done** — `tests/test_skeleton.py`, 89 tests; see §2 |
 | 2 | `grow_up_to()`, `discover(skeleton=...)`, `DiscoveryResult.skeleton`, completeness wording, CLI flag | M | **done** — see the notes in §3.1 and §4.1 |
 | 3 | Report: excluded equivalents (§3.3), unresolved-across-the-board (§3.4), placement multiplicity (§3.5) | M | §3.4 and §3.5 **done**; §3.3 open — its cost estimate was wrong, see the correction there |
-| 4 | Gate P2 — the wrong-skeleton experiment (§3.2), and whatever it forces | M | |
+| 4 | Gate P2 — the wrong-skeleton experiment (§3.2), and whatever it forces | M | experiment **done and recorded**; what it forces (naming the neutralised element) is not built |
 | 5 | Docs: this file, `IMPLEMENTATION_PLAN.md` §6, `HANDOFF.md`, README | S | |
 
 Step 4 is not last because it is least important; it is last because it needs steps 2–3 to run
@@ -329,11 +356,27 @@ at all. It is the step most likely to send steps 2–3 back for changes.
   reference spectra, 10/10 seeds, and the run is faster than the unconstrained one by
   approximately the ratio in §1. Recovery is the gate; the speed-up is a recorded observation,
   not a target to tune towards (`DISCOVERY_V2_PLAN.md` G1 records what happens when a time
-  target is chased).
-- **P2** — with a *wrong* skeleton, the report does not read as a successful search. What
-  "does not read as" means is defined by the §3.2 measurement, and this gate is written
-  properly once that measurement exists. It must not be weakened into "the residuals are
-  larger", which is true and useless.
+  target is chased). **[measured] passes 30/30**, at 2.7–15.4× fewer candidates and 1.7–6×
+  faster. One unlooked-for result: on the capacitor reference the truth is the *recommendation*
+  10/10 with the skeleton against 9/10 without it — asserting the ESR puts it where the
+  parsimony rule can no longer drop it at 1% noise. A skeleton is not only a way to search
+  less.
+- **P2** — with a *wrong* skeleton, the report does not read as a successful search. Now that
+  §3.2 has been measured, the gate can be written, and the measurement rules out the two
+  obvious wordings before it does. Not "the residuals are larger" — they are not, 0/30, and
+  that phrasing was warned against here before anyone knew how completely true the warning
+  was. Not "something unconstrained fits better" either — nothing does. The gate is:
+
+  1. **A falsifiable wrong skeleton must show up as an asserted element the fit had to
+     neutralise**, named as the user's own, on the reference where the assertion is genuinely
+     refutable. [measured] The raw signal is already there 9/10 seeds; naming it is §3.2's
+     forced change.
+  2. **An unfalsifiable wrong skeleton must not be treated as a failure.** A CPE asserted where
+     the sample has an ideal capacitance fits identically and returns n ≈ 1; the report's job
+     there is to state the coverage constraint and the fitted exponent, both of which it does.
+     A gate that demanded a warning here would be demanding a false one.
+  3. **No run may present the skeleton as confirmed by the data.** This is the one that holds
+     in all three cases, and `completeness()` is what carries it.
 - **P3** — the constrained enumeration equals the unconstrained enumeration filtered by
   `contains_skeleton`, as sets, on the reference cases. **[measured] passes** —
   `tests/test_skeleton.py`.
@@ -342,7 +385,10 @@ at all. It is the step most likely to send steps 2–3 back for changes.
 
 ## 7. Risks
 
-- **A wrong skeleton is silent.** The central one; §3.2 exists to measure it and P2 to gate it.
+- **A wrong skeleton is silent.** The central one. [measured] It is *completely* silent in
+  everything the report currently emphasises — residuals, chi², coverage — and the one place it
+  does surface is a parameter that will not resolve. §3.2 records the measurement and P2 is
+  written on it.
 - **The feature makes the completeness claim easy to misread.** A user who sees "every
   plausible topology was evaluated" and skims past "that contains `C1-R1-L1`" has been misled by
   a true sentence. Mitigated by putting the skeleton in the same line rather than in a footnote,

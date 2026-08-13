@@ -20,10 +20,10 @@ and 3 relaxations 10/10 at both 0% and 1% noise, and G5 with the whole suite gre
 `discover(skeleton=...)` and `--skeleton` work end to end, the completeness sentence names the
 constraint, and the report states placement ambiguity and total non-identifiability. What is
 *not* done is §3.3 (which equivalents the skeleton excluded — its cost estimate turned out to
-be wrong, see the correction in that section) and the acceptance gates: **P1 is measured only
-on the capacitor reference** (5/5 seeds, truth recovered and recommended), and **P2 has not
-been run**. Its harness exists (`benchmarks/discovery_v2.py wrong-skeleton`) and its single
-smoke seed is already interesting — see §7.
+be wrong, see the correction in that section). **Gates P1, P3 and P4 pass; P2's experiment has
+been run and rewrote the gate** — a wrong skeleton turns out to be invisible in the residuals
+and in chi², and the one place it does surface is an asserted element the fit had to switch
+off. Naming that element is the next piece of work. See §7.
 
 Working end to end today:
 
@@ -331,22 +331,38 @@ unconstrained space, ~9,600 fits at five elements on the component pool.
 as sets; `tests/test_discover_skeleton.py` pins the unconstrained sentence character for
 character, and the suite is green).
 
-**P1 — the true skeleton must still recover the truth.** Measured on the capacitor reference,
-5/5 seeds, truth reported, on the front, and recommended; 534 candidates against 6,598
-unconstrained (12.4×) and about 10× faster per seed. Recovery is the gate; the speed-up is an
-observation, not a target.
+**P1 — the true skeleton must still recover the truth. [measured] Passes 30/30**, on all
+three references, 10 seeds each: truth reported, on the Pareto front, and the recommendation
+every time. 534 / 972 / 241 candidates against 6,598 / 2,581 / 3,713 unconstrained, and 1.7–6×
+faster in wall clock. One result nobody was looking for: unconstrained, the capacitor truth is
+the *recommendation* 9/10 (one seed cannot resolve the 10 mΩ ESR at 1% noise, so parsimony
+drops it); with `C1-R1-L1` asserted it is 10/10. A skeleton puts prior knowledge where the
+model-selection rule can use it, not only where the enumerator can.
 
-**P2 — a wrong skeleton must not read as a successful search.** This is the one that matters
-and the one still open. `benchmarks/discovery_v2.py wrong-skeleton` asks it as three numbers
-per seed rather than as a verdict: the runs-test z on the best fit's residuals, whether the
-recommendation carries unresolved parameters, and the chi² against what the truth itself
-achieves on the same data.
+**P2 — a wrong skeleton must not read as a successful search. [measured] and it changed the
+question.** The headline: **a wrong skeleton is invisible in everything the report
+emphasises** — residual structure 0/30, and `chi2_reduced` equal to what the *truth itself*
+achieves on the same data, to two figures, in every seed. The escape valve the plan proposed
+(screen a small unconstrained sample, warn if something outside fits materially better) is
+dead on this evidence: nothing outside fits better.
 
-One smoke seed is enough to see why the gate's wording could not be written in advance.
-Asserting the Randles-flavoured `R1-p(CPE1,R2)` against a Randles-*with-Warburg* reference
-gives chi² 1.0× the truth's own fit, runs z = −0.7 (no structure) and a recommendation with
-nothing unresolved. The wrong skeleton is invisible — and not because the report is hiding
-anything: at 1% noise this data cannot tell `R1-p(CPE1,R2)-W1` from `R1-p(C1,R2-W1)`. Whether
-that counts as P2 failing, or as the honest answer to a question the data cannot settle, is
-the decision the full run has to inform. Note the trap the gate itself has to avoid: P2 must
-not be weakened into "the residuals are larger", which is true and useless.
+Two things came out of reading the recommendations, and both are worth not re-deriving:
+
+- **Two of the three "wrong" skeletons were not falsifiable at all.** `p(R1,CPE1)` is a strict
+  generalisation of `p(R1,C1)` — a CPE with n = 1 *is* a capacitor — so those skeletons contain
+  the truth's behaviour while `contains_skeleton` correctly says they do not contain its
+  topology. Both return the skeleton itself, everything resolved, exponent at n ≈ 1. Wrong at
+  the level of element codes is not wrong at the level of what the data can express, and
+  demanding a warning there would be demanding a false one.
+- **Where the skeleton *is* falsifiable, the signal is not the fit quality — it is an asserted
+  element the fit had to switch off.** `R1-p(R2,C1)` against the capacitor truth returns
+  `R1-p(R2,C1-L1-SKINF1)`, which becomes the truth exactly when R2 goes to an open; the element
+  the fit had to neutralise is the one that will not resolve. 9/10 seeds carry an unresolved
+  parameter and `unresolved_everywhere` is true on the same 9.
+
+So P2 is now written in three parts (§6 of the plan), and **what it forces is still to be
+built**: the report should name *which of the user's asserted elements* the fit neutralised,
+rather than reporting an unresolved parameter somewhere in the circuit and leaving them to
+notice it was one of theirs. Placement multiplicity (§3.5) is the same computation — if every
+placement has a neutralised element, the assertion is doing no work anywhere. That is the next
+piece of work in this mode, and it is small.
