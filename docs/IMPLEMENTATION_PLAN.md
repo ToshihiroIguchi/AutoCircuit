@@ -292,6 +292,28 @@ systematic under a runs test.
   it a report that can say *"every plausible topology with up to N elements was evaluated"*.
   Absence from the report becomes evidence.
 
+### 6.1.1 Skeleton-constrained discovery (implemented; see `docs/PARTIAL_TOPOLOGY_PLAN.md`)
+
+The middle of the same axis, not a new one: `fit` fixes the whole topology, `discover` fixes
+none of it, and `discover(skeleton=...)` fixes the part the user actually knows — a
+capacitor's ESR and ESL, a cell's electrolyte resistance. The search grows the skeleton
+outwards; containment is *deletion-and-collapse*, not subtree matching, because `series()` and
+`parallel()` flatten, so `R1-C1` is not a subtree of `R1-C1-p(R2,L1)`.
+
+- **[measured] It is the largest lever in the system.** At five elements from the component
+  pool: 10,214 candidates unconstrained, 6,711 with `R1`, 2,631 with `R1-L1`, 601 with
+  `C1-R1-L1`, 71 with `C1-R1-L1-SKINF1`. Against 1.15–1.75× for the feasibility filter. It is
+  also the first thing that makes six elements affordable while still claiming completeness.
+- **[measured] One or two added elements is the practical range, and that is the interesting
+  range anyway.** Each level costs 40–70× the last: from a ten-element skeleton, +1 is 167
+  candidates, +2 is 11,418, +3 is 521,438, +5 is ~10⁹. "I have ten elements, add five" has no
+  answer, twice over — the enumeration, and well before it a model with more parameters than
+  the data can resolve.
+- **A constraint narrows what the report may claim, and that is not optional.**
+  `complete_up_to`'s sentence names the skeleton; placement ambiguity is reported rather than
+  resolved; a front on which nothing is identifiable is stated as a finding about the
+  measurement. §3 of the plan is the part to read before changing any of it.
+
 ### 6.2 Structure probing — DRT (`core/drt.py`, `autocircuit drt`)
 
 A separate question from "what circuit?": *how many relaxations does this sample show, and is

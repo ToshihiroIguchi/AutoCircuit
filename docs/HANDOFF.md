@@ -1,19 +1,29 @@
-# Handoff — state of AutoCircuit as of 2026-08-08
+# Handoff — state of AutoCircuit as of 2026-08-13
 
-Written at the end of the session that built the backend, updated at the end of the session
-that implemented discovery v2 steps 1–5. Read this first, then `CLAUDE.md`, then
-`docs/DISCOVERY_V2_PLAN.md`.
+Written at the end of the session that built the backend, updated after discovery v2 steps
+1–5, and again after the skeleton-constrained mode (steps 1–3 of
+`docs/PARTIAL_TOPOLOGY_PLAN.md`). Read this first, then `CLAUDE.md`, then the plan for
+whichever part you are touching.
 
 ## 1. Where things stand
 
-The command-line backend is **complete and verified**: 387 tests pass
-(`python -m pytest tests -q`, ~3.7 min). Phases 0–5 of `docs/IMPLEMENTATION_PLAN.md` are done;
+The command-line backend is **complete and verified**: 550 tests pass
+(`python -m pytest tests -q`, ~4 min). Phases 0–5 of `docs/IMPLEMENTATION_PLAN.md` are done;
 phase 6 (web UI) is untouched.
 
 **Discovery v2 is fully implemented** (see §2) and all five gates pass: G1 30/30 across the
 three reference spectra, G2 exactly reproducing the measured counts table, G3 with the truth
 and every known exact equivalent surviving the feasibility filter, G4 with DRT counting 1, 2
 and 3 relaxations 10/10 at both 0% and 1% noise, and G5 with the whole suite green.
+
+**Skeleton-constrained discovery (mode 2 of `CLAUDE.md`) is implemented through step 3** —
+`discover(skeleton=...)` and `--skeleton` work end to end, the completeness sentence names the
+constraint, and the report states placement ambiguity and total non-identifiability. What is
+*not* done is §3.3 (which equivalents the skeleton excluded — its cost estimate turned out to
+be wrong, see the correction in that section) and the acceptance gates: **P1 is measured only
+on the capacitor reference** (5/5 seeds, truth recovered and recommended), and **P2 has not
+been run**. Its harness exists (`benchmarks/discovery_v2.py wrong-skeleton`) and its single
+smoke seed is already interesting — see §7.
 
 Working end to end today:
 
@@ -25,6 +35,7 @@ python -m autocircuit simulate -c "C1-R1-L1-SKINF1" -p C1.C=1e-6 -p R1.R=1e-2 `
 python -m autocircuit validate cap.csv
 python -m autocircuit fit cap.csv -c "C1-R1-L1-SKINF1" --spice cap.cir --json cap.json
 python -m autocircuit discover cap.csv --pool component --workers 8 --progress
+python -m autocircuit discover cap.csv --pool component --skeleton "C1-R1-L1" --workers 8
 python -m autocircuit discover cap.csv --pool component --mode evolve --time-limit 120
 python -m autocircuit drt cell.csv --json drt.json     # exits 1 if DRT does not apply
 ```
@@ -39,7 +50,7 @@ Module map (`src/autocircuit/`):
 | `core/fit.py` | the no-initial-values fitter (log transform → DE → TRF polish → restarts); `screen()` for rank-only fits |
 | `core/stats.py` | covariance, AICc, identifiability warnings |
 | `core/validate.py` | Lin-KK data validation |
-| `core/enumerate.py` | exhaustive topology enumeration + the structural feasibility filter |
+| `core/enumerate.py` | exhaustive topology enumeration, skeleton-constrained growth, the structural feasibility filter |
 | `core/drt.py` | regularised distribution of relaxation times; structure probing only |
 | `core/discover.py` | exhaustive and genetic topology search, Pareto front, equivalence classes |
 | `core/spice.py` | netlist export + NNLS Foster-form ladder synthesis |
@@ -143,6 +154,30 @@ recorded in the code as a comment and in `docs/IMPLEMENTATION_PLAN.md` marked **
   cannot carry a distributed inductive process, so on the capacitor reference it returns no
   peaks, a series resistance wrong by 7× and a 64% residual. `well_described` exists so that
   is reported rather than dressed up as "0 relaxations".
+- **"Contains the skeleton" is deletion-and-collapse, not subtree matching.** `series()` and
+  `parallel()` flatten nested nodes of the same type, so the skeleton `R1-C1` is *not* a
+  subtree of `R1-C1-p(R2,L1)` — that tree is one three-child series node. A subtree test
+  rejects the most obvious candidate the user expects.
+- **Growing a skeleton by attaching elements at existing positions leaves a hole.** A
+  sub-group of a flattened node's children is not an addressable position, so putting a
+  capacitor across only the `C1-L1` half of `R1-C1-L1` cannot be built by any attachment.
+  Attachment alone found 7 of the 16 four-element topologies containing that skeleton, and 58
+  of 139 at five elements — a silent hole in exactly the completeness guarantee the mode
+  exists to provide, in an implementation that looked complete. `_insertions()` therefore also
+  groups proper subsets of a node's children; `tests/test_skeleton.py` names the case.
+- **A skeleton is the largest lever in the system, by a wide margin.** At five elements from
+  the component pool: no skeleton 10,214 candidates, `R1` 6,711 (1.5×), `R1-L1` 2,631 (3.9×),
+  `C1-R1-L1` 601 (17×), `C1-R1-L1-SKINF1` 71 (144×). Against 1.15–1.75× for the feasibility
+  filter and ~2.3× for the browser's worker pool. It also brings six elements into range.
+- **Each added element costs 40–70× the last, and enumeration memory runs out before compute
+  does.** From a ten-element skeleton: +1 is 167 candidates, +2 is 11,418, +3 is 521,438, +4
+  is ~2·10⁷. The shape matters more than the size — the same ten elements as one flat series
+  chain gives 2,148,316 at +2, 188× worse, because a flat node with c children has 2^c ways to
+  group a proper subset. `grow_up_to()` therefore abandons a level *while building it*.
+- **The frontier is 1.3–3.9× larger than the level it produces**, rising with each level, so a
+  frontier bound equal to `max_candidates` stops short of the budget it exists to enforce.
+  Hence `FRONTIER_HEADROOM = 4`: at exactly `max_candidates` a default run would have lost the
+  9,857-candidate six-element level, grown from a frontier of 18,682.
 - **A feasibility filter that lets every element degenerate has no structural power at all.**
   If any element may be shorted or opened, the reachable endpoint-slope hull of *any*
   topology collapses to the union of its leaves' hulls — the test degenerates into "does this
@@ -215,6 +250,11 @@ spec that named the measured tolerances, then re-run here before being committed
 regularisation, the λ-selection rule and the peak criterion stayed on the expensive model —
 all three of which needed measurement to get right (§5.2 of the plan).
 
+The skeleton session kept the same split: `tests/test_skeleton.py` and
+`tests/test_discover_skeleton.py` were written by `sonnet` subagents from specs that named the
+exact contracts, then read and re-run here; the enumeration algorithm, the clamping rule and
+every decision about what the report may claim stayed on the expensive model.
+
 ## 6. Open items
 
 0. Nothing is left of `docs/DISCOVERY_V2_PLAN.md`: step 6 (DRT, gate G4) is done, so all seven
@@ -224,19 +264,89 @@ all three of which needed measurement to get right (§5.2 of the plan).
    it, and the small sizes are the cheapest fits), while raising `exhaustive_min` deliberately
    clears `complete_up_to` — "all topologies up to N" is not true when the smaller sizes were
    skipped. `exhaustive_min` stays available to anyone who wants that trade explicitly.
-1. **Web UI (phase 6)** — the biggest remaining piece. `docs/WEB_UI_PLAN.md` is a **draft
+1. **Skeleton mode: gate P2, and §3.3.** See §7 — P2 is the one thing standing between this
+   mode and calling it finished, and §3.3's design should be chosen from what P2 shows rather
+   than before it.
+2. **Web UI (phase 6)** — the biggest remaining piece. `docs/WEB_UI_PLAN.md` is a **draft
    awaiting approval**, written on the Pyodide measurements rather than on guesses. Its
    architecture question is already settled and prototyped (§2.1): orchestration stays in
    Python behind `discover.screen_plan()`, and the browser reproduces the CLI's discovery
    output to an AICc difference of 0.0. What it left standing is step 1 of its work order —
    getting a `FitResult` across a worker boundary losslessly, so tier 2 can be fanned out too.
    [measured] Tier 2 is 80% of the browser's run time today.
-2. ngspice round-trip in CI. The test suite already proves the netlist is *electrically*
+3. ngspice round-trip in CI. The test suite already proves the netlist is *electrically*
    right via its own nodal-analysis engine (`tests/test_spice.py`); a real simulator would
    also prove it is *dialect* right.
-3. Gamry `.DTA` and BioLogic `.mpt` readers, once real files exist to test against.
-4. ~~Pyodide performance measurement~~ — **done**, `benchmarks/pyodide/`. WASM costs 1.3–1.8×
+4. Gamry `.DTA` and BioLogic `.mpt` readers, once real files exist to test against.
+5. ~~Pyodide performance measurement~~ — **done**, `benchmarks/pyodide/`. WASM costs 1.3–1.8×
    on the numerical work, not the order of magnitude the plan feared, so no reduced web budget
    and no Rust port are needed. What it does settle: `exhaustive_limit=4` is the browser
    default at 2.8 min single-threaded, which makes progress streaming mandatory, and
    `exhaustive_limit=5` is a ~30 min opt-in. Phase 6 can be planned on these numbers.
+
+## 7. Skeleton-constrained discovery (mode 2)
+
+`docs/PARTIAL_TOPOLOGY_PLAN.md` is the design; this is the state of it. The user asserts part
+of the circuit — the *skeleton* — and the search adds elements to it and never removes them:
+
+```powershell
+python -m autocircuit discover cap.csv --pool component --skeleton "C1-R1-L1" --workers 8
+```
+
+The public surface: `discover(skeleton=...)`, `DiscoveryResult.skeleton`, `.placements_of()`
+and `.unresolved_everywhere`, and in `core/enumerate.py` the four functions
+`contains_skeleton` (the definition of the space), `grow_from_skeleton` (one level),
+`grow_up_to` (level by level, with the clamp), and `count_skeleton_placements`.
+
+Decisions already closed, none of which should be reopened without reading why:
+
+- **A skeleton and the genetic search do not compose.** `mode="evolve"` with a skeleton
+  raises, and `mode="auto"` runs the exhaustive stage alone rather than falling back —
+  `mutate()` deletes and retypes elements, so an evolved population is not confined to the
+  constrained space, and a report mixing candidates from two spaces cannot say which one it
+  covered.
+- **A `seeds=` circuit that does not contain the skeleton raises.** A seed adds to the
+  candidate list, a skeleton constrains what that list may hold; the seed could otherwise be
+  the recommendation, under a coverage line saying only constrained topologies were looked at.
+- **`exhaustive_limit` is a total element count everywhere**, including here, and defaults to
+  the skeleton's size + 5. That default reaches past what is affordable on purpose: the clamps
+  decide where a given skeleton stops, and they land where §1.1 of the plan predicted with no
+  new rule — +3 for a three-element skeleton (9,857 candidates), +2 for a ten-element one
+  (11,418).
+- **`max_elements` does not clamp the enumeration under a skeleton.** It caps the genetic
+  search, which never runs here, and its default of 7 would cut a ten-element skeleton off
+  below its own size.
+
+What the report owes the user, from §3 of the plan: the completeness sentence names the
+skeleton (§3.1, done), placement multiplicity is reported rather than resolved (§3.5, done),
+and a front on which nothing is identifiable is stated as a finding about the *measurement*
+(§3.4, done). **§3.3 — which equivalence-class members the skeleton excluded — is open**, and
+the plan's claim that it is cheap has been corrected there: the excluded topologies are
+precisely the ones never fitted, so identifying them means screening the same-size
+unconstrained space, ~9,600 fits at five elements on the component pool.
+
+### The gates
+
+**P3 and P4 pass** (`tests/test_skeleton.py` cross-checks the generator against the definition
+as sets; `tests/test_discover_skeleton.py` pins the unconstrained sentence character for
+character, and the suite is green).
+
+**P1 — the true skeleton must still recover the truth.** Measured on the capacitor reference,
+5/5 seeds, truth reported, on the front, and recommended; 534 candidates against 6,598
+unconstrained (12.4×) and about 10× faster per seed. Recovery is the gate; the speed-up is an
+observation, not a target.
+
+**P2 — a wrong skeleton must not read as a successful search.** This is the one that matters
+and the one still open. `benchmarks/discovery_v2.py wrong-skeleton` asks it as three numbers
+per seed rather than as a verdict: the runs-test z on the best fit's residuals, whether the
+recommendation carries unresolved parameters, and the chi² against what the truth itself
+achieves on the same data.
+
+One smoke seed is enough to see why the gate's wording could not be written in advance.
+Asserting the Randles-flavoured `R1-p(CPE1,R2)` against a Randles-*with-Warburg* reference
+gives chi² 1.0× the truth's own fit, runs z = −0.7 (no structure) and a recommendation with
+nothing unresolved. The wrong skeleton is invisible — and not because the report is hiding
+anything: at 1% noise this data cannot tell `R1-p(CPE1,R2)-W1` from `R1-p(C1,R2-W1)`. Whether
+that counts as P2 failing, or as the honest answer to a question the data cannot settle, is
+the decision the full run has to inform. Note the trap the gate itself has to avoid: P2 must
+not be weakened into "the residuals are larger", which is true and useless.

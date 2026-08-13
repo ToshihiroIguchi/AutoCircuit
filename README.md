@@ -144,6 +144,25 @@ genetic search, which is still what runs above `--exhaustive-limit`; `--mode aut
 default) does the enumeration and only falls back to evolution if the residuals still look
 systematic.
 
+**You can assert the part you already know.** A film capacitor has an ESR and an ESL in series
+with it; a cell has an electrolyte resistance in series with everything. `--skeleton` states
+that much and lets the search supply the rest — it adds elements to what you wrote and never
+removes them:
+
+```
+autocircuit discover cap.csv --pool component --skeleton "C1-R1-L1"
+```
+
+It is the sharpest instrument here: at five elements from the component pool, asserting
+`C1-R1-L1` cuts 10,214 candidates to 601, which is what brings six-element models into range
+at all. It is also the only option that can remove the right answer while leaving a report
+that looks healthy, so the coverage line changes with it and says so in the same sentence —
+*every plausible topology with up to 6 elements **that contains C1-R1-L1** was evaluated* —
+and the report adds two things a constrained search owes you: when your skeleton fits into a
+reported circuit in more than one place, it says so instead of picking one, and when every
+candidate that fits leaves parameters the data cannot resolve, it says that too, because that
+is a fact about the measurement rather than about the search.
+
 **Data validation is not optional.** A spectrum that drifted during the sweep will still fit a
 circuit, and will still report small error bars. The Lin-KK pre-check exists to catch that
 before the numbers are believed.
