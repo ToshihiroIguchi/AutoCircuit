@@ -60,6 +60,7 @@ from .enumerate import (
     # it in bulk; it is re-exported here because it was this module's public surface first.
     is_plausible,  # noqa: F401
     is_plausible_node,  # noqa: F401
+    skeleton_placements,
 )
 from .fit import FitResult, Weighting, fit, screen
 from .spectrum import Spectrum
@@ -183,13 +184,25 @@ class Candidate:
         return self.circuit.complexity
 
     @property
-    def n_unresolved(self) -> int:
-        """Parameters whose standard error exceeds their own value."""
+    def unresolved(self) -> np.ndarray:
+        """Per-parameter mask: True where the standard error exceeds the value itself.
+
+        Kept as a mask rather than only a count because the count answers "is this model
+        identifiable?" while the mask answers "*which* element is not" -- and under a skeleton
+        the second question is the one that matters, since an asserted element the fit could
+        not pin down is an assertion the data never tested (see
+        :meth:`DiscoveryResult.unsupported_assertion`).
+        """
         values = np.abs(self.result.values)
         errors = self.result.statistics.stderr
         with np.errstate(divide="ignore", invalid="ignore"):
             ratio = np.where(values > 0, errors / values, np.inf)
-        return int(np.count_nonzero(ratio > UNRESOLVED_STDERR))
+        return np.asarray(ratio > UNRESOLVED_STDERR)
+
+    @property
+    def n_unresolved(self) -> int:
+        """Parameters whose standard error exceeds their own value."""
+        return int(np.count_nonzero(self.unresolved))
 
     def to_dict(self) -> dict[str, Any]:
         payload = self.result.to_dict()
@@ -278,6 +291,51 @@ class DiscoveryResult:
         """
         well_fitting = self._well_fitting()
         return bool(well_fitting) and all(c.n_unresolved > 0 for c in well_fitting)
+
+    def unsupported_assertion(self, candidate: Candidate) -> tuple[str, ...]:
+        """The user's asserted elements this fit could not pin down; empty when it could.
+
+        [measured, docs/PARTIAL_TOPOLOGY_PLAN.md section 3.2] **This is what a wrong skeleton
+        looks like.** Over three reference spectra and ten seeds each, a skeleton the truth did
+        not contain left no trace in the two places a reader would look: residual structure
+        0/30, and a chi-squared equal to what the *truth itself* achieves on the same data, to
+        two figures, every time. What it did leave was this. Asserting ``R1-p(R2,C1)`` against
+        a capacitor whose truth is ``C1-R1-L1-SKINF1`` returns ``R1-p(R2,C1-L1-SKINF1)``, which
+        becomes the truth exactly when R2 goes to an open -- so the fit neutralises the
+        asserted branch, and the element it had to neutralise is the one whose standard error
+        exceeds its own value. 9/10 seeds.
+
+        The answer is taken over placements (§3.5): if *any* way of reading the skeleton into
+        this circuit resolves all of its elements, the assertion is supported and the result is
+        empty. Otherwise the most favourable reading is reported, so the message names as few
+        elements as the data allows rather than as many.
+
+        Note what this is not. It is not a claim that the skeleton is wrong: an element the
+        data cannot pin down is an element the data has not tested, which is a weaker and more
+        honest statement. A skeleton that merely *generalises* the truth -- a CPE where the
+        sample has an ideal capacitance -- fits identically with everything resolved, and this
+        correctly stays silent for it.
+        """
+        if self.skeleton is None:
+            return ()
+        placements = skeleton_placements(
+            candidate.circuit.root, Circuit.parse(self.skeleton).root
+        )
+        unresolved = candidate.unresolved
+        leaves = candidate.circuit.leaves
+        spans = candidate.circuit.slices()
+        best: tuple[str, ...] | None = None
+        for placement in placements:
+            labels = tuple(
+                leaves[index].label
+                for index in sorted(placement)
+                if bool(np.any(unresolved[spans[leaves[index].label]]))
+            )
+            if not labels:
+                return ()
+            if best is None or len(labels) < len(best):
+                best = labels
+        return best or ()
 
     def placements_of(self, candidate: Candidate) -> int:
         """How many structurally distinct ways the skeleton sits inside ``candidate``.
@@ -419,6 +477,16 @@ class DiscoveryResult:
         recommended = self.recommended
         if recommended is not None and self.best is not None:
             lines += ["", f"Recommended    : {recommended.circuit.to_string()}"]
+            unsupported = self.unsupported_assertion(recommended)
+            if unsupported:
+                named = ", ".join(unsupported)
+                lines += [
+                    f"! The data does not test part of your skeleton: {named} came back with a",
+                    "  standard error larger than its own value, under every way the skeleton",
+                    "  fits this circuit. The fit is what it is with that element switched off,",
+                    "  so the data neither supports nor refutes that part of your assertion --",
+                    "  which is also what a wrong skeleton looks like.",
+                ]
             if recommended is not self.best:
                 lines.append(
                     f"Lowest AICc    : {self.best.circuit.to_string()} "

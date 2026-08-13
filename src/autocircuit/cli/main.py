@@ -276,6 +276,11 @@ def cmd_discover(args: argparse.Namespace) -> int:
             # candidate is identifiable, and that the asserted skeleton fits into a reported
             # topology in more than one place.
             "unresolved_everywhere": result.unresolved_everywhere,
+            "unsupported_assertion": (
+                None
+                if result.skeleton is None or result.recommended is None
+                else list(result.unsupported_assertion(result.recommended))
+            ),
             "skeleton_placements": (
                 None
                 if result.skeleton is None

@@ -281,6 +281,76 @@ def test_a_report_where_nothing_is_identifiable_says_so() -> None:
     assert "cannot" in result.summary() and "resolve" in result.summary()
 
 
+def test_an_asserted_element_the_fit_had_to_switch_off_is_named() -> None:
+    """What gate P2 measured, in miniature (docs/PARTIAL_TOPOLOGY_PLAN.md section 3.2).
+
+    [measured] Over three references and ten seeds each, a wrong skeleton left *no* trace in
+    the two places a reader looks: residual structure 0/30, and a chi-squared equal to what the
+    truth itself achieves on the same data. What it did leave is this. Asserting a semicircle
+    `R1-p(R2,C1)` against a series `C1-R1-L1` truth returns `R1-p(R2,C1)-L1`, which becomes the
+    truth exactly when R2 goes to an open -- so the fit neutralises the asserted branch, and
+    the element it had to neutralise is the one whose standard error exceeds its own value.
+    Naming it is the difference between a report the reader can act on and an unresolved
+    parameter somewhere in a circuit they have to notice was theirs.
+    """
+    truth = simulate(
+        "C1-R1-L1",
+        log_frequencies(1e2, 1e9, 4),
+        {"C1.C": 1e-6, "R1.R": 1e-2, "L1.L": 5e-10},
+        noise=0.01,
+        seed=0,
+    )
+    result = discover(
+        truth,
+        pool=("R", "C", "L"),
+        skeleton="R1-p(R2,C1)",
+        mode="exhaustive",
+        exhaustive_limit=4,
+        seed=0,
+    )
+    assert result.recommended is not None
+    assert result.unsupported_assertion(result.recommended) == ("R2",)
+    assert "does not test part of your skeleton" in result.summary()
+
+
+def test_a_skeleton_the_data_supports_is_not_flagged() -> None:
+    """The other half of the gate, and the reason this cannot simply warn whenever a skeleton
+    is present: a skeleton the truth really does contain comes back with every asserted element
+    resolved, and a warning there would be a false one. The measurement makes the same point
+    from the other side -- two of the three "wrong" skeletons in the P2 run were strict
+    generalisations of the truth (a CPE with n = 1 *is* a capacitor), fitted identically with
+    nothing unresolved, and were correctly not flagged.
+    """
+    truth = simulate(
+        "C1-R1-L1",
+        log_frequencies(1e2, 1e9, 4),
+        {"C1.C": 1e-6, "R1.R": 1e-2, "L1.L": 5e-10},
+        noise=0.01,
+        seed=0,
+    )
+    result = discover(
+        truth,
+        pool=("R", "C", "L"),
+        skeleton="C1-R1-L1",
+        mode="exhaustive",
+        exhaustive_limit=4,
+        seed=0,
+    )
+    assert result.recommended is not None
+    assert result.unsupported_assertion(result.recommended) == ()
+    assert "does not test part of your skeleton" not in result.summary()
+
+
+def test_an_unconstrained_run_has_no_assertion_to_report_on() -> None:
+    truth_values = {"R1.R": 20.0, "R2.R": 1000.0, "C1.C": 1e-8}
+    spectrum = simulate(
+        "R1-p(R2,C1)", log_frequencies(1e1, 1e5, 2), truth_values, noise=0.0, seed=0
+    )
+    result = discover(spectrum, pool=POOL, mode="exhaustive", exhaustive_limit=3, seed=0)
+    assert result.recommended is not None
+    assert result.unsupported_assertion(result.recommended) == ()
+
+
 def test_a_resolved_report_carries_no_such_warning() -> None:
     """The counterpart, so the warning is a finding and not decoration: noise-free data that
     determines its circuit must not trip it.

@@ -7,8 +7,8 @@ whichever part you are touching.
 
 ## 1. Where things stand
 
-The command-line backend is **complete and verified**: 550 tests pass
-(`python -m pytest tests -q`, ~4 min). Phases 0–5 of `docs/IMPLEMENTATION_PLAN.md` are done;
+The command-line backend is **complete and verified**: 554 tests pass
+(`python -m pytest tests -q`, ~4-5 min). Phases 0–5 of `docs/IMPLEMENTATION_PLAN.md` are done;
 phase 6 (web UI) is untouched.
 
 **Discovery v2 is fully implemented** (see §2) and all five gates pass: G1 30/30 across the
@@ -23,7 +23,7 @@ constraint, and the report states placement ambiguity and total non-identifiabil
 be wrong, see the correction in that section). **Gates P1, P3 and P4 pass; P2's experiment has
 been run and rewrote the gate** — a wrong skeleton turns out to be invisible in the residuals
 and in chi², and the one place it does surface is an asserted element the fit had to switch
-off. Naming that element is the next piece of work. See §7.
+off, which the report now names. Only §3.3 is left. See §7.
 
 Working end to end today:
 
@@ -360,9 +360,13 @@ Two things came out of reading the recommendations, and both are worth not re-de
   the fit had to neutralise is the one that will not resolve. 9/10 seeds carry an unresolved
   parameter and `unresolved_everywhere` is true on the same 9.
 
-So P2 is now written in three parts (§6 of the plan), and **what it forces is still to be
-built**: the report should name *which of the user's asserted elements* the fit neutralised,
-rather than reporting an unresolved parameter somewhere in the circuit and leaving them to
-notice it was one of theirs. Placement multiplicity (§3.5) is the same computation — if every
-placement has a neutralised element, the assertion is doing no work anywhere. That is the next
-piece of work in this mode, and it is small.
+P2 is now written in three parts (§6 of the plan), and what it pointed at is built:
+`DiscoveryResult.unsupported_assertion()` names *which of the user's asserted elements* the fit
+could not pin down, under the recommendation. Placement multiplicity (§3.5) is the same
+computation — the answer is taken over placements, so a skeleton that has any fully resolved
+reading is reported as supported. It says the data does not *test* that part of the assertion
+rather than that the assertion is wrong, which is both weaker and true, and is what keeps it
+silent for a skeleton that merely generalises the truth.
+
+**What is left in this mode:** §3.3 (which excluded equivalents to report, and at what cost),
+and nothing else.

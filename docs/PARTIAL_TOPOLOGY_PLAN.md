@@ -2,8 +2,9 @@
 
 Status: **steps 1–2 are implemented and measured** (enumeration, and the search wired to it),
 **step 3 is two thirds done** (§3.4 and §3.5; §3.3 is open and its cost estimate has been
-corrected), and **step 4's experiment has been run** — gates P1, P3 and P4 pass, and P2 is
-written from the measurement rather than from a guess (§3.2). Written 2026-08-12, measured
+corrected), and **step 4 is done** — gates P1, P3 and P4 pass, P2 is written from
+the measurement rather than from a guess, and the signal that measurement pointed at is built
+(§3.2). Only §3.3 and the documentation sweep are left. Written 2026-08-12, measured
 2026-08-13.
 Prerequisite reading: `docs/DISCOVERY_V2_PLAN.md` (especially the corrections in §3.2, §3.4 and
 §5.1 — this design repeats their shape), `docs/HANDOFF.md` §3, and `CLAUDE.md`'s three modes.
@@ -177,12 +178,21 @@ the one that will not resolve: 9/10 seeds carry an unresolved parameter and
 > **A wrong skeleton that the data can refute announces itself as an asserted element the fit
 > had to switch off, not as a worse fit.**
 
-That is what P2 should be written on, and what §3.4's warning was already half-detecting by
-accident. What it forces is small and specific: the report should say *which* of the user's
-asserted elements the fit had to neutralise, rather than reporting an unresolved parameter
-somewhere in the circuit and leaving them to notice it is one of theirs. Placement ambiguity
-(§3.5) is part of the same computation — if every placement of the skeleton has a neutralised
-element, the assertion is doing no work anywhere.
+That is what P2 is written on, and what §3.4's warning was already half-detecting by accident.
+
+**Implemented** as `DiscoveryResult.unsupported_assertion()`, printed under the recommendation:
+it names *which* of the user's asserted elements the fit could not pin down, rather than
+reporting an unresolved parameter somewhere in the circuit and leaving them to notice it was
+one of theirs. Placement ambiguity (§3.5) is part of the same computation — the answer is taken
+over placements, so if any reading of the skeleton resolves all of its elements the assertion
+is supported and nothing is printed, and otherwise the most favourable reading is the one
+named. `enumerate.skeleton_placements()` therefore returns the leaf-index sets rather than only
+their count, and the report goes from those to parameters through `Circuit.slices()`.
+
+The wording matters as much as the signal. It says the data does not *test* that part of the
+assertion — not that the assertion is wrong. An element the fit had to switch off is one the
+measurement has nothing to say about, which is weaker and true; and the same restraint is what
+keeps it silent for a skeleton that merely generalises the truth.
 
 ### 3.3 The skeleton chooses among forms the data cannot distinguish
 
@@ -344,7 +354,7 @@ has to change; step 3 gains a second button.
 | 1 | `contains_skeleton`, `grow_from_skeleton`, cross-check tests | M | **done** — `tests/test_skeleton.py`, 89 tests; see §2 |
 | 2 | `grow_up_to()`, `discover(skeleton=...)`, `DiscoveryResult.skeleton`, completeness wording, CLI flag | M | **done** — see the notes in §3.1 and §4.1 |
 | 3 | Report: excluded equivalents (§3.3), unresolved-across-the-board (§3.4), placement multiplicity (§3.5) | M | §3.4 and §3.5 **done**; §3.3 open — its cost estimate was wrong, see the correction there |
-| 4 | Gate P2 — the wrong-skeleton experiment (§3.2), and whatever it forces | M | experiment **done and recorded**; what it forces (naming the neutralised element) is not built |
+| 4 | Gate P2 — the wrong-skeleton experiment (§3.2), and whatever it forces | M | **done** — experiment measured, gate written from it, and the signal it pointed at (naming the neutralised element) built |
 | 5 | Docs: this file, `IMPLEMENTATION_PLAN.md` §6, `HANDOFF.md`, README | S | |
 
 Step 4 is not last because it is least important; it is last because it needs steps 2–3 to run
@@ -369,8 +379,9 @@ at all. It is the step most likely to send steps 2–3 back for changes.
 
   1. **A falsifiable wrong skeleton must show up as an asserted element the fit had to
      neutralise**, named as the user's own, on the reference where the assertion is genuinely
-     refutable. [measured] The raw signal is already there 9/10 seeds; naming it is §3.2's
-     forced change.
+     refutable. [measured] The raw signal is there 9/10 seeds; naming it is
+     `unsupported_assertion()`, and `tests/test_discover_skeleton.py` holds the case in
+     miniature.
   2. **An unfalsifiable wrong skeleton must not be treated as a failure.** A CPE asserted where
      the sample has an ideal capacitance fits identically and returns n ≈ 1; the report's job
      there is to state the coverage constraint and the fitted exponent, both of which it does.

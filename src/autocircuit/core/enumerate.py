@@ -70,6 +70,7 @@ __all__ = [
     "is_feasible",
     "is_plausible",
     "is_plausible_node",
+    "skeleton_placements",
 ]
 
 
@@ -301,33 +302,46 @@ def _mark_leaves(node: Node, keep: frozenset[int], cursor: list[int]) -> Node:
     return Series(children) if isinstance(node, Series) else Parallel(children)
 
 
-def count_skeleton_placements(candidate: Node, skeleton: Node) -> int:
-    """How many structurally distinct ways ``skeleton`` maps into ``candidate``.
+def skeleton_placements(candidate: Node, skeleton: Node) -> list[frozenset[int]]:
+    """Every structurally distinct way ``skeleton`` maps into ``candidate``.
 
-    Zero means it does not: this agrees with :func:`contains_skeleton` everywhere, and is the
-    slower way to ask, since it cannot stop at the first placement it finds.
+    Each placement is the set of ``candidate`` leaf indices that are the skeleton's, in the
+    depth-first order :class:`~autocircuit.core.circuit.Circuit` numbers its leaves, so a
+    caller can go from a placement to the parameters of those elements. An empty list means the
+    candidate does not contain the skeleton at all; :func:`contains_skeleton` answers that same
+    question faster, since it stops at the first placement.
 
-    A count above one is not a defect in the search, and it is not something more computation
-    can settle. Topologies are deduplicated by canonical form, so each one is fitted once, but
-    a skeleton can sit inside the same topology in more than one place: from the skeleton
-    ``R1``, both "add C in parallel, then R in series with it" and "add C in series, then R in
-    parallel with the pair" arrive at ``p(R,[C-R])``, with the user's resistor somewhere
-    structurally different -- and a different fitted value -- each time. The data cannot say
-    which resistor is theirs, so the honest report says that rather than picking one, the same
-    reason an equivalence class is reported instead of one member of it.
+    More than one placement is not a defect in the search, and it is not something more
+    computation can settle. Topologies are deduplicated by canonical form, so each is fitted
+    once, but a skeleton can sit inside the same topology in more than one place: from the
+    skeleton ``R1``, both "add C in parallel, then R in series with it" and "add C in series,
+    then R in parallel with the pair" arrive at ``p(R,[C-R])``, with the user's resistor
+    somewhere structurally different -- and a different fitted value -- each time. The data
+    cannot say which resistor is theirs, so the honest report says that rather than picking
+    one, for the same reason an equivalence class is reported instead of one member of it.
+
+    Placements exchanged by an automorphism of the topology are one placement, not two: they
+    are the same claim about the same circuit. The first index set found for each is the one
+    returned.
     """
     target = canonical_form(simplify(skeleton))
     n_keep = count_elements(skeleton)
     total = count_elements(candidate)
     if total < n_keep:
-        return 0
-    placements: set[str] = set()
+        return []
+    found: dict[str, frozenset[int]] = {}
     for keep in itertools.combinations(range(total), n_keep):
         kept = frozenset(keep)
         remaining = _remove_leaves(candidate, kept, [0])
         if remaining is not None and canonical_form(simplify(remaining)) == target:
-            placements.add(canonical_form(_mark_leaves(candidate, kept, [0])))
-    return len(placements)
+            found.setdefault(canonical_form(_mark_leaves(candidate, kept, [0])), kept)
+    return list(found.values())
+
+
+def count_skeleton_placements(candidate: Node, skeleton: Node) -> int:
+    """How many structurally distinct ways ``skeleton`` maps into ``candidate``; see
+    :func:`skeleton_placements`, of which this is the count."""
+    return len(skeleton_placements(candidate, skeleton))
 
 
 def _insertions(node: Node, codes: tuple[str, ...]) -> Iterator[Node]:

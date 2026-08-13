@@ -24,6 +24,7 @@ from autocircuit.core.enumerate import (
     grow_from_skeleton,
     grow_up_to,
     is_plausible_node,
+    skeleton_placements,
 )
 
 # =============================================================================================
@@ -261,6 +262,18 @@ def test_the_skeleton_can_sit_in_two_places_in_one_topology() -> None:
     candidate = Circuit.parse("p(R1,C1-R2)").root
     assert canonical_form(candidate) == "p(R,[C-R])"
     assert count_skeleton_placements(candidate, Circuit.parse("R1").root) == 2
+
+
+def test_a_placement_is_leaf_indices_in_circuit_order() -> None:
+    """The index convention is load-bearing, not incidental: the report goes from a placement
+    to *the parameters of those elements* through ``Circuit.leaves`` and ``Circuit.slices``,
+    which is how it can name the asserted element the fit could not resolve. An off-by-one in
+    the leaf numbering would blame the wrong element, and blame it plausibly.
+    """
+    circuit = Circuit.parse("p(R1,C1-R2)")
+    assert [leaf.label for leaf in circuit.leaves] == ["R1", "C1", "R2"]
+    placements = skeleton_placements(circuit.root, Circuit.parse("R1").root)
+    assert sorted(sorted(p) for p in placements) == [[0], [2]]
 
 
 def test_placements_related_by_symmetry_count_once() -> None:
