@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from numpy.testing import assert_allclose
 
-from autocircuit.core.circuit import Circuit, CircuitError, simplify
+from autocircuit.core.circuit import Circuit, CircuitError, remove_subtree, simplify
 from autocircuit.core.dsl import CircuitSyntaxError
 from autocircuit.core.spectrum import Spectrum
 
@@ -223,6 +223,60 @@ def test_simplify_leaves_cpe_pair_untouched() -> None:
     # CPE is not in the mergeable set even though two of them sit in series.
     result = Circuit(simplify(Circuit.parse("CPE1-CPE2").root))
     assert result.to_string() == "CPE1-CPE2"
+
+
+# =============================================================================================
+# remove_subtree
+# =============================================================================================
+
+
+def test_remove_subtree_collapses_a_two_branch_parallel_into_the_surviving_branch() -> None:
+    circuit = Circuit.parse("C1-R1-p(R2,C2)")
+    result = Circuit(remove_subtree(circuit.root, (2, 1)))
+    assert result.to_string() == "C1-R1-R2"
+
+
+def test_remove_subtree_goes_through_series_and_parallel_matching_a_fresh_parse() -> None:
+    # Removing R2 collapses p(R2,C1) down to the surviving branch C1, which must merge into
+    # the surrounding series connection exactly as series() would when parsing from scratch.
+    circuit = Circuit.parse("R1-p(R2,C1)-L1")
+    result = Circuit(remove_subtree(circuit.root, (1, 0)))
+    assert result.to_string() == "R1-C1-L1"
+    reparsed = Circuit.parse(result.to_string())
+    assert result.canonical_form() == reparsed.canonical_form()
+
+
+def test_remove_subtree_removes_an_element_nested_inside_a_branch() -> None:
+    circuit = Circuit.parse("R1-p(R2-C1,L1)")
+    result = Circuit(remove_subtree(circuit.root, (1, 0, 1)))
+    assert result.to_string() == "R1-p(R2,L1)"
+
+
+def test_remove_subtree_of_the_root_raises() -> None:
+    circuit = Circuit.parse("R1-C1")
+    with pytest.raises(CircuitError):
+        remove_subtree(circuit.root, ())
+
+
+def test_remove_subtree_with_an_out_of_range_index_raises() -> None:
+    # Must raise rather than silently deleting a different child.
+    circuit = Circuit.parse("R1-C1-L1")
+    with pytest.raises(CircuitError):
+        remove_subtree(circuit.root, (5,))
+
+
+def test_remove_subtree_with_a_negative_index_raises() -> None:
+    # A negative index must not be interpreted as Python-style indexing from the end -- that
+    # would silently delete a different child than the one the path names.
+    circuit = Circuit.parse("R1-C1-L1")
+    with pytest.raises(CircuitError):
+        remove_subtree(circuit.root, (-1,))
+
+
+def test_remove_subtree_running_past_a_leaf_raises() -> None:
+    circuit = Circuit.parse("R1-C1")
+    with pytest.raises(CircuitError):
+        remove_subtree(circuit.root, (0, 0))
 
 
 # =============================================================================================

@@ -97,6 +97,58 @@ def weight_vectors(
     raise ValueError(f"unknown weighting {weighting!r}")
 
 
+def search_space(
+    circuit: Circuit,
+    spectrum: Spectrum,
+    *,
+    fixed: dict[str, float] | None = None,
+    bounds: dict[str, tuple[float, float]] | None = None,
+    margin_decades: float = 3.0,
+) -> tuple[Float, Float, Float]:
+    """The interval the fitter searches for each parameter, and the value it starts from.
+
+    Returns ``(lower, upper, start)``, each ordered like ``circuit.param_names``. ``start`` is
+    the geometric centre of each interval, or the held value for a fixed parameter -- it is a
+    statement about the *data's* scale, not a guess at the device, which is the whole reason
+    this fitter needs no initial values.
+
+    This is public because the browser draws a model curve before anything has been fitted, and
+    that curve has to start from the point the fitter itself starts from. :class:`_Problem`
+    calls it too, so there is one implementation rather than a second one for display.
+    """
+    names = circuit.param_names
+    held = dict(fixed or {})
+    unknown = set(held) - set(names)
+    if unknown:
+        raise ValueError(f"cannot fix unknown parameters: {', '.join(sorted(unknown))}")
+
+    ctx = BoundsContext.from_data(spectrum.omega, spectrum.z, margin_decades)
+    lower, upper = circuit.bounds(ctx)
+    if bounds:
+        unknown = set(bounds) - set(names)
+        if unknown:
+            raise ValueError(f"bounds given for unknown parameters: {', '.join(unknown)}")
+        for name, (lo, hi) in bounds.items():
+            i = names.index(name)
+            lower[i], upper[i] = lo, hi
+
+    start = np.empty(len(names), dtype=np.float64)
+    for i, name in enumerate(names):
+        start[i] = held.get(name, math.sqrt(lower[i] * upper[i]))
+    return lower, upper, start
+
+
+def relative_error(z_model: Complex, spectrum: Spectrum) -> float:
+    """Root-mean-square |Z_model - Z_data| / |Z_data| over the spectrum.
+
+    Shared with the browser's live preview, which shows this number for a model that has not
+    been fitted yet. Pressing Fit must move the same quantity rather than swap it for a
+    different one computed elsewhere.
+    """
+    rel = np.abs(z_model - spectrum.z) / np.abs(spectrum.z)
+    return float(np.sqrt(np.mean(rel**2)))
+
+
 @dataclass
 class FitResult:
     """Outcome of one fit, including everything needed to judge whether to trust it."""
@@ -134,8 +186,7 @@ class FitResult:
 
     def relative_error(self, spectrum: Spectrum) -> float:
         """Root-mean-square |Z_model - Z_data| / |Z_data| over the spectrum."""
-        rel = np.abs(self.z_model - spectrum.z) / np.abs(spectrum.z)
-        return float(np.sqrt(np.mean(rel**2)))
+        return relative_error(self.z_model, spectrum)
 
     @property
     def warnings(self) -> tuple[str, ...]:
@@ -311,19 +362,13 @@ class _Problem:
         if self.free_idx.size == 0:
             raise ValueError("all parameters are fixed; nothing to fit")
 
-        ctx = BoundsContext.from_data(spectrum.omega, spectrum.z, margin_decades)
-        lo_all, hi_all = circuit.bounds(ctx)
-        if bounds:
-            unknown = set(bounds) - set(names)
-            if unknown:
-                raise ValueError(f"bounds given for unknown parameters: {', '.join(unknown)}")
-            for name, (lo, hi) in bounds.items():
-                i = names.index(name)
-                lo_all[i], hi_all[i] = lo, hi
-
-        self.template = np.empty(len(names), dtype=np.float64)
-        for i, name in enumerate(names):
-            self.template[i] = fixed.get(name, math.sqrt(lo_all[i] * hi_all[i]))
+        lo_all, hi_all, self.template = search_space(
+            circuit,
+            spectrum,
+            fixed=fixed,
+            bounds=bounds,
+            margin_decades=margin_decades,
+        )
 
         self.log_mask_all = circuit.log_mask()
         self.log_mask = self.log_mask_all[self.free_idx]

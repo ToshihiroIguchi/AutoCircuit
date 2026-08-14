@@ -489,6 +489,14 @@ COMPONENT_POOL: tuple[str, ...] = ("R", "C", "L", "CPE", "SKINF")
 #: Pool tuned for electrochemical and dielectric (Maxwell-Wagner) spectra.
 ELECTROCHEMICAL_POOL: tuple[str, ...] = ("R", "C", "L", "CPE", "W", "Ws", "Wo", "G")
 
+#: The pools offered by name, for the CLI's ``--pool`` and the browser's element palette. It
+#: lives here rather than in either front end so both offer the same set.
+POOLS: dict[str, tuple[str, ...]] = {
+    "default": DEFAULT_POOL,
+    "component": COMPONENT_POOL,
+    "electrochemical": ELECTROCHEMICAL_POOL,
+}
+
 
 def get(code: str) -> Element:
     """Look up an element by code, raising a helpful error for unknown codes."""

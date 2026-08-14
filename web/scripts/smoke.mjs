@@ -56,7 +56,7 @@ const ask = (request) => JSON.parse(handle(JSON.stringify(request)));
 console.log("version");
 const version = ask({ op: "version" });
 check("version answers", version.ok === true, JSON.stringify(version));
-check("bridge version is 1", version.result?.bridge === 1);
+check("bridge version is 2", version.result?.bridge === 2);
 check(
   "all four readers are present",
   JSON.stringify(version.result?.formats) ===
@@ -113,6 +113,68 @@ const kk = validation.result?.validation;
 check("the verdict is a pass on clean synthetic data", kk?.passed === true);
 check("the residual pattern is random", kk?.systematic === false);
 check("the summary text travelled", typeof kk?.summary === "string" && kk.summary.includes("Lin-KK"));
+
+console.log("circuit");
+const catalogue = ask({ op: "elements" });
+check("elements answers", catalogue.ok === true, JSON.stringify(catalogue.error));
+check(
+  "the palette is the registry, not a copy of it",
+  catalogue.result?.elements?.some((element) => element.code === "CPE") === true,
+);
+check(
+  "the pools are the ones --pool offers",
+  JSON.stringify(Object.keys(catalogue.result?.pools ?? {})) ===
+    JSON.stringify(["default", "component", "electrochemical"]),
+);
+
+const described = ask({ op: "circuit", circuit: "C1-R1-L1", spectrum: simulated });
+check("circuit parses", described.ok === true, JSON.stringify(described.error));
+check("its tree is a series of three", described.result?.tree?.children?.length === 3);
+check(
+  "each parameter carries the interval the fitter searches",
+  described.result?.params?.every((p) => typeof p.start === "number" && p.lower < p.upper) === true,
+);
+const broken = ask({ op: "circuit", circuit: "C1-p(R2" });
+check("a syntax error is an error response, not a crash", broken.ok === false);
+
+const edited = ask({ op: "edit", circuit: "C1-R1", path: [1], action: "parallel", code: "C" });
+check("an edit answers with the circuit it produced", edited.result?.circuit === "C1-p(R1,C2)");
+const collapsed = ask({
+  op: "edit",
+  circuit: "C1-R1-p(R2,C2)",
+  path: [2, 1],
+  action: "remove",
+});
+check(
+  "deleting one branch of a pair collapses the block",
+  collapsed.result?.circuit === "C1-R1-R2",
+  JSON.stringify(collapsed),
+);
+
+console.log("preview and fit");
+const preview = ask({ op: "preview", circuit: "C1-R1-L1", spectrum: simulated });
+check("preview answers", preview.ok === true, JSON.stringify(preview.error));
+check(
+  "it evaluates at every measured frequency",
+  preview.result?.z_model?.re.length === simulated.f.data.length,
+);
+const fitted = ask({ op: "fit", circuit: "C1-R1-L1", spectrum: simulated, restarts: 2 });
+check("fit answers", fitted.ok === true, JSON.stringify(fitted.error));
+check("it converged", fitted.result?.fit?.success === true, fitted.result?.fit?.message);
+check(
+  "it recovered the capacitance it was generated from",
+  Math.abs(fitted.result?.fit?.values.data[0] / 1e-6 - 1) < 0.05,
+  JSON.stringify(fitted.result?.fit?.values.data),
+);
+check(
+  "the residuals arrive already split, one value per point",
+  fitted.result?.residual_real?.data.length === simulated.f.data.length &&
+    fitted.result?.residual_imag?.data.length === simulated.f.data.length,
+);
+check(
+  "the report text travelled",
+  typeof fitted.result?.summary === "string" && fitted.result.summary.includes("chi^2"),
+);
 
 console.log("errors");
 check("a missing file is an error response", ask({ op: "read", path: "/nope.csv" }).ok === false);

@@ -2,7 +2,16 @@
 // for the bridge operations. Nothing here interprets a payload -- a spectrum goes out exactly
 // as it came in.
 
-import type { SpectrumWire, ValidationWire, VersionsWire } from "../core/types";
+import type {
+  CatalogueWire,
+  CircuitWire,
+  EditAction,
+  FitWire,
+  PreviewWire,
+  SpectrumWire,
+  ValidationWire,
+  VersionsWire,
+} from "../core/types";
 import type { LoadStage, WorkerRequest, WorkerResponse } from "./protocol";
 
 /** A failure the Python side reported, as opposed to one the transport invented. */
@@ -16,6 +25,46 @@ export class BridgeError extends Error {
   }
 }
 
+/**
+ * What the parameters of a circuit are being judged against.
+ *
+ * The spectrum is what turns a topology into a search space: every bound and every starting
+ * value below is derived from the measured frequency range and impedance magnitude. `fixed` and
+ * `bounds` are the user's overrides, and they are sent with *every* call rather than stored,
+ * because the bridge holds no state (see `autocircuit/web/bridge.py`).
+ */
+export interface CircuitContext {
+  spectrum?: SpectrumWire;
+  fixed?: Record<string, number>;
+  bounds?: Record<string, [number, number]>;
+}
+
+/** One structural edit: an action at a position, and the element it adds where one is added. */
+export interface EditRequest {
+  circuit: string;
+  path: number[];
+  action: EditAction;
+  code?: string;
+  position?: "before" | "after";
+}
+
+/** The knobs `fit` exposes. Every one of them is an argument the CLI has too. */
+export interface FitOptions {
+  weighting?: string;
+  restarts?: number;
+  seed?: number;
+  time_limit?: number | null;
+}
+
+/** Drop the absent members so an omitted override is absent on the wire, not `undefined`. */
+function wireContext(context: CircuitContext): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (context.spectrum !== undefined) out.spectrum = context.spectrum;
+  if (context.fixed !== undefined) out.fixed = context.fixed;
+  if (context.bounds !== undefined) out.bounds = context.bounds;
+  return out;
+}
+
 type Pending = { resolve: (value: WorkerResponse) => void; reject: (reason: Error) => void };
 
 export class BridgeClient {
@@ -23,6 +72,9 @@ export class BridgeClient {
   private pending = new Map<number, Pending>();
   private nextId = 1;
   private readyPromise: Promise<VersionsWire> | null = null;
+  // The element catalogue is the one answer that cannot change while the page is open: it is
+  // the registry the loaded core was built with.
+  private cataloguePromise: Promise<CatalogueWire> | null = null;
 
   constructor(private onStatus: (stage: LoadStage, detail: string) => void = () => {}) {
     this.worker = new Worker(new URL("./bridge.worker.ts", import.meta.url), { type: "module" });
@@ -91,6 +143,45 @@ export class BridgeClient {
   async validate(spectrum: SpectrumWire): Promise<ValidationWire> {
     const result = await this.call<{ validation: ValidationWire }>({ op: "validate", spectrum });
     return result.validation;
+  }
+
+  /** Every element the core knows, and the named pools it groups them into. */
+  async elements(): Promise<CatalogueWire> {
+    if (this.cataloguePromise === null) {
+      this.cataloguePromise = this.call<CatalogueWire>({ op: "elements" });
+    }
+    return this.cataloguePromise;
+  }
+
+  /** Parse a circuit string into the tree the canvas draws and the parameters it lists. */
+  async circuit(circuit: string, context: CircuitContext = {}): Promise<CircuitWire> {
+    return this.call<CircuitWire>({ op: "circuit", circuit, ...wireContext(context) });
+  }
+
+  /**
+   * Apply one structural edit and get the circuit that results.
+   *
+   * The tree surgery happens in Python. This method carries a position and an action; it does
+   * not know what a parallel block is, which is what keeps the browser from building a topology
+   * the command line would read differently.
+   */
+  async edit(request: EditRequest, context: CircuitContext = {}): Promise<CircuitWire> {
+    return this.call<CircuitWire>({ op: "edit", ...request, ...wireContext(context) });
+  }
+
+  /** The model curve for parameters that have not been fitted; missing ones take the fitter's
+   *  own starting value. */
+  async preview(
+    circuit: string,
+    values: Record<string, number>,
+    context: CircuitContext = {},
+  ): Promise<PreviewWire> {
+    return this.call<PreviewWire>({ op: "preview", circuit, values, ...wireContext(context) });
+  }
+
+  /** Fit a known topology. No initial values are asked for, because none are needed. */
+  async fitCircuit(circuit: string, options: FitOptions, context: CircuitContext = {}): Promise<FitWire> {
+    return this.call<FitWire>({ op: "fit", circuit, ...options, ...wireContext(context) });
   }
 
   private async call<T>(request: object): Promise<T> {

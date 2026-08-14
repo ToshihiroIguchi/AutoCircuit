@@ -2,17 +2,18 @@
 
 Written at the end of the session that built the backend, updated after discovery v2 steps
 1–5, again after the skeleton-constrained mode (all of `docs/PARTIAL_TOPOLOGY_PLAN.md`), and
-again after step 1 of `docs/WEB_UI_PLAN.md`. Read this first, then `CLAUDE.md`, then the plan
+again after each step of `docs/WEB_UI_PLAN.md` (steps 1–3 so far). Read this first, then `CLAUDE.md`, then the plan
 for whichever part you are touching.
 
 ## 1. Where things stand
 
-The command-line backend is **complete and verified**: 605 tests pass
-(`python -m pytest tests -q`, 6 min — and that is one full run, not a union of subsets).
-Phases 0–5 of `docs/IMPLEMENTATION_PLAN.md` are done. Phase 6 (web UI) has its **steps 1 and 2
-built and measured**: a lossless `FitResult` across a worker boundary, so the browser fans out
-both tiers of the search (§8), and the Data screen — import, plots and the Lin-KK verdict —
-running the same core through Pyodide (§9).
+The command-line backend is **complete and verified**: 640 tests pass
+(`python -m pytest tests -q`, 6–7 min — and that is one full run, not a union of subsets).
+Phases 0–5 of `docs/IMPLEMENTATION_PLAN.md` are done. Phase 6 (web UI) has its **steps 1, 2 and
+3 built and measured**: a lossless `FitResult` across a worker boundary, so the browser fans out
+both tiers of the search (§8); the Data screen — import, plots and the Lin-KK verdict — running
+the same core through Pyodide (§9); and the Fit screen — schematic canvas, live preview and a
+manual fit that needs no initial values (§10), which closed gate W1.
 
 **Discovery v2 is fully implemented** (see §2) and all five gates pass: G1 30/30 across the
 three reference spectra, G2 exactly reproducing the measured counts table, G3 with the truth
@@ -498,3 +499,64 @@ the same work in ~4 s. Gate W3 asks for under 10 s *to a first fit* and therefor
 the import is the item worth attacking, and a wheel instead of a source archive is the first
 thing to measure. Single-run figures from an automated Chrome — the ratio is the result, not the
 seconds.
+
+
+## 10. Web UI step 3 — the Fit screen
+
+`docs/WEB_UI_PLAN.md` §2.4 is the record. `BRIDGE_VERSION` is now **2**: `elements`, `circuit`,
+`edit`, `preview` and `fit` join `version`/`read`/`trim`/`validate`. The app has screens now — a
+tab bar over `web/src/screens/DataScreen.tsx` and `FitScreen.tsx` — and `App.tsx` holds the
+spectra both of them work on.
+
+- **The canvas edits a tree in Python.** Each box and slot carries the path `subtree_at` takes,
+  and the `edit` operation does the surgery with `series`/`parallel`/`replace_subtree`/
+  `remove_subtree`. `web/src/components/CircuitCanvas.tsx` knows how a series run and a parallel
+  block *look*; it cannot build a circuit string, and it must not learn to. A JavaScript circuit
+  builder would be a second implementation of the grammar the CLI parses.
+- **`core/circuit.remove_subtree()` is new** and belongs with the other tree-addressing helpers.
+  Deleting one branch of a two-branch parallel collapses the block into the survivor, because
+  that is what the network becomes; deleting the root raises.
+- **`core/fit.search_space()` is new**, lifted out of the private `_Problem`, which now calls it.
+  It returns `(lower, upper, start)`, and `start` is what the preview curve is drawn with — so
+  the curve begins where the fitter begins rather than at a display default that resembles it.
+  `core/fit.relative_error()` came out of `FitResult` for the same reason: the number under the
+  preview and the number after the fit have to be the same quantity.
+- **`POOLS` moved from `cli/main.py` to `core/elements.py`**, so the palette and `--pool` offer
+  the same named sets.
+- **The fit response carries `residual_real`/`residual_imag` already split.** The residual vector
+  is real parts then imaginary parts, which is a detail of the objective function and not a
+  promise; a front end that assumed it would mis-plot silently if it changed.
+
+Three things the UI had to say out loud, and will have to again on the Discover screen:
+
+- A table of editable numbers beside a Fit button implies the numbers seed the fit. **They do
+  not** — Fit is the same global search the CLI runs. Only *Fix* binds a number, and it removes
+  the parameter from the fit rather than nudging it. The table carries that sentence.
+- **A new circuit's preview sits ~160% away from the data**, because the geometric centre of a
+  fifteen-decade interval is not near anything. That is what "no starting guess" looks like;
+  inventing a nicer-looking default would be inventing a guess.
+- **Editing anything retires the fit.** Values survive (they are the next preview's starting
+  point); the statistics do not, because they describe a model that is no longer on screen.
+
+[measured] **Gate W1 passes at the precision the CLI reports, and only there.**
+`benchmarks/pyodide/fit_parity.py` writes the CLI's fit of the nine circuits in
+`tests/test_fit.py::SYNTHETIC_SUITE` — carrying the spectra themselves, not a recipe for
+regenerating them — and `run_fit_parity.mjs` refits them through `bridge.handle` in Pyodide.
+All 34 parameters agree at six significant digits; **none are bit-identical** (worst relative
+difference 2.4e-7). Evaluating the circuits at CPython's fitted values *is* bit-identical for
+1001 of 1042 components — the 41 that are not all belong to the skin-effect-on-a-wire circuit,
+whose `tanh` and complex `sqrt` differ between the WASM libm and the desktop's at 5e-14.
+
+That last row retires the assumption `FitResult.to_wire` was written around: it carries
+`z_model` rather than recomputing it on arrival because nobody had measured whether numpy agrees
+across interpreters. It does — except for elements built on transcendentals, which is precisely
+the failure that would have looked like a bug in an element rather than in a transport.
+
+Two smaller browser findings, of the kind only a browser produces:
+
+- **A fit is not sub-second in the browser.** The plan's §3 said no progress UI was needed; a
+  three-element fit took 5.2 s at five restarts and the corpus ran to 36 s at three. The button
+  shows its state and the canvas locks while it runs.
+- **JavaScript switches to exponential notation only below 1e-7**, which prints a 3.3 µF
+  capacitance as `0.0000033`. The parameter table formats below 1e-3 and above 1e6 as
+  exponential instead, so a value can be checked against a datasheet at a glance.

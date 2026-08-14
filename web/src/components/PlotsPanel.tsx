@@ -39,22 +39,72 @@ function useDecodedSpectrum(spectrum: LoadedSpectrum) {
   }, [spectrum.current]);
 }
 
-function useFitOverlay(spectrum: LoadedSpectrum) {
+/**
+ * A model curve to draw over the data instead of the Lin-KK one.
+ *
+ * The Fit screen owns a different model from the Data screen's, but not a different picture of
+ * it, so the panels are shared rather than copied. The residuals are passed in already computed
+ * -- they are the ones the fit minimised, split by Python -- because deriving them here would
+ * be a second definition of "residual" for the same plot.
+ */
+export interface ModelOverlay {
+  label: string;
+  re: Float64Array;
+  im: Float64Array;
+  residualReal: Float64Array | null;
+  residualImag: Float64Array | null;
+  residualTitle: string;
+  residualUnit: string;
+  /** Shown in the residual panel when there are no residuals to draw. */
+  residualPlaceholder: string;
+}
+
+function useKKOverlay(spectrum: LoadedSpectrum): ModelOverlay | null {
   return useMemo(() => {
     if (spectrum.validation === null) return null;
     const { re, im } = decodeComplexArray(spectrum.validation.z_fit);
-    const magnitude = new Float64Array(re.length);
-    for (let i = 0; i < re.length; i += 1) {
-      magnitude[i] = Math.hypot(re[i] as number, im[i] as number);
-    }
-    return { re, im, magnitude };
+    return {
+      label: "Lin-KK fit",
+      re,
+      im,
+      residualReal: decodeArray(spectrum.validation.residual_real),
+      residualImag: decodeArray(spectrum.validation.residual_imag),
+      residualTitle: "Lin-KK residuals",
+      residualUnit: "%",
+      residualPlaceholder: "Residuals unavailable.",
+    };
   }, [spectrum.validation]);
 }
 
-export function PlotsPanel({ spectrum }: { spectrum: LoadedSpectrum }) {
+export function PlotsPanel({
+  spectrum,
+  model = null,
+}: {
+  spectrum: LoadedSpectrum;
+  model?: ModelOverlay | null;
+}) {
   const [xRange, setXRange] = useState<XRange>(null);
   const { f, re, im, magnitude, phaseDeg } = useDecodedSpectrum(spectrum);
-  const fit = useFitOverlay(spectrum);
+  const kk = useKKOverlay(spectrum);
+  const overlay = model ?? kk;
+  const fit = useMemo(() => {
+    if (overlay === null) return null;
+    const magnitudes = new Float64Array(overlay.re.length);
+    const phases = new Float64Array(overlay.re.length);
+    for (let i = 0; i < overlay.re.length; i += 1) {
+      const rv = overlay.re[i] as number;
+      const iv = overlay.im[i] as number;
+      magnitudes[i] = Math.hypot(rv, iv);
+      phases[i] = (Math.atan2(iv, rv) * 180) / Math.PI;
+    }
+    return {
+      re: overlay.re,
+      im: overlay.im,
+      magnitude: magnitudes,
+      phaseDeg: phases,
+      label: overlay.label,
+    };
+  }, [overlay]);
 
   function handleFreqRelayout(event: RelayoutEvent): void {
     if (event["xaxis.autorange"] === true) {
@@ -84,7 +134,7 @@ export function PlotsPanel({ spectrum }: { spectrum: LoadedSpectrum }) {
     nyquistData.push({
       type: "scatter",
       mode: "lines",
-      name: "Lin-KK fit",
+      name: fit.label,
       x: Array.from(fit.re),
       y: Array.from(fit.im, (v) => -v),
       line: { color: FIT_COLOR, width: 1 },
@@ -118,7 +168,7 @@ export function PlotsPanel({ spectrum }: { spectrum: LoadedSpectrum }) {
     magnitudeData.push({
       type: "scatter",
       mode: "lines",
-      name: "Lin-KK fit",
+      name: fit.label,
       x: Array.from(f),
       y: Array.from(fit.magnitude),
       line: { color: FIT_COLOR, width: 1 },
@@ -142,20 +192,35 @@ export function PlotsPanel({ spectrum }: { spectrum: LoadedSpectrum }) {
       marker: { color: MEASURED_COLOR, size: 5 },
     },
   ];
+  if (fit !== null) {
+    // The phase is where a model that matches |Z| everywhere can still be wrong, so the overlay
+    // belongs here as much as on the other two panels.
+    phaseData.push({
+      type: "scatter",
+      mode: "lines",
+      name: fit.label,
+      x: Array.from(f),
+      y: Array.from(fit.phaseDeg),
+      line: { color: FIT_COLOR, width: 1 },
+    });
+  }
   const phaseLayout: Partial<Plotly.Layout> = {
     ...PLOT_LAYOUT_BASE,
+    showlegend: fit !== null,
     title: panelTitle("Bode phase"),
     xaxis: freqAxis,
     yaxis: { title: { text: "arg(Z) (deg)" } },
   };
 
+  const hasResiduals =
+    overlay !== null && overlay.residualReal !== null && overlay.residualImag !== null;
   const residualLayout: Partial<Plotly.Layout> = {
     ...PLOT_LAYOUT_BASE,
     showlegend: true,
-    title: panelTitle("Lin-KK residuals"),
+    title: panelTitle(overlay?.residualTitle ?? "Residuals"),
     xaxis: freqAxis,
     yaxis: {
-      title: { text: "Residual (%)" },
+      title: { text: `Residual (${overlay?.residualUnit ?? "%"})` },
       zeroline: true,
       zerolinecolor: AXIS_LINE_COLOR,
     },
@@ -178,18 +243,20 @@ export function PlotsPanel({ spectrum }: { spectrum: LoadedSpectrum }) {
           layout={phaseLayout}
           onRelayout={handleFreqRelayout}
         />
-        {spectrum.validation !== null ? (
+        {hasResiduals && overlay !== null ? (
           <Plot
             className="plots-panel__plot"
-            data={residualData(f, spectrum.validation)}
+            data={residualData(f, overlay)}
             layout={residualLayout}
             onRelayout={handleFreqRelayout}
           />
         ) : (
           <div className="plots-panel__plot plots-panel__placeholder">
-            {spectrum.validating
+            {model === null && spectrum.validating
               ? "Computing the Lin-KK residuals…"
-              : (spectrum.validationError ?? "Residuals unavailable.")}
+              : model === null
+                ? (spectrum.validationError ?? "Residuals unavailable.")
+                : (overlay?.residualPlaceholder ?? "Residuals unavailable.")}
           </div>
         )}
       </div>
@@ -197,19 +264,18 @@ export function PlotsPanel({ spectrum }: { spectrum: LoadedSpectrum }) {
   );
 }
 
-function residualData(
-  f: Float64Array,
-  validation: NonNullable<LoadedSpectrum["validation"]>,
-): Plotly.Data[] {
-  const residualReal = decodeArray(validation.residual_real);
-  const residualImag = decodeArray(validation.residual_imag);
+function residualData(f: Float64Array, overlay: ModelOverlay): Plotly.Data[] {
+  // A fraction is drawn as a percentage; anything else is drawn as it arrived. The Lin-KK
+  // residuals are relative, the fit's are the weighted ones it minimised, and rescaling the
+  // second like the first would put a percent sign on a number that is not one.
+  const scale = overlay.residualUnit === "%" ? 100 : 1;
   return [
     {
       type: "scatter",
       mode: "lines+markers",
       name: "Re(Z) residual",
       x: Array.from(f),
-      y: Array.from(residualReal, (v) => v * 100),
+      y: Array.from(overlay.residualReal ?? [], (v) => v * scale),
       marker: { color: MEASURED_COLOR, size: 4 },
       line: { color: MEASURED_COLOR, width: 1 },
     },
@@ -218,7 +284,7 @@ function residualData(
       mode: "lines+markers",
       name: "Im(Z) residual",
       x: Array.from(f),
-      y: Array.from(residualImag, (v) => v * 100),
+      y: Array.from(overlay.residualImag ?? [], (v) => v * scale),
       marker: { color: FIT_COLOR, size: 4 },
       line: { color: FIT_COLOR, width: 1 },
     },

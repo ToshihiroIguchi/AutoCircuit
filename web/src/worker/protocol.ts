@@ -8,7 +8,7 @@
 import type { VersionsWire } from "../core/types";
 
 /** Protocol version this bundle speaks; the worker refuses a core that answers differently. */
-export const BRIDGE_VERSION = 1;
+export const BRIDGE_VERSION = 2;
 
 export type WorkerRequest =
   | { kind: "init"; id: number; pyodideUrl: string; indexUrl: string; archiveUrl: string }

@@ -362,6 +362,30 @@ def replace_subtree(node: Node, path: Sequence[int], new: Node) -> Node:
     return series(*children) if isinstance(node, Series) else parallel(*children)
 
 
+def remove_subtree(node: Node, path: Sequence[int]) -> Node:
+    """A copy of ``node`` with the subtree at ``path`` deleted.
+
+    The parent is rebuilt through :func:`series`/:func:`parallel`, so a connection left with a
+    single child collapses into that child -- deleting one branch of a two-branch parallel
+    block leaves the other branch in series where the block was, which is what the network
+    actually becomes. Deleting the root is an error: a circuit with no elements is not a
+    circuit, and the caller has to decide what to put there instead.
+    """
+    if not path:
+        raise CircuitError("cannot delete the whole circuit")
+    parent_path, index = tuple(path[:-1]), path[-1]
+    parent = subtree_at(node, parent_path)
+    if isinstance(parent, ElementNode):
+        raise CircuitError(f"path {tuple(path)!r} runs past a leaf")
+    if not 0 <= index < len(parent.children):
+        raise CircuitError(f"path {tuple(path)!r} addresses no child")
+    kept = [child for i, child in enumerate(parent.children) if i != index]
+    if not kept:
+        raise CircuitError(f"path {tuple(path)!r} leaves its connection empty")
+    rebuilt = series(*kept) if isinstance(parent, Series) else parallel(*kept)
+    return replace_subtree(node, parent_path, rebuilt)
+
+
 def canonical_form(node: Node) -> str:
     """Label-free, order-independent string for a bare topology tree.
 

@@ -1,0 +1,398 @@
+// The Fit screen: draw a circuit, watch it against the data, press Fit.
+//
+// The whole point of this screen is what it does *not* ask for. There is no place to type a
+// starting guess, because the fitter does not need one: the interval it searches comes from the
+// measured frequency range and impedance magnitude, and the value it starts from is the centre
+// of that interval. A number typed in the parameter table moves the preview curve; it does not
+// seed the fit. `ParameterTable` says so in as many words, because the arrangement implies
+// otherwise to anyone who has used software that does need a guess.
+//
+// The canvas is also, already, a skeleton editor: a partly drawn circuit is exactly what
+// `discover(skeleton=...)` takes. Step 4 adds the button; nothing here has to change for it.
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type {
+  CatalogueWire,
+  CircuitNodeWire,
+  CircuitWire,
+  FitWire,
+  LoadedSpectrum,
+  PreviewWire,
+  SpectrumWire,
+} from "../core/types";
+import { decodeArray, decodeComplexArray, decodeFloat } from "../core/wire";
+import { BridgeClient, BridgeError } from "../worker/client";
+import { CircuitCanvas } from "../components/CircuitCanvas";
+import { ElementPalette } from "../components/ElementPalette";
+import { FitPanel } from "../components/FitPanel";
+import { ParameterTable } from "../components/ParameterTable";
+import { PlotsPanel, type ModelOverlay } from "../components/PlotsPanel";
+
+/** The simplest circuit there is. Anything else would be a guess about the device. */
+const INITIAL_CIRCUIT = "R1";
+
+export interface FitScreenProps {
+  client: BridgeClient;
+  ready: boolean;
+  spectrum: LoadedSpectrum | null;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof BridgeError || error instanceof Error ? error.message : String(error);
+}
+
+/** Find an element by its label; labels are unique within a circuit, which is what makes the
+ *  canvas and the parameter table able to point at the same thing. */
+function pathOfLabel(node: CircuitNodeWire, label: string): number[] | null {
+  if (node.kind === "element") return node.label === label ? node.path : null;
+  for (const child of node.children) {
+    const found = pathOfLabel(child, label);
+    if (found !== null) return found;
+  }
+  return null;
+}
+
+function labelAtPath(node: CircuitNodeWire, path: number[]): string | null {
+  if (node.kind === "element") return path.length === 0 ? node.label : null;
+  const [index, ...rest] = path;
+  const child = node.children[index as number];
+  return child === undefined ? null : labelAtPath(child, rest);
+}
+
+export function FitScreen({ client, ready, spectrum }: FitScreenProps) {
+  const wire = spectrum?.current ?? null;
+
+  const [catalogue, setCatalogue] = useState<CatalogueWire | null>(null);
+  const [circuitText, setCircuitText] = useState(INITIAL_CIRCUIT);
+  const [describe, setDescribe] = useState<CircuitWire | null>(null);
+  const [circuitError, setCircuitError] = useState<string | null>(null);
+  const [values, setValues] = useState<Record<string, number>>({});
+  const [held, setHeld] = useState<string[]>([]);
+  const [bounds, setBounds] = useState<Record<string, [number, number]>>({});
+  const [armedCode, setArmedCode] = useState<string | null>(null);
+  const [selectedLabel, setSelectedLabel] = useState<string | null>(null);
+  const [preview, setPreview] = useState<PreviewWire | null>(null);
+  const [fit, setFit] = useState<{ result: FitWire; signature: string } | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [fitting, setFitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [weighting, setWeighting] = useState("modulus");
+  const [restarts, setRestarts] = useState(5);
+  const [seed, setSeed] = useState(0);
+
+  // What the last `circuit` request asked about. Comparing against this rather than against the
+  // answer is what keeps an equivalent-but-differently-spelled string ("C1 - R1") from being
+  // re-requested forever once Python answers with its own formatting.
+  const asked = useRef<{ text: string; wire: SpectrumWire | null } | null>(null);
+  const previewTicket = useRef(0);
+
+  useEffect(() => {
+    if (!ready) return;
+    client.elements().then(setCatalogue).catch((err: unknown) => setError(errorMessage(err)));
+  }, [client, ready]);
+
+  /** Store a parsed circuit and drop any hold or bound that its parameters no longer have. */
+  const adopt = useCallback((result: CircuitWire) => {
+    const names = new Set(result.params.map((param) => param.name));
+    setDescribe(result);
+    setCircuitError(null);
+    setHeld((previous) => {
+      const kept = previous.filter((name) => names.has(name));
+      return kept.length === previous.length ? previous : kept;
+    });
+    setBounds((previous) => {
+      const entries = Object.entries(previous).filter(([name]) => names.has(name));
+      return entries.length === Object.keys(previous).length ? previous : Object.fromEntries(entries);
+    });
+  }, []);
+
+  // Parse whatever is in the text field. A syntax error leaves the last good circuit on the
+  // canvas: the user is usually mid-edit, and blanking the screen at every intermediate
+  // keystroke would be worse than showing the message under the field.
+  useEffect(() => {
+    if (!ready) return undefined;
+    const text = circuitText.trim();
+    if (text === "") {
+      setCircuitError("Enter a circuit, for example R1-p(R2,C1).");
+      return undefined;
+    }
+    if (asked.current !== null && asked.current.text === text && asked.current.wire === wire) {
+      return undefined;
+    }
+    const timer = setTimeout(() => {
+      asked.current = { text, wire };
+      client
+        .circuit(text, wire === null ? {} : { spectrum: wire })
+        .then(adopt)
+        .catch((err: unknown) => setCircuitError(errorMessage(err)));
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [client, ready, circuitText, wire, adopt]);
+
+  const params = describe?.params ?? [];
+
+  /** Every parameter's current value: what the user typed, or what the fitter would start from. */
+  const effective = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const param of params) {
+      const start = param.start === undefined ? 0 : decodeFloat(param.start);
+      out[param.name] = values[param.name] ?? start;
+    }
+    return out;
+  }, [params, values]);
+
+  const signature = `${describe?.circuit ?? ""}|${JSON.stringify(effective)}`;
+  const currentFit = fit !== null && fit.signature === signature ? fit.result : null;
+
+  // The preview curve. It is recomputed for every change to the circuit or to a value, which is
+  // cheap: one impedance evaluation, no fitting.
+  useEffect(() => {
+    if (!ready || describe === null || wire === null) {
+      setPreview(null);
+      return;
+    }
+    const ticket = previewTicket.current + 1;
+    previewTicket.current = ticket;
+    client
+      .preview(describe.circuit, effective, { spectrum: wire })
+      .then((result) => {
+        if (previewTicket.current === ticket) setPreview(result);
+      })
+      .catch((err: unknown) => {
+        if (previewTicket.current === ticket) setError(errorMessage(err));
+      });
+  }, [client, ready, describe, effective, wire]);
+
+  const applyEdit = useCallback(
+    async (request: Parameters<BridgeClient["edit"]>[0]) => {
+      setEditing(true);
+      setError(null);
+      try {
+        const result = await client.edit(request, wire === null ? {} : { spectrum: wire });
+        asked.current = { text: result.circuit, wire };
+        setCircuitText(result.circuit);
+        adopt(result);
+      } catch (err) {
+        setError(errorMessage(err));
+      } finally {
+        setEditing(false);
+      }
+    },
+    [client, wire, adopt],
+  );
+
+  const handleFit = useCallback(async () => {
+    if (describe === null || wire === null) return;
+    setFitting(true);
+    setError(null);
+    try {
+      const fixed: Record<string, number> = {};
+      for (const name of held) if (name in effective) fixed[name] = effective[name] as number;
+      const result = await client.fitCircuit(
+        describe.circuit,
+        { weighting, restarts, seed },
+        { spectrum: wire, fixed, bounds },
+      );
+      // Adopt the fitted values, and remember the state this fit describes so that the next
+      // edit to the circuit or to a value retires it instead of leaving stale numbers beside a
+      // model they no longer belong to.
+      const fitted = decodeArray(result.fit.values);
+      const next: Record<string, number> = { ...values };
+      const shown: Record<string, number> = {};
+      params.forEach((param, index) => {
+        next[param.name] = fitted[index] as number;
+        shown[param.name] = fitted[index] as number;
+      });
+      setValues(next);
+      setFit({ result, signature: `${describe.circuit}|${JSON.stringify(shown)}` });
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setFitting(false);
+    }
+  }, [client, describe, wire, held, effective, values, params, weighting, restarts, seed, bounds]);
+
+  const model: ModelOverlay | null = useMemo(() => {
+    if (currentFit !== null) {
+      const { re, im } = decodeComplexArray(currentFit.fit.z_model);
+      return {
+        label: "Fit",
+        re,
+        im,
+        residualReal: decodeArray(currentFit.residual_real),
+        residualImag: decodeArray(currentFit.residual_imag),
+        residualTitle: `Fit residuals (${currentFit.fit.weighting} weighting)`,
+        residualUnit: "weighted",
+        residualPlaceholder: "",
+      };
+    }
+    if (preview !== null && describe !== null && preview.circuit === describe.circuit) {
+      const { re, im } = decodeComplexArray(preview.z_model);
+      return {
+        label: "Preview",
+        re,
+        im,
+        residualReal: null,
+        residualImag: null,
+        residualTitle: "Residuals",
+        residualUnit: "%",
+        residualPlaceholder: "Press Fit to see the residuals of a fitted model.",
+      };
+    }
+    return null;
+  }, [currentFit, preview, describe]);
+
+  const selectedPath =
+    describe === null || selectedLabel === null ? null : pathOfLabel(describe.tree, selectedLabel);
+
+  if (spectrum === null) {
+    return (
+      <p className="empty-hint">
+        Load a spectrum on the Data screen first: a circuit is fitted to data, and the search
+        bounds are derived from the data too.
+      </p>
+    );
+  }
+
+  return (
+    <div className="fit-screen">
+      <div className="fit-screen__build">
+        {catalogue !== null && (
+          <ElementPalette catalogue={catalogue} armedCode={armedCode} onArm={setArmedCode} />
+        )}
+
+        <section className="circuit-panel">
+          <h2 className="panel-title">Circuit</h2>
+          {describe === null ? (
+            <p className="empty-hint">Parsing…</p>
+          ) : (
+            <CircuitCanvas
+              tree={describe.tree}
+              selectedPath={selectedPath}
+              armedCode={armedCode}
+              busy={editing || fitting}
+              onSelect={(path) => setSelectedLabel(labelAtPath(describe.tree, path))}
+              onInsert={(path, action, position, code) =>
+                void applyEdit({ circuit: describe.circuit, path, action, position, code })
+              }
+              onRemove={(path) =>
+                void applyEdit({ circuit: describe.circuit, path, action: "remove" })
+              }
+            />
+          )}
+
+          <label className="circuit-panel__field">
+            <span>Circuit</span>
+            <input
+              type="text"
+              value={circuitText}
+              spellCheck={false}
+              onChange={(event) => setCircuitText(event.target.value)}
+              aria-label="Circuit description"
+            />
+          </label>
+          {circuitError !== null && (
+            <pre className="circuit-panel__error" role="alert">
+              {circuitError}
+            </pre>
+          )}
+          {describe !== null && selectedLabel !== null && catalogue !== null && (
+            <div className="circuit-panel__selected">
+              <span>{selectedLabel} is a</span>
+              <select
+                value={params.find((p) => p.label === selectedLabel)?.code ?? ""}
+                disabled={editing || fitting}
+                aria-label={`Element type of ${selectedLabel}`}
+                onChange={(event) => {
+                  const path = pathOfLabel(describe.tree, selectedLabel);
+                  if (path !== null) {
+                    void applyEdit({
+                      circuit: describe.circuit,
+                      path,
+                      action: "replace",
+                      code: event.target.value,
+                    });
+                    setSelectedLabel(null);
+                  }
+                }}
+              >
+                {catalogue.elements.map((element) => (
+                  <option key={element.code} value={element.code}>
+                    {element.code} — {element.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          {describe !== null && (
+            <p className="circuit-panel__meta">
+              {describe.n_elements} element{describe.n_elements === 1 ? "" : "s"},{" "}
+              {describe.n_params} parameter{describe.n_params === 1 ? "" : "s"}
+            </p>
+          )}
+        </section>
+      </div>
+
+      <FitPanel
+        fit={currentFit}
+        preview={preview}
+        weighting={weighting}
+        restarts={restarts}
+        seed={seed}
+        fitting={fitting}
+        disabled={!ready || describe === null || editing}
+        error={error}
+        onWeighting={setWeighting}
+        onRestarts={setRestarts}
+        onSeed={setSeed}
+        onFit={() => void handleFit()}
+      />
+
+      {describe !== null && (
+        <ParameterTable
+          params={params}
+          values={effective}
+          fixed={Object.fromEntries(
+            held.filter((name) => name in effective).map((name) => [name, effective[name] as number]),
+          )}
+          bounds={bounds}
+          fit={currentFit}
+          selectedLabel={selectedLabel}
+          disabled={fitting}
+          onValue={(name, value) => setValues((previous) => ({ ...previous, [name]: value }))}
+          onFix={(name, hold) => {
+            // Ticking Fix captures the value as it stands, so the hold means a number rather
+            // than a reference to whatever the box shows later.
+            if (hold) {
+              setValues((previous) => ({ ...previous, [name]: effective[name] as number }));
+              setHeld((previous) => (previous.includes(name) ? previous : [...previous, name]));
+            } else {
+              setHeld((previous) => previous.filter((entry) => entry !== name));
+            }
+          }}
+          onBound={(name, index, value) =>
+            setBounds((previous) => {
+              const param = params.find((entry) => entry.name === name);
+              const fallback: [number, number] = [
+                param?.lower === undefined ? 0 : decodeFloat(param.lower),
+                param?.upper === undefined ? 0 : decodeFloat(param.upper),
+              ];
+              const next: Record<string, [number, number]> = { ...previous };
+              if (value === null) {
+                delete next[name];
+                return next;
+              }
+              const pair: [number, number] = [...(previous[name] ?? fallback)];
+              pair[index] = value;
+              next[name] = pair;
+              return next;
+            })
+          }
+          onSelectLabel={setSelectedLabel}
+        />
+      )}
+
+      <PlotsPanel key={`fit-plots-${spectrum.id}`} spectrum={spectrum} model={model} />
+    </div>
+  );
+}

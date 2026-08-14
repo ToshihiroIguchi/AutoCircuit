@@ -11,7 +11,12 @@ import numpy as np
 import pytest
 
 from autocircuit.core.circuit import Circuit
-from autocircuit.core.fit import fit, weight_vectors
+from autocircuit.core.fit import (  # _Problem is private: exercised directly, see below
+    _Problem,
+    fit,
+    search_space,
+    weight_vectors,
+)
 from autocircuit.core.simulate import log_frequencies, simulate
 from autocircuit.core.spectrum import Spectrum
 
@@ -283,3 +288,84 @@ def test_fit_handles_a_spectrum_built_by_hand() -> None:
     result = fit("R1-C1", Spectrum(f, z), seed=0)
     assert result.params["R1.R"] == pytest.approx(10.0, rel=1e-4)
     assert result.params["C1.C"] == pytest.approx(1e-6, rel=1e-4)
+
+
+# =============================================================================================
+# search_space / _Problem
+#
+# `_Problem` calls `search_space` internally and must use exactly what it returns: the same
+# starting point, and the same log-transformed bounds. `_Problem` keeps only the transformed
+# bounds (`lower_x`/`upper_x`, restricted to the free parameters), so the comparison below
+# reproduces that transform from `search_space`'s own (lower, upper) rather than reaching into
+# a second, private copy of it.
+# =============================================================================================
+
+
+def _expected_x_bounds(
+    lower: np.ndarray, upper: np.ndarray, free_idx: np.ndarray, log_mask_all: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    log_mask = log_mask_all[free_idx]
+    lo, hi = lower[free_idx], upper[free_idx]
+    lo_x = np.where(log_mask, np.log10(np.maximum(lo, 1e-300)), lo)
+    hi_x = np.where(log_mask, np.log10(np.maximum(hi, 1e-299)), hi)
+    return lo_x, hi_x
+
+
+def test_problem_template_and_bounds_match_search_space_without_overrides() -> None:
+    circuit = Circuit.parse("R1-p(R2,C1)")
+    data = simulate(
+        circuit,
+        log_frequencies(1e1, 1e5, 6),
+        {"R1.R": 12.0, "R2.R": 800.0, "C1.C": 5e-8},
+        noise=0.01,
+        seed=4,
+    )
+    lower, upper, start = search_space(circuit, data)
+    problem = _Problem(circuit, data, "modulus", None, {}, None, 3.0)
+
+    assert np.array_equal(problem.template, start)
+    expected_lo_x, expected_hi_x = _expected_x_bounds(
+        lower, upper, problem.free_idx, circuit.log_mask()
+    )
+    assert np.array_equal(problem.lower_x, expected_lo_x)
+    assert np.array_equal(problem.upper_x, expected_hi_x)
+
+
+def test_problem_template_and_bounds_match_search_space_with_fixed_and_bounds_overrides() -> None:
+    circuit = Circuit.parse("C1-R1-L1")
+    data = simulate(
+        circuit,
+        log_frequencies(1e2, 1e9, 8),
+        {"C1.C": 1e-6, "R1.R": 1e-2, "L1.L": 5e-10},
+        noise=0.005,
+        seed=3,
+    )
+    fixed = {"L1.L": 5e-10}
+    bounds = {"R1.R": (1e-3, 1.0)}
+    lower, upper, start = search_space(circuit, data, fixed=fixed, bounds=bounds)
+    problem = _Problem(circuit, data, "modulus", None, fixed, bounds, 3.0)
+
+    assert np.array_equal(problem.template, start)
+    l1_index = circuit.param_names.index("L1.L")
+    assert start[l1_index] == 5e-10
+    assert problem.template[l1_index] == 5e-10
+
+    expected_lo_x, expected_hi_x = _expected_x_bounds(
+        lower, upper, problem.free_idx, circuit.log_mask()
+    )
+    assert np.array_equal(problem.lower_x, expected_lo_x)
+    assert np.array_equal(problem.upper_x, expected_hi_x)
+
+
+def test_search_space_rejects_unknown_fixed_parameter_names() -> None:
+    circuit = Circuit.parse("R1-C1")
+    data = simulate(circuit, log_frequencies(1.0, 1e5, 5), {"R1.R": 10.0, "C1.C": 1e-6}, seed=0)
+    with pytest.raises(ValueError, match="unknown"):
+        search_space(circuit, data, fixed={"R9.R": 1.0})
+
+
+def test_search_space_rejects_unknown_bounds_parameter_names() -> None:
+    circuit = Circuit.parse("R1-C1")
+    data = simulate(circuit, log_frequencies(1.0, 1e5, 5), {"R1.R": 10.0, "C1.C": 1e-6}, seed=0)
+    with pytest.raises(ValueError, match="unknown"):
+        search_space(circuit, data, bounds={"R9.R": (1.0, 2.0)})

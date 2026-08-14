@@ -1,9 +1,11 @@
 # Web UI — Phase 6 Plan
 
-Status: steps 1 and 2 built and measured (2026-08-14); steps 3–6 are a draft awaiting approval.
-The one architectural question this plan carried is settled and prototyped — see §2.1 — and that
-prototype changed §2.2 and the work order, which is what prototypes are for. Step 2 did the same
-to §1: the cold-start figure there came from Node and is wrong for a browser by 3×, see §2.3.
+Status: steps 1, 2 and 3 built and measured (2026-08-14); steps 4–6 are a draft awaiting
+approval. The one architectural question this plan carried is settled and prototyped — see §2.1 —
+and that prototype changed §2.2 and the work order, which is what prototypes are for. Step 2 did
+the same to §1: the cold-start figure there came from Node and is wrong for a browser by 3×, see
+§2.3. Step 3 closed gate W1 and, in doing so, replaced an assumption §2.2 had explicitly left
+unmeasured — see §2.4.
 Prerequisite reading: `docs/IMPLEMENTATION_PLAN.md` §9 (the original sketch, now partly
 superseded by measurement), `benchmarks/pyodide/README.md` (every performance number below),
 and `docs/HANDOFF.md` §3.
@@ -212,6 +214,64 @@ package is unpacked from a zip and imported from source, and a wheel or a precom
 cache is the obvious thing to measure next. That is a step 6 problem; it is recorded here so it
 is not discovered there.
 
+### 2.4 What step 3 built, and the assumption it retired
+
+Step 3 is the Fit screen: an element palette, a schematic canvas, a live preview of the model
+against the data, and a manual fit with honest standard errors. Five operations join the
+bridge's four — `elements`, `circuit`, `edit`, `preview`, `fit` — and `BRIDGE_VERSION` is 2.
+
+**The canvas edits a tree in Python, not a string in JavaScript.** Every box and slot carries the
+path that `subtree_at` takes, and an edit is "insert an R after this path"; `edit` performs the
+surgery with `series`/`parallel`/`replace_subtree`/`remove_subtree` and answers with the circuit
+that resulted. So there is one implementation of the grammar and one of the tree operations,
+both in Python. The alternative — a JavaScript circuit builder emitting DSL text — is a second
+implementation of the thing the CLI parses, and it would disagree eventually.
+
+**The preview starts where the fitter starts.** `fit.search_space()` was lifted out of the
+private `_Problem` so that the value a freshly drawn circuit is drawn with is literally the
+value differential evolution begins from, rather than a display default that resembles it.
+`_Problem` calls the same function, so the two cannot drift.
+
+Three consequences of the "no initial values" claim showed up as UI problems rather than code
+problems, and are worth stating because they will recur on the Discover screen:
+
+- **A table of editable numbers next to a Fit button implies the numbers seed the fit.** They do
+  not: Fit runs the same global search the CLI runs, from the same data-derived bounds. The
+  table says so in a line under it. The one control that *does* bind a number is Fix, which
+  removes the parameter from the fit rather than nudging it.
+- **The neutral starting point looks broken, and it is not.** The preview curve of a new circuit
+  sits ~160% away from the data, because the geometric centre of an interval spanning fifteen
+  decades is not near anything. That is what "no starting guess" costs on screen, and hiding it
+  would mean inventing a guess.
+- **Editing the circuit retires the fit.** The parameters stay (they are the next preview's
+  starting point) but the statistics do not, because they describe a model that is no longer on
+  screen.
+
+**[measured] Gate W1 passes at the precision the CLI reports, and only at that precision.**
+`benchmarks/pyodide/fit_parity.py` writes the command line's fit of all nine circuits in
+`tests/test_fit.py`'s corpus — carrying the *spectra*, not a recipe for regenerating them — and
+`run_fit_parity.mjs` refits them through `bridge.handle` inside Pyodide:
+
+| comparison | result |
+|------------|--------|
+| 34 fitted parameters, six significant digits | **all agree** |
+| 34 fitted parameters, bit for bit | **none agree**; worst relative difference 2.4e-7 |
+| 1042 impedance components at CPython's fitted values | 96.1% bit-identical, worst 5.0e-14 |
+
+The second row is the finding. A fitted parameter travels through differential evolution and a
+trust-region solve, and a last-bit difference in either compounds into the optimizer's path, so
+cross-interpreter bit-identity is not available for a fit and a gate that demanded it would fail
+for the wrong reason. The third row says where the difference enters: evaluating a circuit is
+bit-identical in every case except the one built on `tanh` and complex `sqrt` (skin effect on a
+wire), where the WASM libm and the desktop's differ at 5e-14.
+
+That retires the assumption `FitResult.to_wire` was written around. Its docstring says `z_model`
+is carried rather than recomputed because recomputing "would stake the browser's agreement with
+the CLI on numpy returning bit-identical results in a second WASM interpreter, which is an
+assumption nobody has measured". It is measured now, and it would have been **wrong** — not for
+most circuits, but for exactly the ones with transcendental elements, which is the failure mode
+that would have looked like a bug in an element rather than in a transport.
+
 ## 3. Screens
 
 Following ZView's workflow, which is what the target users know:
@@ -222,10 +282,15 @@ Following ZView's workflow, which is what the target users know:
    (§2.3). Validation runs automatically on load and after every trim, so the verdict is not
    something the user has to go and ask for, and `KKResult.summary()` is rendered verbatim
    rather than paraphrased.
-2. **Fit** — circuit canvas (drag-drop series/parallel blocks reading like a schematic) with a
+2. **Fit** — ~~circuit canvas (drag-drop series/parallel blocks reading like a schematic) with a
    live model preview overlaid on the data before fitting. This is the differentiator and it
    should feel like the point of the app: no initial values, press Fit, get parameters with
-   honest standard errors. Sub-second, so no progress UI needed.
+   honest standard errors. Sub-second, so no progress UI needed.~~ **Built** (§2.4). One thing
+   the sketch had wrong: a fit is *not* sub-second in the browser. The three-element demo took
+   5.2 s at five restarts and the nine-circuit corpus ranged to 36 s at three, so the button
+   shows its state and the canvas locks while it runs. It is still the interactive path — no
+   streaming, no cancel — but "no progress UI needed" was optimism from a machine where the same
+   fit takes 0.2 s.
 3. **Discover** — the job screen. Pool selection, `exhaustive_limit`, live progress, streamed
    partial Pareto front, cancel. Progress comes from the batch loop itself rather than from
    `on_progress`: the driver knows how many candidates each batch carried, which is what the
@@ -255,7 +320,7 @@ Plots: linked Nyquist / Bode(|Z|, θ) / residuals, zoom-synced, log axes. Plotly
 | 0 | ~~Pyodide worker harness, orchestration decision~~ | **done** — §2.1, `benchmarks/pyodide/run_orchestrated.mjs` |
 | 1 | ~~Lossless `FitResult` across a worker boundary, so tier 2 fans out too~~ | **done** — §2.2; 287 s → 123 s |
 | 2 | ~~Vite/React scaffold, data import, plots, Lin-KK panel~~ | **done** — §2.3 |
-| 3 | Circuit canvas + live preview + manual fit | L |
+| 3 | ~~Circuit canvas + live preview + manual fit~~ | **done** — §2.4; gate W1 measured |
 | 4 | Discovery job screen: progress, streaming, cancel, completeness | M |
 | 5 | Report: equivalence classes, exports, DRT panel | M |
 | 6 | Example datasets, loading states, dark/light, deploy to Pages | S |
@@ -264,7 +329,10 @@ Plots: linked Nyquist / Bode(|Z|, θ) / residuals, zoom-synced, log axes. Plotly
 
 - **W1** — the browser and the CLI produce identical fitted parameters for the nine-circuit
   synthetic corpus, to the last reported digit. Same code, so any difference is a bug in the
-  bridge.
+  bridge. **[measured] Passes**, §2.4: all 34 parameters agree at six significant digits. Note
+  what the gate does *not* say, because the measurement showed it matters: none of them are
+  bit-identical, and none can be — the optimizer's path is not reproducible across
+  interpreters, only its answer is.
 - **W2** — `discover` at `exhaustive_limit=4` on the capacitor reference completes in the
   browser, streams progress at least once a second, and reports the same `complete_up_to` and
   equivalence classes as the CLI. *(The result half of this already passes headlessly, §2.1;

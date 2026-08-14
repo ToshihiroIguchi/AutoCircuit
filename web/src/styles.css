@@ -549,8 +549,577 @@ body {
   padding: 16px;
 }
 
+/* ---- screen tabs ---- */
+
+.app-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--gridline);
+}
+
+.app-tab {
+  font-family: inherit;
+  font-size: 12px;
+  padding: 6px 16px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+
+.app-tab:hover {
+  color: var(--text-primary);
+}
+
+.app-tab--active {
+  background: var(--surface-1);
+  border-color: var(--gridline);
+  border-bottom: 1px solid var(--surface-1);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* ---- fit screen ---- */
+
+.fit-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.fit-screen__build {
+  display: grid;
+  grid-template-columns: 190px 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.palette,
+.circuit-panel,
+.params,
+.fit-panel {
+  background: var(--surface-1);
+  border: 1px solid var(--gridline);
+  border-radius: 4px;
+  padding: 10px 12px;
+}
+
+.palette__pools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-bottom: 8px;
+}
+
+.palette__pool {
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.palette__pool--active {
+  background: var(--series-1);
+  border-color: var(--series-1);
+  color: #fff;
+}
+
+.palette__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.palette__item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  font-size: 11px;
+  padding: 4px 7px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface-2);
+  cursor: grab;
+}
+
+.palette__item:hover {
+  border-color: var(--series-1);
+  background: var(--surface-1);
+}
+
+.palette__item--armed {
+  border-color: var(--series-1);
+  box-shadow: inset 2px 0 0 var(--series-1);
+  background: var(--surface-1);
+}
+
+.palette__code {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  min-width: 36px;
+}
+
+.palette__name {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette__hint {
+  margin: 8px 0 0;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* ---- circuit canvas ----
+   The schematic is laid out with flexbox rather than drawn: a series run is a row, a parallel
+   block is a stack of rows between two rails. The wires are borders on those boxes, so the
+   picture reflows with the page instead of needing a coordinate system. */
+
+.canvas {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  overflow-x: auto;
+  padding: 14px 6px;
+  min-height: 74px;
+}
+
+.canvas__terminal {
+  flex: 0 0 12px;
+  height: 1px;
+  background: var(--text-secondary);
+}
+
+.cc-series {
+  display: flex;
+  align-items: center;
+}
+
+.cc-parallel {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  border-left: 1px solid var(--text-secondary);
+  border-right: 1px solid var(--text-secondary);
+  padding: 4px 0;
+  position: relative;
+}
+
+.cc-parallel__branches {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cc-branch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* The stubs that join a branch to the two rails. Without them a short branch floats between
+   them and the block stops reading as a connection. */
+.cc-branch::before,
+.cc-branch::after {
+  content: "";
+  flex: 1 0 10px;
+  height: 1px;
+  background: var(--text-secondary);
+}
+
+.cc-element {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+}
+
+.cc-element__body {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  min-width: 54px;
+  padding: 8px 10px;
+  border: 1px solid var(--text-secondary);
+  border-radius: 2px;
+  background: var(--surface-1);
+  cursor: pointer;
+}
+
+.cc-element__body:hover {
+  border-color: var(--series-1);
+}
+
+.cc-element--selected .cc-element__body {
+  border-color: var(--series-1);
+  box-shadow: 0 0 0 2px rgba(42, 120, 214, 0.25);
+}
+
+.cc-element__tools {
+  display: flex;
+  gap: 2px;
+  position: absolute;
+  top: -13px;
+  right: -6px;
+  opacity: 0;
+  transition: opacity 80ms linear;
+}
+
+.cc-element:hover .cc-element__tools,
+.cc-element--selected .cc-element__tools {
+  opacity: 1;
+}
+
+.cc-element__tool {
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 1;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.cc-element__tool:hover:not(:disabled) {
+  border-color: var(--series-1);
+  color: var(--series-1);
+}
+
+.cc-element__tool--remove:hover:not(:disabled) {
+  border-color: var(--status-critical);
+  color: var(--status-critical);
+}
+
+.cc-element__tool:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* A slot is the wire between two elements: a thin line that grows a + when it can take one. */
+.cc-slot {
+  position: relative;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: transparent;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.cc-slot::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  background: var(--text-secondary);
+}
+
+.cc-slot:hover:not(:disabled),
+.cc-slot:focus-visible {
+  color: var(--series-1);
+}
+
+.cc-slot:hover:not(:disabled) span,
+.cc-slot:focus-visible span {
+  position: relative;
+  display: inline-block;
+  background: var(--surface-1);
+  border: 1px solid var(--series-1);
+  border-radius: 50%;
+  width: 15px;
+  height: 15px;
+}
+
+.cc-slot--branch {
+  width: 100%;
+  height: 16px;
+}
+
+.cc-slot--branch::before {
+  left: 25%;
+  right: 25%;
+  border-top: 1px dashed var(--text-muted);
+  background: none;
+}
+
+.circuit-panel__field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.circuit-panel__field span {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.circuit-panel__field input {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+.circuit-panel__error {
+  margin: 6px 0 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--status-critical);
+  white-space: pre-wrap;
+}
+
+.circuit-panel__selected {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.circuit-panel__meta {
+  margin: 6px 0 0;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* ---- parameter table ---- */
+
+.params__table {
+  /* Sized by its contents, not by the page: stretched to full width the search interval ends up
+     a screen away from the parameter it belongs to. */
+  width: auto;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.params__table th:first-child,
+.params__table td:first-child {
+  padding-right: 20px;
+}
+
+.params__table th,
+.params__table td {
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--gridline);
+  text-align: left;
+}
+
+.params__table th {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.params__table td.num,
+.params__table th.num {
+  text-align: right;
+  font-family: var(--font-mono);
+}
+
+.params__row--selected {
+  background: var(--status-neutral-bg);
+}
+
+.params__label {
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+.params__param {
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+.params__unit {
+  color: var(--text-muted);
+}
+
+.params__input {
+  width: 108px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-align: right;
+  padding: 2px 4px;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  background: none;
+}
+
+.params__input:hover:not(:disabled),
+.params__input:focus {
+  border-color: var(--border);
+  background: var(--surface-2);
+}
+
+.params__input--muted {
+  color: var(--text-muted);
+}
+
+.params__input:disabled {
+  color: var(--text-muted);
+}
+
+.params__note {
+  margin: 8px 0 0;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* ---- fit panel ---- */
+
+.fit-panel__controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.fit-panel__controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.fit-panel__controls select,
+.fit-panel__controls input {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  width: 110px;
+}
+
+.fit-panel__run {
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 20px;
+  border: 1px solid var(--series-1);
+  border-radius: 3px;
+  background: var(--series-1);
+  color: #fff;
+  cursor: pointer;
+}
+
+.fit-panel__run:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.fit-panel__pending,
+.fit-panel__status {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.fit-panel__status--failed {
+  color: var(--status-critical);
+  font-weight: 600;
+}
+
+.fit-panel__error {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--status-critical);
+}
+
+.fit-panel__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 22px;
+  margin: 8px 0 0;
+}
+
+.fit-panel__stats > div {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.fit-panel__stats dt {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.fit-panel__stats dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.fit-panel__warnings {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--status-critical);
+}
+
+.fit-panel__report {
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.fit-panel__report pre {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: var(--surface-2);
+  border: 1px solid var(--gridline);
+  border-radius: 3px;
+  padding: 8px 10px;
+  margin: 6px 0 0;
+  overflow-x: auto;
+  white-space: pre;
+}
+
 @media (max-width: 1100px) {
   .plots-panel__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .fit-screen__build {
     grid-template-columns: 1fr;
   }
 }

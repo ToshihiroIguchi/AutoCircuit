@@ -1,23 +1,22 @@
-// The Data screen: load impedance spectra, watch their Lin-KK verdict, trim their frequency
-// window, and look at the four plots. Everything here talks to the Python core through
-// `BridgeClient` -- see web/src/worker/client.ts for the four calls this screen makes.
+// The shell: one Pyodide client, the spectra everything else works on, and which screen is
+// showing. The screens themselves are in src/screens/ -- Data (load, validate, trim) and Fit
+// (draw a circuit, fit it). They share the loaded spectra because a fit is fitted to the
+// spectrum the Data screen has selected, in the window it has been trimmed to.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BridgeClient, BridgeError } from "./worker/client";
 import type { LoadStage } from "./worker/protocol";
 import type { LoadedSpectrum, SpectrumWire, VersionsWire } from "./core/types";
 import { StatusBar } from "./components/StatusBar";
-import { DropZone } from "./components/DropZone";
-import { SpectraTable } from "./components/SpectraTable";
-import { TrimPanel } from "./components/TrimPanel";
-import { KKPanel } from "./components/KKPanel";
-import { PlotsPanel } from "./components/PlotsPanel";
+import { DataScreen, type FileError } from "./screens/DataScreen";
+import { FitScreen } from "./screens/FitScreen";
 
-interface FileError {
-  id: string;
-  name: string;
-  message: string;
-}
+type Screen = "data" | "fit";
+
+const SCREENS: ReadonlyArray<readonly [Screen, string]> = [
+  ["data", "Data"],
+  ["fit", "Fit"],
+];
 
 function nextId(): string {
   return typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -35,6 +34,7 @@ export function App() {
   const [versions, setVersions] = useState<VersionsWire | null>(null);
   const [bootError, setBootError] = useState<string | null>(null);
 
+  const [screen, setScreen] = useState<Screen>("data");
   const [spectra, setSpectra] = useState<LoadedSpectrum[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [fileErrors, setFileErrors] = useState<FileError[]>([]);
@@ -191,6 +191,10 @@ export function App() {
       setDragActive(false);
       const files = event.dataTransfer?.files;
       if (!ready || files === undefined || files.length === 0) return;
+      // A file dropped from another screen is still a load, so it goes where the loading is
+      // reported -- otherwise the reader's verdict on it would land on a page nobody is looking
+      // at.
+      setScreen("data");
       handleFiles(Array.from(files));
     }
     window.addEventListener("dragenter", onDragEnter);
@@ -214,49 +218,38 @@ export function App() {
         <StatusBar stage={stage} detail={detail} versions={versions} bootError={bootError} />
       </header>
 
-      <DropZone disabled={!ready} dragActive={dragActive} onFiles={handleFiles} />
+      <nav className="app-tabs">
+        {SCREENS.map(([name, title]) => (
+          <button
+            key={name}
+            type="button"
+            className={`app-tab${screen === name ? " app-tab--active" : ""}`}
+            onClick={() => setScreen(name)}
+            aria-current={screen === name ? "page" : undefined}
+          >
+            {title}
+          </button>
+        ))}
+      </nav>
 
-      {fileErrors.length > 0 && (
-        <ul className="file-errors">
-          {fileErrors.map((e) => (
-            <li key={e.id} className="file-error">
-              <span className="file-error__name">{e.name}</span>
-              <span className="file-error__message">{e.message}</span>
-              <button
-                type="button"
-                className="file-error__dismiss"
-                onClick={() => dismissFileError(e.id)}
-                aria-label={`Dismiss error for ${e.name}`}
-              >
-                &times;
-              </button>
-            </li>
-          ))}
-        </ul>
+      {screen === "data" ? (
+        <DataScreen
+          ready={ready}
+          dragActive={dragActive}
+          spectra={spectra}
+          selected={selected}
+          selectedId={selectedId}
+          fileErrors={fileErrors}
+          onFiles={handleFiles}
+          onSelect={setSelectedId}
+          onRemove={removeSpectrum}
+          onDismissError={dismissFileError}
+          onApplyTrim={applyTrim}
+          onResetTrim={resetTrim}
+        />
+      ) : (
+        <FitScreen client={client} ready={ready} spectrum={selected} />
       )}
-
-      <main className="app-main">
-        <section className="app-left">
-          <h2 className="panel-title">Loaded spectra</h2>
-          <SpectraTable
-            spectra={spectra}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-            onRemove={removeSpectrum}
-          />
-        </section>
-        <section className="app-right">
-          {selected === null ? (
-            <p className="empty-hint">Load a spectrum to see its plots and Kramers-Kronig verdict.</p>
-          ) : (
-            <>
-              <TrimPanel key={`trim-${selected.id}`} spectrum={selected} onApply={applyTrim} onReset={resetTrim} />
-              <KKPanel spectrum={selected} />
-              <PlotsPanel key={`plots-${selected.id}`} spectrum={selected} />
-            </>
-          )}
-        </section>
-      </main>
     </div>
   );
 }

@@ -24,12 +24,7 @@ from autocircuit.core.discover import (
     exhaustive_limit_for,
 )
 from autocircuit.core.drt import DRTResult, drt
-from autocircuit.core.elements import (
-    COMPONENT_POOL,
-    DEFAULT_POOL,
-    ELECTROCHEMICAL_POOL,
-    REGISTRY,
-)
+from autocircuit.core.elements import POOLS, REGISTRY
 from autocircuit.core.fit import FitResult, fit
 from autocircuit.core.simulate import log_frequencies, simulate
 from autocircuit.core.spectrum import Spectrum
@@ -37,12 +32,6 @@ from autocircuit.core.spice import to_netlist
 from autocircuit.core.validate import lin_kk
 from autocircuit.io import read as read_spectrum
 from autocircuit.io import write_csv, write_zview
-
-POOLS = {
-    "default": DEFAULT_POOL,
-    "component": COMPONENT_POOL,
-    "electrochemical": ELECTROCHEMICAL_POOL,
-}
 
 
 def _parse_assignments(items: Sequence[str] | None, what: str) -> dict[str, float]:

@@ -143,7 +143,9 @@ Two things about the fan-out are worth keeping:
   residuals, standard errors and the correlation matrix, as JSON text). Against a stage that
   costs minutes, recomputing any of it to save that is the wrong trade — and recomputing
   `z_model` in particular would stake the browser's agreement with the CLI on numpy returning
-  bit-identical results in a second WASM interpreter, which nobody has measured.
+  bit-identical results in a second WASM interpreter. That has since been measured, by
+  `run_fit_parity.mjs` below, and the answer is that it would have been wrong for any circuit
+  built on a transcendental.
 
 Timings are single-run and this workload is noisy: the tier-1 screen came out 55 s in the
 earlier run and 37 s here with identical work, in line with the ±30% seen in the worker sweep
@@ -152,3 +154,35 @@ above. Treat the ratio, not the seconds, as the result.
 `src.zip` is a build artifact (gitignored); `make_zip.py` regenerates it. It exists because
 PowerShell's `Compress-Archive` writes backslash separators that Python's `zipfile` unpacks
 into files literally named `autocircuit\__init__.py`, which fails only at the import.
+
+## `fit_parity.py` + `run_fit_parity.mjs` — gate W1
+
+Does a manual fit in the browser return what the command line's does?
+
+```powershell
+python benchmarks/pyodide/fit_parity.py          # the CLI's half -> fit_parity_ref.json
+node benchmarks/pyodide/run_fit_parity.mjs src.zip
+```
+
+The reference file carries the *spectra* as well as the answers, and the corpus is imported from
+`tests/test_fit.py::SYNTHETIC_SUITE` rather than copied, so the two interpreters demonstrably fit
+the same numbers and the nine circuits stay defined in one place. The browser half goes through
+`autocircuit.web.bridge.handle` — the entry point the Pyodide worker in `web/` calls — not
+through Python the browser never runs.
+
+**[measured]** at three restarts, seed 0:
+
+| comparison | result |
+|------------|--------|
+| 34 fitted parameters, six significant digits | all agree |
+| 34 fitted parameters, bit for bit | none agree; worst relative difference 2.4e-7 |
+| 1042 impedance components at CPython's fitted values | 1001 bit-identical, worst 5.0e-14 |
+
+The second row is the finding: a fitted parameter travels through differential evolution and a
+trust-region solve, so a last-bit difference compounds into the optimizer's *path*, and only its
+answer is reproducible across interpreters. The third row locates the difference — evaluating a
+circuit is bit-identical everywhere except the skin-effect-on-a-wire case, whose `tanh` and
+complex `sqrt` come from a libm that differs between WASM and the desktop.
+
+WASM is 1.2–4× slower per fit here (8.1 s against 0.8 s on the easiest, 36 s against 48 s on the
+hardest — that last one favouring the browser, which is noise, not a result).
