@@ -294,3 +294,12 @@ The interpreter-bound import pays 3.9×, once, for 1.6 s.
 So `exhaustive_limit=4` is a usable web default at 2.8 min single-threaded — which makes
 progress streaming mandatory rather than optional — `exhaustive_limit=5` is a ~30 min opt-in,
 and the fitter needs no separate web budget.
+
+`pyodide/run_orchestrated.mjs` then runs the whole two-tier search across four Pyodide workers
+with the orchestration still in Python, and reproduces the CLI's report exactly: same 741
+candidates screened, same 37 refitted, same AICc to a difference of 0.0, same Pareto front, same
+recommendation. **[measured] 123 s**, of which the tier-1 screen is 37 s and the tier-2 refit
+86 s. That refit stage was 232 s of a 287 s run until `FitResult.to_wire()` let a whole fit --
+covariance and restart spread included -- cross a worker boundary losslessly; `tests/test_wire.py`
+pins the transport and `docs/WEB_UI_PLAN.md` §2.2 records why the CLI's `--json` shape could not
+serve as it.

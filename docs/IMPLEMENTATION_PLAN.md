@@ -1,6 +1,7 @@
 # AutoCircuit — Implementation Plan
 
-Status: v2 (2026-08-08). Phases 0-5 are implemented; phase 6 (web UI) is not started.
+Status: v2 (2026-08-08). Phases 0-5 are implemented; phase 6 (web UI) has its worker-boundary
+transport built (§10) and no UI yet.
 Sections marked **[measured]** record results from the code as it exists, not intentions.
 Update this document whenever a decision changes.
 
@@ -380,8 +381,9 @@ return a common `Spectrum` (f [Hz], Z [complex], metadata). Export: CSV and ZVie
 
 ## 9. Web application (after CLI is solid)
 
-> Superseded in detail by **`docs/WEB_UI_PLAN.md`** (draft awaiting approval), which is built
-> on the measurements below rather than on the estimates this section originally carried.
+> Superseded in detail by **`docs/WEB_UI_PLAN.md`** (step 1 built; steps 2–6 await approval),
+> which is built on the measurements below rather than on the estimates this section originally
+> carried.
 
 - **Static site** (deployable on GitHub Pages): Vite + TypeScript + React; the Python core
   wheel runs in **Pyodide inside a Web Worker** (UI never blocks; progress messages stream
@@ -418,9 +420,11 @@ one-off 1.6 s import. Consequences, all now measured rather than guessed:
   inner loop; `fit_budget()` stays put.
 - **Cold start to the first fit is ~4 s** (1.2 s boot + 1.1 s cached numpy/scipy + 1.6 s
   import), so the loading stage is a UI state, not an architectural problem.
-- **`exhaustive_limit=4` is the web default and costs 2.8 min single-threaded.** A browser has
-  no `multiprocessing`, so `--workers` has no analogue there. That makes progress streaming
-  through the existing `on_progress` callback mandatory, not decorative.
+- **`exhaustive_limit=4` is the web default and costs 2.8 min single-threaded**, or a measured
+  2.0 min across four Pyodide workers. A browser has no `multiprocessing`, so `--workers` has no
+  analogue there — Web Workers are, and both tiers of the search now fan out across them
+  (`docs/WEB_UI_PLAN.md` §2.2). Either way progress streaming through the existing `on_progress`
+  callback is mandatory, not decorative.
 - **`exhaustive_limit=5` stays an explicit opt-in** at roughly half an hour.
 
 ## 10. Milestones
@@ -433,7 +437,7 @@ one-off 1.6 s import. Consequences, all now measured rather than guessed:
 | 3 | CLI | **done** — `fit`, `discover`, `validate`, `simulate`, `convert`, `elements` |
 | 4 | SPICE export | **done** — NNLS Foster-form ladder synthesis; netlist verified by nodal analysis. ngspice round-trip still outstanding. |
 | 5 | Topology discovery | **done** — genetic search, then the exhaustive-first redesign of §6.1, all seven steps of `docs/DISCOVERY_V2_PLAN.md` including DRT structure probing (§6.2) |
-| 6 | Web UI | **not started** |
+| 6 | Web UI | **step 1 done** — a `FitResult` crosses a worker boundary losslessly, so the browser fans out both tiers of the search (287 s → 123 s on the capacitor reference). Steps 2–6 of `docs/WEB_UI_PLAN.md`, which are the UI itself, await approval. |
 
 Test corpus actually used: series/parallel RC, capacitor C+ESR+ESL, capacitor with `SKINF`,
 Randles with Warburg, two-block Maxwell-Wagner, three-block brick layer with CPE, depressed
@@ -441,7 +445,8 @@ semicircle, and a wire with `SKINW` — each at 0% and 1% noise.
 
 ### 10.1 Next steps
 
-1. **Web UI (phase 6)** — the only untouched phase, and the largest remaining piece.
+1. **Web UI (phase 6)** — the largest remaining piece; its step 1 (the worker-boundary
+   transport) is done, and steps 2–6 are the UI itself.
 2. **ngspice round-trip in CI** — the nodal-analysis engine in the test suite proves the
    netlist is electrically right; running a real simulator would also prove it is *dialect*
    right.

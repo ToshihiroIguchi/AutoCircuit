@@ -1,15 +1,16 @@
-# Handoff — state of AutoCircuit as of 2026-08-13
+# Handoff — state of AutoCircuit as of 2026-08-14
 
 Written at the end of the session that built the backend, updated after discovery v2 steps
-1–5, and again after the skeleton-constrained mode (all of
-`docs/PARTIAL_TOPOLOGY_PLAN.md`). Read this first, then `CLAUDE.md`, then the plan for
-whichever part you are touching.
+1–5, again after the skeleton-constrained mode (all of `docs/PARTIAL_TOPOLOGY_PLAN.md`), and
+again after step 1 of `docs/WEB_UI_PLAN.md`. Read this first, then `CLAUDE.md`, then the plan
+for whichever part you are touching.
 
 ## 1. Where things stand
 
-The command-line backend is **complete and verified**: 559 tests pass
-(`python -m pytest tests -q`, ~4-5 min). Phases 0–5 of `docs/IMPLEMENTATION_PLAN.md` are done;
-phase 6 (web UI) is untouched.
+The command-line backend is **complete and verified**: 583 tests pass
+(`python -m pytest tests -q`, ~5 min). Phases 0–5 of `docs/IMPLEMENTATION_PLAN.md` are done.
+Phase 6 (web UI) has its **step 1 built and measured** — a lossless `FitResult` across a worker
+boundary, so the browser fans out both tiers of the search (§8) — and no UI yet.
 
 **Discovery v2 is fully implemented** (see §2) and all five gates pass: G1 30/30 across the
 three reference spectra, G2 exactly reproducing the measured counts table, G3 with the truth
@@ -54,6 +55,7 @@ Module map (`src/autocircuit/`):
 | `core/enumerate.py` | exhaustive topology enumeration, skeleton-constrained growth, the structural feasibility filter |
 | `core/drt.py` | regularised distribution of relaxation times; structure probing only |
 | `core/discover.py` | exhaustive and genetic topology search, Pareto front, equivalence classes |
+| `core/wire.py` | lossless JSON encoding of the arrays that cross a worker boundary |
 | `core/spice.py` | netlist export + NNLS Foster-form ladder synthesis |
 | `io/` | generic CSV, ZView/ZPlot, Touchstone, Keysight readers |
 | `cli/main.py` | argparse CLI |
@@ -179,6 +181,26 @@ recorded in the code as a comment and in `docs/IMPLEMENTATION_PLAN.md` marked **
   frontier bound equal to `max_candidates` stops short of the budget it exists to enforce.
   Hence `FRONTIER_HEADROOM = 4`: at exactly `max_candidates` a default run would have lost the
   9,857-candidate six-element level, grown from a frontier of 18,682.
+- **`FitResult.to_dict()` cannot transport a fit, and widening it would be the wrong fix.** It
+  is the CLI's `--json` *report*: no `z_model`, no residuals, no correlation matrix, no rank, no
+  raw values array, no restart count, no fixed values — so `Statistics` cannot be rebuilt from
+  it and neither can a `Candidate`. `to_wire()`/`from_wire()` are a separate format for exactly
+  that reason (`core/wire.py`, and §2.2 of `docs/WEB_UI_PLAN.md`).
+- **The non-finite path on the wire is routine, not defensive, and the test for it is
+  `allow_nan=False`.** An exact fit on noise-free data has `ssr == 0.0`, which makes AIC, AICc
+  and BIC all `-inf` — `p(R1,R2)` against a single resistor is the two-line demonstration in
+  `tests/test_wire.py`. Python's `json.dumps` emits bare `Infinity`/`NaN` tokens by default and
+  `JSON.parse` rejects them, so a payload that survives the default dump can still be
+  undeliverable to a Web Worker.
+- **A non-finite *standard error*, on the other hand, is unreachable from a real fit.**
+  `compute_statistics` clips the covariance diagonal to ≥ 0 before the square root and runs
+  `nan_to_num` + `clip(-1, 1)` on the correlation, so a rank-deficient fit reports a tiny finite
+  stderr and a correlation pinned to exactly ±1. Only `_covariance`'s two failure returns fill
+  those arrays with inf/nan. Do not go looking for a degenerate circuit that produces one.
+- **Refits must be handed to workers one at a time; screens can be sliced up front.** 741
+  sloppy screening fits average out, so round-robin is fine there. Full-budget fits of different
+  topologies differ by an order of magnitude, and a static split leaves most of the pool waiting
+  on whichever slice drew the expensive ones.
 - **A feasibility filter that lets every element degenerate has no structural power at all.**
   If any element may be shorted or opened, the reachable endpoint-slope hull of *any*
   topology collapses to the union of its leaves' hulls — the test degenerates into "does this
@@ -265,16 +287,15 @@ every decision about what the report may claim stayed on the expensive model.
    it, and the small sizes are the cheapest fits), while raising `exhaustive_min` deliberately
    clears `complete_up_to` — "all topologies up to N" is not true when the smaller sizes were
    skipped. `exhaustive_min` stays available to anyone who wants that trade explicitly.
-1. **Skeleton mode: gate P2, and §3.3.** See §7 — P2 is the one thing standing between this
-   mode and calling it finished, and §3.3's design should be chosen from what P2 shows rather
-   than before it.
-2. **Web UI (phase 6)** — the biggest remaining piece. `docs/WEB_UI_PLAN.md` is a **draft
-   awaiting approval**, written on the Pyodide measurements rather than on guesses. Its
-   architecture question is already settled and prototyped (§2.1): orchestration stays in
-   Python behind `discover.screen_plan()`, and the browser reproduces the CLI's discovery
-   output to an AICc difference of 0.0. What it left standing is step 1 of its work order —
-   getting a `FitResult` across a worker boundary losslessly, so tier 2 can be fanned out too.
-   [measured] Tier 2 is 80% of the browser's run time today.
+1. ~~**Skeleton mode: gate P2, and §3.3.**~~ Both done; see §7.
+2. **Web UI (phase 6)** — the biggest remaining piece, and now the only one.
+   `docs/WEB_UI_PLAN.md` steps 2–6 are a **draft awaiting approval**; its step 1 is built (§8).
+   Nothing in the plan's architecture is open any more: orchestration stays in Python behind
+   `discover.screen_plan()` and `discover.refit_plan()`, both tiers fan out across Pyodide
+   workers, and the browser reproduces the CLI's discovery output to an AICc difference of 0.0
+   in 123 s where it took 287 s. What is left is the UI itself — Vite/React scaffold, data
+   import and plots, the circuit canvas (which is also the skeleton editor, so mode 2 rides
+   along for the cost of one button), the discovery job screen, and the report.
 3. ngspice round-trip in CI. The test suite already proves the netlist is *electrically*
    right via its own nodal-analysis engine (`tests/test_spice.py`); a real simulator would
    also prove it is *dialect* right.
@@ -379,3 +400,35 @@ eight) against a search of about a minute, and five elements is ~20 min single-c
 
 **What is left in this mode:** nothing but the documentation sweep, which this file is part
 of.
+
+## 8. Web UI step 1 — a fit that crosses a worker boundary
+
+`docs/WEB_UI_PLAN.md` §2.2 is the record; this is what exists. The browser now fans out **both**
+tiers of the search, which took one new module and one new generator:
+
+- **`core/wire.py`** — JSON encoding for the numeric payloads: `encode_float`/`decode_float`,
+  `encode_array`/`decode_array` (any rank, shape carried), `encode_complex_array`/
+  `decode_complex_array`, `encode_mapping`/`decode_mapping`. Non-finite values are the strings
+  `"inf"`, `"-inf"`, `"nan"`.
+- **`Statistics.to_wire()`/`from_wire()`** and **`FitResult.to_wire()`/`from_wire()`**, with
+  `fit.WIRE_VERSION` so a stale worker build fails loudly instead of reporting wrong numbers.
+- **`discover.refit_plan()`** — the tier-2 mirror of `screen_plan()`: it yields batches of
+  `RefitTask` and receives either `FitResult` objects or their wire form back, keeping the
+  shortlist quota, the drop-what-cannot-be-fitted rule and the ordering in one place.
+  `_refit_shortlist` is now a thin driver over it, and `_refit_worker` returns the wire payload
+  even under `multiprocessing`, so every parallel CLI run exercises the browser's transport.
+- **`benchmarks/pyodide/`** — `orchestrate.py` drives both plans; `screen_task_worker.mjs`
+  answers both `screen` and `refit` messages; `run_orchestrated.mjs` hands refits out one at a
+  time.
+
+[measured] Bit-identical, twice over: a full-precision dump of `discover()` on all three
+reference spectra at four workers — values, fitted response, residuals, standard errors,
+correlation matrices — is unchanged from before the change, and the browser's report on the
+capacitor reference matches the pre-fan-out run candidate for candidate, front for front,
+recommendation included. The clock is what moved: **287 s → 123 s**, tier 2 from 232 s to 86 s,
+against CPython's 90 s at four processes.
+
+One thing this leaves for step 2: the *spectrum* still reaches each worker by being recomputed
+there (`simulate(...)` in the worker's own bootstrap), which is fine for a benchmark whose data
+is synthetic and wrong for a UI where the user loads a file. `encode_complex_array` is what that
+wants; there is no new format to design, only a message to add.

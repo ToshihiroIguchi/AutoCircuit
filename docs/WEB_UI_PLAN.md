@@ -1,8 +1,9 @@
 # Web UI — Phase 6 Plan
 
-Status: draft for approval (2026-08-09). No UI exists yet. The one architectural question it
-carried is settled and prototyped — see §2.1 — and that prototype changed §2.2 and the work
-order, which is what prototypes are for.
+Status: draft for approval (2026-08-09; step 1 built 2026-08-14). No UI exists yet. The one
+architectural question it carried is settled and prototyped — see §2.1 — and that prototype
+changed §2.2 and the work order, which is what prototypes are for. Step 1 of that order is now
+done and measured; steps 2–6, which are the UI itself, are still awaiting approval.
 Prerequisite reading: `docs/IMPLEMENTATION_PLAN.md` §9 (the original sketch, now partly
 superseded by measurement), `benchmarks/pyodide/README.md` (every performance number below),
 and `docs/HANDOFF.md` §3.
@@ -25,11 +26,12 @@ budgets, (b) Rust/WASM port of the fitness inner loop". Both hedges can be dropp
 
 Two consequences shape the whole design:
 
-1. **A real search takes minutes, not seconds.** 169 s single-threaded; 287 s as prototyped
-   across four workers, which is worse than it sounds and is explained in §2.2, and ~90 s once
-   the fix there lands. There is no arrangement of this software that makes topology discovery
-   feel instant in a browser, so the UI has to be built around a long-running job — streamed
-   progress, partial results, and a cancel button — rather than around a request/response.
+1. **A real search takes minutes, not seconds.** 169 s single-threaded; 287 s as first
+   prototyped across four workers, which is worse than it sounds and is explained in §2.2, and
+   123 s measured once the fix there landed. There is no arrangement of this software that makes
+   topology discovery feel instant in a browser, so the UI has to be built around a long-running
+   job — streamed progress, partial results, and a cancel button — rather than around a
+   request/response.
 2. **`fit` on a known topology takes under a second**, and that is the interactive path. The
    two modes deserve different treatment in the UI: manual fitting is live, discovery is a job.
 
@@ -100,30 +102,56 @@ difference of 0.0**, same Pareto front, same recommendation (the true `C-R-L-SKI
 gate W1 demonstrated in advance of the UI, and it is only true because there is one
 implementation of the logic rather than two.
 
-### 2.2 What the prototype found that the plan had wrong
+### 2.2 What the prototype found that the plan had wrong — and what fixing it took
 
-| stage | browser, 4 workers | CPython, 4 processes |
-|-------|-------------------:|---------------------:|
-| tier 1 screen (741 candidates) | 55 s | — |
-| tier 2 refit (37 candidates) | 232 s | — |
-| **total** | **287 s** | **90 s** |
+| stage | browser, 4 workers | after step 1 | CPython, 4 processes |
+|-------|-------------------:|-------------:|---------------------:|
+| tier 1 screen (741 candidates) | 55 s | 37 s | — |
+| tier 2 refit (37 candidates) | 232 s | 86 s | — |
+| **total** | **287 s** | **123 s** | **90 s** |
 
-Tier 1 parallelises and is no longer the problem. **Tier 2 is 80% of the browser's time**, not
-the ~25% assumed above, because it runs serially in the orchestrator while CPython fans it
-across its pool as well. The single-threaded WASM penalty is 1.3×; the gap here is 3.2×, and
-all of the difference is that one serial stage.
+Tier 1 parallelises and was never the problem. **Tier 2 was 80% of the browser's time**, not
+the ~25% assumed above, because it ran serially in the orchestrator while CPython fans it
+across its pool as well. The single-threaded WASM penalty is 1.3×; the gap was 3.2×, and all of
+the difference was that one serial stage. It is now 1.4×.
 
-Tier 2 was left serial for a reason: a refit returns a whole `FitResult` — covariance,
-statistics, restart spread — which is a Python object, and handing back only the fitted values
-is precisely the shortcut that discards the restart spread a non-identifiable model uses to
-announce itself (`docs/DISCOVERY_V2_PLAN.md` §5.1). Fanning it out therefore needs a lossless
-serialisation of `FitResult` across the worker boundary. `FitResult.to_dict()` exists for the
-CLI's `--json` and is the obvious starting point, but whether it is lossless enough to
-rebuild a `Candidate` — `pareto_front`, `recommended` and the equivalence classes all need the
-fitted response, not just the numbers — has not been checked.
+Tier 2 was serial for a reason: a refit returns a whole `FitResult` — covariance, statistics,
+restart spread — which is a Python object, and handing back only the fitted values is precisely
+the shortcut that discards the restart spread a non-identifiable model uses to announce itself
+(`docs/DISCOVERY_V2_PLAN.md` §5.1). Fanning it out needed a lossless serialisation of
+`FitResult` across the worker boundary. **Step 1 built it**; four things about it are worth not
+re-deriving.
 
-**That is now the first piece of work, and it is a bigger one than "prototype the harness".**
-Until it is done the browser default is a ~5 minute search rather than a ~1.5 minute one.
+- **`FitResult.to_dict()` could not be the starting point, and widening it would have been
+  wrong.** It is a *report* — the CLI's `--json` — and it carries no `z_model`, no residuals,
+  no correlation matrix, no rank, no raw values array, no restart count and no fixed-parameter
+  values, so a `Statistics` cannot be rebuilt from it, and without that neither can a
+  `Candidate`. Extending it would have put megabytes of arrays into every report file to serve
+  a transport nobody reading that file uses. `to_wire()` / `from_wire()` are separate, in
+  `core/wire.py`, `core/stats.py` and `core/fit.py`.
+- **Nothing is recomputed on arrival.** `z_model` could be regenerated from `circuit.impedance()`
+  for about 300 numbers per candidate less traffic, against a stage costing minutes — but it
+  would stake the browser's agreement with the CLI on numpy returning bit-identical results in
+  a second WASM interpreter, which nobody has measured. The whole payload is ~7 KB per
+  candidate at 71 points.
+- **Non-finite values travel as the string sentinels `"inf"`, `"-inf"`, `"nan"`**, not as the
+  `null`-means-infinity convention the screening costs use (§2 above). A cost is one-sided, so
+  `null` is unambiguous there; a standard error can be either infinite or `nan` and those mean
+  different things. [measured] The path is routine, not defensive: an exact fit on noise-free
+  data has `ssr == 0.0` and therefore AIC, AICc and BIC all `-inf` — which is exactly what the
+  equivalence-class report is built to surface. The strict test is `json.dumps(..., allow_nan=False)`,
+  because Python's default emits bare `Infinity`/`NaN` tokens that `JSON.parse` rejects.
+- **`refit_plan()` is a generator mirroring `screen_plan()`.** The per-element-count shortlist
+  quota that gate G1 rests on stays in Python, and `_refit_shortlist` is now a thin driver over
+  it exactly as `_screen_parallel` is over `screen_plan`. `_refit_worker` returns the wire
+  payload rather than a pickled object even on the desktop, so every parallel CLI run exercises
+  the browser's transport.
+
+[measured] The round trip is bit-identical, and so is the whole search: a full-precision dump
+of `discover()` on all three reference spectra at four workers — every candidate's values,
+fitted response, residuals, standard errors and correlation matrix — is unchanged before and
+after, and the browser's report on the capacitor reference matches the pre-fan-out run
+candidate for candidate.
 
 ## 3. Screens
 
@@ -163,7 +191,7 @@ Plots: linked Nyquist / Bode(|Z|, θ) / residuals, zoom-synced, log axes. Plotly
 | step | contents | size |
 |------|----------|------|
 | 0 | ~~Pyodide worker harness, orchestration decision~~ | **done** — §2.1, `benchmarks/pyodide/run_orchestrated.mjs` |
-| 1 | Lossless `FitResult` across a worker boundary, so tier 2 fans out too (§2.2) | M |
+| 1 | ~~Lossless `FitResult` across a worker boundary, so tier 2 fans out too~~ | **done** — §2.2; 287 s → 123 s |
 | 2 | Vite/React scaffold, data import, plots, Lin-KK panel | M |
 | 3 | Circuit canvas + live preview + manual fit | L |
 | 4 | Discovery job screen: progress, streaming, cancel, completeness | M |
