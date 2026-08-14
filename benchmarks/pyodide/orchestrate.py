@@ -5,16 +5,18 @@ depends on -- enumeration, the feasibility filter, the early-abandon thresholds,
 shortlist quota, the tier-2 refit -- and hands out only batches of "screen these circuits".
 JavaScript fans those across Web Workers and sends the costs back.
 
-The point being proved is that no part of :func:`autocircuit.core.discover.screen_plan` or
-:func:`_shortlist` has to be reimplemented in JavaScript for the browser to parallelise the
-screen. The alternative design would have moved the per-element-count quota into JS, where
-nothing tests it.
+The point being proved is that no part of :func:`autocircuit.core.discover.screen_plan`,
+:func:`refit_plan` or :func:`_shortlist` has to be reimplemented in JavaScript for the browser
+to parallelise either tier. The alternative design would have moved the per-element-count quota
+into JS, where nothing tests it.
 
-Tier 2 deliberately stays here rather than being fanned out too. A refit returns a whole
-``FitResult`` -- covariance, restart spread and all -- which is a Python object that cannot
-cross a structured-clone boundary without a serialisation format nobody has needed yet, and
-handing back only the fitted values is exactly the shortcut that loses the restart spread
-(``docs/DISCOVERY_V2_PLAN.md`` 5.1). It is also the cheaper tier.
+**Tier 2 fans out as well, and that is the change this file records.** It used to run here,
+serially, because a refit returns a whole ``FitResult`` -- covariance, restart spread and all --
+and handing back only the fitted values is exactly the shortcut that loses the restart spread
+(``docs/DISCOVERY_V2_PLAN.md`` 5.1). Measurement then showed that serial stage to be 80% of the
+browser's run time (``docs/WEB_UI_PLAN.md`` 2.2), so the missing piece was built:
+:meth:`FitResult.to_wire` carries every field across the boundary losslessly, and
+:func:`refit_plan` hands out the fits the way ``screen_plan`` hands out the screens.
 """
 
 from __future__ import annotations
@@ -29,8 +31,8 @@ from autocircuit.core.discover import (
     REFINE_DEFAULT,
     Candidate,
     DiscoveryResult,
-    _refit_shortlist,
     pareto_front,
+    refit_plan,
     screen_plan,
 )
 from autocircuit.core.enumerate import EndpointBehaviour, enumerate_topologies, is_feasible
@@ -46,6 +48,12 @@ SPECTRUM = simulate(
 POOL = ("R", "C", "L", "CPE", "SKINF")
 LIMIT = 4
 CHUNK = 64
+
+#: Refits handed out at a time. Unlike the screen, no decision here depends on an earlier
+#: batch, so this only trades scheduling granularity against round trips -- and it is what the
+#: UI will stream a partial Pareto front from. One batch would leave a worker idle at the tail,
+#: since refit times vary by an order of magnitude across topologies.
+REFIT_CHUNK = 8
 
 _state: dict[str, Any] = {}
 
@@ -96,17 +104,53 @@ def submit(costs_json: str) -> None:
     _state["pending"] = [_from_wire(cost) for cost in json.loads(costs_json)]
 
 
+def next_refit() -> str:
+    """The next batch of tier-2 refits, or ``null`` once the shortlist is done.
+
+    Same shape as :func:`next_batch`, and for the same reason: which topologies are worth a
+    full-budget refit is :func:`_shortlist`'s decision, taken inside :func:`refit_plan`, and
+    JavaScript never sees the rule -- only the list of fits to run.
+    """
+    if "refit_plan" not in _state:
+        scored = [(float(cost), text) for cost, text in _state["scored"]]
+        _state["refit_plan"] = refit_plan(
+            scored,
+            n_refine=REFINE_DEFAULT["exhaustive"],
+            n_data=2 * SPECTRUM.n,
+            restarts=5,
+            seed=0,
+            chunk=REFIT_CHUNK,
+        )
+        _state["refit_pending"] = None
+    plan = _state["refit_plan"]
+    try:
+        if _state["refit_pending"] is None:
+            tasks = next(plan)
+        else:
+            tasks = plan.send(_state["refit_pending"])
+    except StopIteration as done:
+        _state["candidates"] = list(done.value)
+        return json.dumps(None)
+    _state["refit_pending"] = None
+    return json.dumps([[task.text, task.restarts, task.seed] for task in tasks])
+
+
+def submit_refit(results_json: str) -> None:
+    """Hand back one wire-format ``FitResult`` (or ``null``) per task just issued.
+
+    ``null`` means the topology could not be fitted at all, which is an answer rather than an
+    error; anything else is :meth:`FitResult.to_wire`, which :func:`refit_plan` decodes.
+    """
+    _state["refit_pending"] = json.loads(results_json)
+
+
 def finish() -> str:
-    """Tier 2 and the report, from the scored screen."""
-    scored = [(float(cost), text) for cost, text in _state["scored"]]
-    candidates: list[Candidate] = _refit_shortlist(
-        scored, SPECTRUM, "modulus", 5, 0, REFINE_DEFAULT["exhaustive"], None
-    )
-    candidates.sort(key=lambda c: c.aicc)
+    """The report, from the refitted candidates."""
+    candidates: list[Candidate] = _state["candidates"]
     result = DiscoveryResult(
         candidates=candidates,
         pareto=pareto_front(candidates),
-        n_evaluated=len(scored),
+        n_evaluated=len(_state["scored"]),
         generations=0,
         elapsed_s=time.perf_counter() - _state["started"],
         pool=POOL,

@@ -47,11 +47,39 @@ function screenBatch(pool, tasks) {
           resolve(m.costs);
         };
         worker.on("message", onMessage);
-        worker.postMessage(JSON.stringify(slices[i]));
+        worker.postMessage({ kind: "screen", tasks: slices[i] });
       });
       return Promise.race([answered, failed]);
     }),
   ).then((sliceCosts) => tasks.map((_, j) => sliceCosts[j % pool.length][Math.floor(j / pool.length)]));
+}
+
+/** Refits, handed out one at a time rather than sliced up front.
+ *
+ * The screen can be sliced round-robin because 741 sloppy fits average out. A refit batch
+ * cannot: full-budget fits of different topologies differ by an order of magnitude, and a
+ * static split leaves most of the pool waiting on whichever slice drew the expensive ones.
+ */
+function refitBatch(pool, tasks) {
+  const results = new Array(tasks.length);
+  let next = 0;
+  const drain = ({ worker, failed }) =>
+    (async () => {
+      while (next < tasks.length) {
+        const index = next++;
+        const answered = new Promise((resolve) => {
+          const onMessage = (m) => {
+            if (m.kind !== "refit") return;
+            worker.off("message", onMessage);
+            resolve(m.results);
+          };
+          worker.on("message", onMessage);
+          worker.postMessage({ kind: "refit", tasks: [tasks[index]] });
+        });
+        results[index] = (await Promise.race([answered, failed]))[0];
+      }
+    })();
+  return Promise.all(pool.map(drain)).then(() => results);
 }
 
 const bootStarted = performance.now();
@@ -87,12 +115,28 @@ for (;;) {
 process.stderr.write("\n");
 const screenSeconds = (performance.now() - started) / 1000;
 
+// Tier 2 goes out to the same pool. Each result comes back as FitResult.to_wire(): every
+// field, losslessly, so the orchestrator's report is built from the workers' own numbers
+// rather than from a summary of them.
+const refitStarted = performance.now();
+let refitted = 0;
+for (;;) {
+  const batch = JSON.parse(py("next_refit")());
+  if (batch === null) break;
+  const results = await refitBatch(pool, batch);
+  py("submit_refit")(JSON.stringify(results));
+  refitted += batch.length;
+  process.stderr.write(`\r  refitted ${refitted}`);
+}
+process.stderr.write("\n");
+const refitSeconds = (performance.now() - refitStarted) / 1000;
+
 const report = JSON.parse(py("finish")());
 const totalSeconds = (performance.now() - started) / 1000;
 await Promise.all(pool.map((p) => p.worker.terminate()));
 
 console.error(
   `boot ${bootSeconds.toFixed(1)} s, screen ${screenSeconds.toFixed(1)} s,` +
-    ` total ${totalSeconds.toFixed(1)} s`,
+    ` refit ${refitSeconds.toFixed(1)} s, total ${totalSeconds.toFixed(1)} s`,
 );
 console.log(JSON.stringify(report, null, 1));

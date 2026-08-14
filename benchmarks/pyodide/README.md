@@ -53,8 +53,9 @@ What this settles for phase 6:
   (2.2 s the first time, when the wheels are fetched), 1.6 s importing the package. That needs
   a loading state, not an architecture.
 - **`exhaustive_limit=4` is the right web default, and it is 2.8 minutes** single-threaded, or
-  roughly 1.5 min across a four-worker pool (see below). Not seconds either way, so progress
-  streaming through the existing `on_progress` callback is required, not a nicety.
+  a measured 2.0 min end to end across a four-worker pool (both tiers fanned out, last section).
+  Not seconds either way, so progress streaming through the existing `on_progress` callback is
+  required, not a nicety.
 - **`exhaustive_limit=5` is not a default.** The same search over 6,598 candidates costs ~22
   min single-core on CPython, so ~30 min here, and a worker pool only takes that to ~12 min.
   It stays available as an explicit choice.
@@ -100,8 +101,9 @@ pool is worth having but wants creating once and keeping.
 
 `run_orchestrated.mjs` is the prototype of the architecture `docs/WEB_UI_PLAN.md` §2.1 settles
 on: orchestration stays in Python — `discover.screen_plan()` yields batches of screening work
-and receives their costs — while JavaScript does nothing but carry those batches out to
-workers. Nothing that gate G1 depends on is reimplemented in JS.
+and receives their costs, `discover.refit_plan()` does the same for the full-budget refits —
+while JavaScript does nothing but carry those batches out to workers. Nothing that gate G1
+depends on is reimplemented in JS.
 
 ```powershell
 node benchmarks/pyodide/run_orchestrated.mjs src.zip 4
@@ -117,15 +119,35 @@ processes:
 | refitted candidates | 37, same order | 37 |
 | worst AICc difference | **0.0** | — |
 | recommendation | `[C-L-R-SKINF]` (the truth) | same |
-| tier 1 | 55 s | — |
-| tier 2 | 232 s | — |
-| total | 287 s | 90 s |
+| tier 1 | 37 s | — |
+| tier 2 | 86 s | — |
+| total | **123 s** | 90 s |
 
-Identical results, which is the point. The timing is the finding: **tier 2 is 80% of the
-browser's run**, because a refit returns a `FitResult` that cannot cross a worker boundary
-without a lossless serialisation, so it stays in the orchestrator while CPython fans it out
-too. That, not WASM, is what makes the browser 3.2× slower here when the single-threaded
-penalty is 1.3×.
+Identical results, which is the point: every one of the 37 refitted candidates, the whole
+Pareto front and the recommendation match the run made when tier 2 was still serial, so
+fanning it out changed the clock and nothing else.
+
+**Tier 2 used to be 80% of this run** — 232 s of 287 s — because a refit returns a whole
+`FitResult` and there was no way to get one across a worker boundary without losing the
+covariance and the restart spread. `FitResult.to_wire()` is that way (see
+`docs/WEB_UI_PLAN.md` §2.2), and with it the stage drops to 86 s and the browser lands within
+1.4× of CPython's four-process time instead of 3.2×.
+
+Two things about the fan-out are worth keeping:
+
+- **Refits are handed out one at a time, not sliced up front.** The screen can be split
+  round-robin because 741 sloppy fits average out; full-budget fits of different topologies
+  differ by an order of magnitude, so a static split leaves most of the pool waiting on
+  whichever slice drew the expensive ones.
+- **The payload is ~7 KB per candidate** at 71 frequency points (values, fitted response,
+  residuals, standard errors and the correlation matrix, as JSON text). Against a stage that
+  costs minutes, recomputing any of it to save that is the wrong trade — and recomputing
+  `z_model` in particular would stake the browser's agreement with the CLI on numpy returning
+  bit-identical results in a second WASM interpreter, which nobody has measured.
+
+Timings are single-run and this workload is noisy: the tier-1 screen came out 55 s in the
+earlier run and 37 s here with identical work, in line with the ±30% seen in the worker sweep
+above. Treat the ratio, not the seconds, as the result.
 
 `src.zip` is a build artifact (gitignored); `make_zip.py` regenerates it. It exists because
 PowerShell's `Compress-Archive` writes backslash separators that Python's `zipfile` unpacks
