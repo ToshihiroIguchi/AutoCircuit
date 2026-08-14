@@ -157,6 +157,94 @@ export interface FitWire {
   summary: string;
 }
 
+// -- The topology search ---------------------------------------------------------------------
+//
+// A search is the one thing the bridge holds state for, because it is a pair of generators that
+// keep the enumeration and the shortlist quota between batches. These records are the batches
+// going out and the results coming back; every decision behind them was taken in Python.
+
+/** One screening job: the topology, and the cost above which its polish is not worth running. */
+export type ScreenTaskWire = [circuit: string, abandonAbove: number | null];
+
+/** One refit job: the topology, and the full-budget fit settings to run it with. */
+export type RefitTaskWire = [circuit: string, restarts: number, seed: number];
+
+/** How many topologies of each size the search is about to look at. */
+export interface SearchLevelWire {
+  n_elements: number;
+  candidates: number;
+}
+
+/** What `discover_start` committed to, before anything is fitted. */
+export interface SearchPlanWire {
+  job: string;
+  candidates: number;
+  levels: SearchLevelWire[];
+  limit: number;
+  floor: number;
+  pool: string[];
+  skeleton: string | null;
+  mode: string;
+  screen_chunk: number;
+  refit_chunk: number;
+}
+
+/** A batch of tier-1 work, with how far the screen has got. `tasks` is null when it is done. */
+export interface ScreenStepWire {
+  tasks: ScreenTaskWire[] | null;
+  screened: number;
+  total: number;
+  /** Best-scoring topology so far, without its score -- a screening cost is not reportable. */
+  best: string | null;
+}
+
+/** One candidate as a results row: what it is, how well it fits, what it cannot pin down. */
+export interface CandidateRowWire {
+  circuit: string;
+  canonical: string;
+  n_elements: number;
+  n_params: number;
+  complexity: WireFloat;
+  aicc: WireFloat;
+  chi2_reduced: WireFloat;
+  n_unresolved: number;
+  /** Parameters whose standard error exceeds their own value. */
+  unresolved: string[];
+}
+
+/** A batch of tier-2 work, with the Pareto front of everything refitted so far. */
+export interface RefitStepWire {
+  tasks: RefitTaskWire[] | null;
+  refitted: number;
+  shortlisted: number;
+  front: CandidateRowWire[];
+}
+
+/**
+ * The finished -- or stopped -- search.
+ *
+ * `completeness` and `summary` are the CLI's own sentences and are rendered verbatim. What a
+ * search is allowed to claim is the part of this report that matters most and the part a
+ * paraphrase would quietly get wrong: `complete_up_to` describes the *screen*, and
+ * `refit_progress`, when it is not null, says that the ranking below it is partial.
+ */
+export interface ReportWire {
+  n_evaluated: number;
+  complete_up_to: number | null;
+  elapsed_s: WireFloat;
+  pool: string[];
+  mode: string;
+  skeleton: string | null;
+  refit_progress: [refitted: number, shortlisted: number] | null;
+  stopped: boolean;
+  completeness: string;
+  summary: string;
+  candidates: CandidateRowWire[];
+  pareto: CandidateRowWire[];
+  recommended: string | null;
+  unresolved_everywhere: boolean;
+}
+
 /** What build the worker is running; checked at start-up against what this bundle expects. */
 export interface VersionsWire {
   bridge: number;

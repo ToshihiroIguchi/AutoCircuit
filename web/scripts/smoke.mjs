@@ -56,7 +56,7 @@ const ask = (request) => JSON.parse(handle(JSON.stringify(request)));
 console.log("version");
 const version = ask({ op: "version" });
 check("version answers", version.ok === true, JSON.stringify(version));
-check("bridge version is 2", version.result?.bridge === 2);
+check("bridge version is 3", version.result?.bridge === 3);
 check(
   "all four readers are present",
   JSON.stringify(version.result?.formats) ===
@@ -174,6 +174,101 @@ check(
 check(
   "the report text travelled",
   typeof fitted.result?.summary === "string" && fitted.result.summary.includes("chi^2"),
+);
+
+console.log("discovery");
+// One Pyodide instance playing both roles the browser splits across workers: the orchestrator
+// that holds the plan, and the pool that answers `screen_task`/`refit_task`. That is the whole
+// message flow of the Discover screen, minus the fan-out -- which is the part only a real
+// browser can exercise.
+function drive(job, { stopAfterScreenBatches = null, stopAfterRefitBatches = null } = {}) {
+  let costs = null;
+  for (let batch = 0; ; batch += 1) {
+    if (stopAfterScreenBatches !== null && batch >= stopAfterScreenBatches) return "screen";
+    const step = ask({ op: "discover_screen", job, costs });
+    if (step.ok !== true) throw new Error(JSON.stringify(step.error));
+    if (step.result.tasks === null) break;
+    costs = step.result.tasks.map(
+      ([circuit, abandon]) =>
+        ask({ op: "screen_task", spectrum: simulated, circuit, abandon_above: abandon }).result
+          .cost,
+    );
+  }
+  let results = null;
+  for (let batch = 0; ; batch += 1) {
+    if (stopAfterRefitBatches !== null && batch >= stopAfterRefitBatches) return "refit";
+    const step = ask({ op: "discover_refit", job, results });
+    if (step.ok !== true) throw new Error(JSON.stringify(step.error));
+    if (step.result.tasks === null) break;
+    results = step.result.tasks.map(
+      ([circuit, restarts, seed]) =>
+        ask({ op: "refit_task", spectrum: simulated, circuit, restarts, seed }).result.fit,
+    );
+  }
+  return "done";
+}
+
+const search = ask({
+  op: "discover_start",
+  spectrum: simulated,
+  // R and C alone cannot describe a spectrum that turns inductive: the feasibility screen
+  // rejects every candidate and the search evaluates nothing, which is a real answer but not
+  // the one this section is about.
+  pool: ["R", "C", "L"],
+  exhaustive_limit: 3,
+  restarts: 1,
+});
+check("discover_start answers", search.ok === true, JSON.stringify(search.error));
+check(
+  "it says how much work each element count is",
+  search.result?.levels?.every((level) => typeof level.candidates === "number") === true,
+  JSON.stringify(search.result?.levels),
+);
+check("the search is exhaustive; the browser has no genetic fallback", search.result?.mode === "exhaustive");
+
+check("a whole search runs to the end", drive(search.result.job) === "done");
+const report = ask({ op: "discover_report", job: search.result.job }).result;
+check("it claims the coverage it reached", report?.complete_up_to === 3, JSON.stringify(report?.complete_up_to));
+check(
+  "and says so in the sentence the screen renders verbatim",
+  typeof report?.completeness === "string" &&
+    report.completeness.includes("every plausible topology with up to 3 elements"),
+  report?.completeness,
+);
+check("nothing is claimed partial when nothing was cut short", report?.refit_progress === null);
+check("it recommends a candidate", typeof report?.recommended === "string", JSON.stringify(report?.recommended));
+check("the Pareto front is not empty", (report?.pareto?.length ?? 0) > 0);
+
+const cancelled = ask({
+  op: "discover_start",
+  spectrum: simulated,
+  // R and C alone cannot describe a spectrum that turns inductive: the feasibility screen
+  // rejects every candidate and the search evaluates nothing, which is a real answer but not
+  // the one this section is about.
+  pool: ["R", "C", "L"],
+  exhaustive_limit: 3,
+  restarts: 1,
+  refit_chunk: 1,
+});
+check("a second search replaces the first", cancelled.result?.job !== search.result?.job);
+check("stopped mid-refit", drive(cancelled.result.job, { stopAfterRefitBatches: 2 }) === "refit");
+ask({ op: "discover_cancel", job: cancelled.result.job });
+const partial = ask({ op: "discover_report", job: cancelled.result.job }).result;
+check("a cancelled run still reports", partial?.stopped === true);
+check("the screen finished, so its claim stands", partial?.complete_up_to === 3);
+check(
+  "but the ranking says it is partial",
+  Array.isArray(partial?.refit_progress) && partial.completeness.includes("shortlisted"),
+  partial?.completeness,
+);
+check(
+  "and it reports fewer candidates than the whole shortlist",
+  partial.refit_progress[0] < partial.refit_progress[1],
+  JSON.stringify(partial?.refit_progress),
+);
+check(
+  "a job that has been replaced is refused rather than confused with the current one",
+  ask({ op: "discover_screen", job: search.result.job }).ok === false,
 );
 
 console.log("errors");

@@ -443,9 +443,14 @@ def _drive_refit_plan(
     )
     all_tasks: list[RefitTask] = []
     try:
-        tasks = next(plan)
+        batch = next(plan)
         while True:
+            tasks = batch.tasks
             all_tasks.extend(tasks)
+            # What the driver is allowed to show while the rest is still running: the batch
+            # carries the candidates finished so far, so nothing here rebuilds one.
+            assert len(batch.done) <= len(all_tasks) - len(tasks)
+            assert batch.total >= len(all_tasks)
             outcomes = []
             for i, task in enumerate(tasks):
                 if drop_first_of_batch and i == 0:
@@ -460,7 +465,7 @@ def _drive_refit_plan(
                     maxiter=_TINY_MAXITER,
                 )
                 outcomes.append(json.loads(json.dumps(result.to_wire())) if as_wire else result)
-            tasks = plan.send(outcomes)
+            batch = plan.send(outcomes)
     except StopIteration as done:
         return list(done.value), all_tasks
 
@@ -494,6 +499,47 @@ def test_refit_plan_drops_a_task_that_comes_back_none() -> None:
     # forced to None: only the second topology should survive.
     assert len(candidates) == 1
     assert candidates[0].circuit.to_string() == "R1-C1-L1"
+
+
+def test_refit_plan_streams_the_candidates_it_has_already_finished() -> None:
+    """Each batch carries the finished candidates, so a partial front needs no second decoder.
+
+    This is what a cancelled browser run reports from, and what the Pareto front is drawn from
+    while the rest of the shortlist is still being fitted.
+    """
+    spectrum = _refit_spectrum()
+    scored = [(1.0, "R1-C1"), (2.0, "R1-p(R2,C1)"), (3.0, "R1-C1-L1")]
+    plan = refit_plan(
+        scored, n_refine=3, n_data=2 * spectrum.n, restarts=1, seed=0, chunk=1
+    )
+
+    snapshots: list[list[str]] = []
+    issued: list[str] = []
+    try:
+        batch = next(plan)
+        while True:
+            snapshots.append([c.circuit.to_string() for c in batch.done])
+            assert batch.done == sorted(batch.done, key=lambda c: c.aicc)
+            assert {c.circuit.to_string() for c in batch.done} == set(issued)
+            issued.extend(task.text for task in batch.tasks)
+            batch = plan.send(
+                [
+                    fit(
+                        task.text,
+                        spectrum,
+                        restarts=task.restarts,
+                        seed=task.seed,
+                        popsize=_TINY_POPSIZE,
+                        maxiter=_TINY_MAXITER,
+                    )
+                    for task in batch.tasks
+                ]
+            )
+    except StopIteration as done:
+        final = list(done.value)
+
+    assert [len(snapshot) for snapshot in snapshots] == [0, 1, 2]
+    assert {c.circuit.to_string() for c in final} == set(issued)
 
 
 def test_refit_plan_with_an_empty_shortlist_finishes_on_the_first_next() -> None:

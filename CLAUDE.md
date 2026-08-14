@@ -73,13 +73,17 @@ static-site Web UI running the same core via WASM (Pyodide).
    search is allowed to claim — and §3.2 is where a guess was replaced by a measurement: a
    wrong skeleton is invisible in the residuals and in chi², and surfaces only as an asserted
    element the fit had to switch off.
-5. `docs/WEB_UI_PLAN.md` — phase 6, web UI. **Steps 1, 2 and 3 done and measured** (a lossless
+5. `docs/WEB_UI_PLAN.md` — phase 6, web UI. **Steps 1–4 done and measured** (a lossless
    `FitResult` across a worker boundary, so the browser fans out both tiers, 287 s → 123 s; the
-   Data screen, whose Lin-KK verdicts match the CLI's digit for digit; and the Fit screen, whose
-   fits match the CLI's to every reported digit — gate W1); **steps 4–6 are a draft awaiting
-   approval.** Its §2.3 is where a browser contradicted a number taken from Node, and §2.4 is
-   where a measurement retired an assumption the transport had been designed around: a fit is
-   *not* bit-reproducible across interpreters, only its reported digits are.
+   Data screen, whose Lin-KK verdicts match the CLI's digit for digit; the Fit screen, whose
+   fits match the CLI's to every reported digit — gate W1; and the Discover screen, whose search
+   matches the CLI's front row for row — gates W2 and W4); **steps 5–6 are a draft awaiting
+   approval.** Its §2.3 is where a browser contradicted a number taken from Node, §2.4 is
+   where a measurement retired an assumption the transport had been designed around (a fit is
+   *not* bit-reproducible across interpreters, only its reported digits are), and §2.5 is where
+   a measurement showed one clause of a gate to be unachievable — tier-2 progress cannot stream
+   once a second, because one refit takes several — and the gate was rewritten around what was
+   measured rather than quietly reinterpreted.
 
 Update these when decisions change.
 

@@ -6,8 +6,14 @@ import type {
   CatalogueWire,
   CircuitWire,
   EditAction,
+  FitResultWire,
   FitWire,
   PreviewWire,
+  RefitStepWire,
+  RefitTaskWire,
+  ReportWire,
+  ScreenStepWire,
+  SearchPlanWire,
   SpectrumWire,
   ValidationWire,
   VersionsWire,
@@ -46,6 +52,23 @@ export interface EditRequest {
   action: EditAction;
   code?: string;
   position?: "before" | "after";
+}
+
+/**
+ * The knobs the topology search exposes. Every one of them is an argument `discover` has too.
+ *
+ * There is no screening-budget knob, and that is deliberate: reducing it for the browser is the
+ * one economy measured to lose the truth while leaving the report looking healthy
+ * (`docs/WEB_UI_PLAN.md` section 1). `exhaustiveLimit` is the honest lever -- it costs coverage,
+ * which `complete_up_to` then reports.
+ */
+export interface SearchOptions {
+  pool?: string[];
+  skeleton?: string | null;
+  exhaustiveLimit?: number;
+  weighting?: string;
+  seed?: number;
+  restarts?: number;
 }
 
 /** The knobs `fit` exposes. Every one of them is an argument the CLI has too. */
@@ -182,6 +205,101 @@ export class BridgeClient {
   /** Fit a known topology. No initial values are asked for, because none are needed. */
   async fitCircuit(circuit: string, options: FitOptions, context: CircuitContext = {}): Promise<FitWire> {
     return this.call<FitWire>({ op: "fit", circuit, ...options, ...wireContext(context) });
+  }
+
+  // -- The topology search ------------------------------------------------------------------
+  //
+  // Two roles, both served by this same class. The orchestrator answers `discover*`: it holds
+  // the search and hands out batches. A pool worker answers `screenTask`/`refitTask`: one
+  // topology in, one number or one fit out, and no state at all. Which role a client is in is
+  // decided by whoever calls it, which is why a pool member is an ordinary BridgeClient.
+
+  /** One tier-1 screen. `abandonAbove` of null is infinity: nothing to beat yet. */
+  async screenTask(
+    spectrum: SpectrumWire,
+    circuit: string,
+    abandonAbove: number | null,
+    options: SearchOptions = {},
+  ): Promise<number | null> {
+    const result = await this.call<{ cost: number | null }>({
+      op: "screen_task",
+      spectrum,
+      circuit,
+      abandon_above: abandonAbove,
+      weighting: options.weighting,
+      seed: options.seed,
+    });
+    return result.cost;
+  }
+
+  /** One tier-2 refit, whole. Null means the topology could not be fitted, which is an answer. */
+  async refitTask(
+    spectrum: SpectrumWire,
+    task: RefitTaskWire,
+    options: SearchOptions = {},
+  ): Promise<FitResultWire | null> {
+    const [circuit, restarts, seed] = task;
+    const result = await this.call<{ fit: FitResultWire | null }>({
+      op: "refit_task",
+      spectrum,
+      circuit,
+      restarts,
+      seed,
+      weighting: options.weighting,
+    });
+    return result.fit;
+  }
+
+  /** Enumerate the space and open both plans. Nothing is fitted yet. */
+  async discoverStart(spectrum: SpectrumWire, options: SearchOptions): Promise<SearchPlanWire> {
+    return this.call<SearchPlanWire>({
+      op: "discover_start",
+      spectrum,
+      pool: options.pool,
+      skeleton: options.skeleton,
+      exhaustive_limit: options.exhaustiveLimit,
+      weighting: options.weighting,
+      seed: options.seed,
+      restarts: options.restarts,
+    });
+  }
+
+  /** Hand back the last batch's costs, take the next batch. */
+  async discoverScreen(job: string, costs: Array<number | null> | null): Promise<ScreenStepWire> {
+    return this.call<ScreenStepWire>({ op: "discover_screen", job, costs });
+  }
+
+  /** Hand back the last batch's fits, take the next batch and the front so far. */
+  async discoverRefit(
+    job: string,
+    results: Array<FitResultWire | null> | null,
+  ): Promise<RefitStepWire> {
+    return this.call<RefitStepWire>({ op: "discover_refit", job, results });
+  }
+
+  /** The report, whether the search finished or was stopped. */
+  async discoverReport(job: string): Promise<ReportWire> {
+    return this.call<ReportWire>({ op: "discover_report", job });
+  }
+
+  /** Stop handing out work. The report stays readable afterwards, and says it was stopped. */
+  async discoverCancel(job: string): Promise<{ job: string; screened: number; refitted: number }> {
+    return this.call({ op: "discover_cancel", job });
+  }
+
+  /**
+   * Destroy the worker, whatever it is doing.
+   *
+   * The only way to stop a fit that is already running: Pyodide is single-threaded and a
+   * differential evolution inside it does not check for messages. So a cancelled search
+   * terminates its pool and builds a new one, at about 1.5 s and one copy of numpy and scipy
+   * per worker. That is the price of a cancel button that actually cancels.
+   */
+  terminate(): void {
+    this.worker.terminate();
+    const stopped = new Error("the worker was terminated");
+    for (const [, entry] of this.pending) entry.reject(stopped);
+    this.pending.clear();
   }
 
   private async call<T>(request: object): Promise<T> {

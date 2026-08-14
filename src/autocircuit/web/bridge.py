@@ -16,10 +16,13 @@ this module exists rather than the worker running Python of its own:
   here can still be undeliverable to the main thread. `core/wire.py` carries the non-finite
   values as string sentinels so this never has to be relaxed.
 
-* **The bridge holds no state.** A spectrum travels with each request that needs it instead of
-  living in the worker under a handle. That is what lets the pool of step 4 hand the same
-  spectrum to every worker, and it means a worker can be replaced without the user losing the
-  data they loaded.
+* **The bridge holds no state, with one deliberate exception.** A spectrum travels with each
+  request that needs it instead of living in the worker under a handle, which is what lets the
+  screening pool hand the same spectrum to every worker and what makes a worker replaceable
+  without the user losing the data they loaded. A *search* cannot work that way -- it is a pair
+  of generators that hold the enumeration and the shortlist quota between batches, and it runs
+  for minutes -- so it lives in :mod:`autocircuit.web.job`, in the one worker that orchestrates
+  it. The workers doing the fitting stay stateless, which is the property that mattered.
 """
 
 from __future__ import annotations
@@ -41,7 +44,8 @@ from autocircuit.core.circuit import (
     subtree_at,
     subtree_paths,
 )
-from autocircuit.core.elements import POOLS, REGISTRY
+from autocircuit.core.discover import RefitTask, ScreenTask, run_refit, run_screen
+from autocircuit.core.elements import DEFAULT_POOL, POOLS, REGISTRY
 from autocircuit.core.fit import WIRE_VERSION as FIT_WIRE_VERSION
 from autocircuit.core.fit import Weighting, fit, relative_error, search_space
 from autocircuit.core.spectrum import WIRE_VERSION as SPECTRUM_WIRE_VERSION
@@ -49,10 +53,11 @@ from autocircuit.core.spectrum import Spectrum
 from autocircuit.core.validate import DEFAULT_MU_CRITERION, DEFAULT_RESIDUAL_LIMIT, lin_kk
 from autocircuit.core.validate import WIRE_VERSION as VALIDATE_WIRE_VERSION
 from autocircuit.core.wire import encode_array, encode_complex_array, encode_float
+from autocircuit.web import job
 
 #: Version of the request/response protocol below. The worker checks it against its own build
 #: at start-up, so a stale cached bundle fails loudly rather than answering the wrong question.
-BRIDGE_VERSION = 2
+BRIDGE_VERSION = 3
 
 __all__ = ["BRIDGE_VERSION", "handle"]
 
@@ -253,6 +258,134 @@ def _op_fit(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# -- Topology discovery -----------------------------------------------------------------------
+#
+# Two halves that run in different workers. ``screen_task`` and ``refit_task`` are what a pool
+# worker answers: a topology and a spectrum in, a number or a fit out, no state and no opinion
+# about what to run next. The ``discover_*`` operations are what the orchestrator answers, and
+# they are a thin skin over :mod:`autocircuit.web.job` -- every decision they appear to make
+# was made in ``core/discover.py`` (see that module's docstring).
+
+
+def _op_screen_task(payload: dict[str, Any]) -> dict[str, Any]:
+    """One tier-1 screen. ``abandon_above`` of null means infinity: nothing to beat yet."""
+    spectrum = Spectrum.from_wire(payload["spectrum"])
+    cost = run_screen(
+        ScreenTask(str(payload["circuit"]), job.from_wire_cost(payload.get("abandon_above"))),
+        spectrum,
+        weighting=job.cast_weighting(payload.get("weighting", "modulus")),
+        seed=int(payload.get("seed", 0)),
+    )
+    return {"cost": job.to_wire_cost(cost)}
+
+
+def _op_refit_task(payload: dict[str, Any]) -> dict[str, Any]:
+    """One tier-2 refit, whole. A topology that cannot be fitted answers with null.
+
+    The fit crosses back as :meth:`FitResult.to_wire` -- covariance, restart spread and all --
+    because handing back only the fitted values is exactly the shortcut that discards how a
+    non-identifiable model announces itself (docs/DISCOVERY_V2_PLAN.md section 5.1).
+    """
+    spectrum = Spectrum.from_wire(payload["spectrum"])
+    result = run_refit(
+        RefitTask(
+            str(payload["circuit"]),
+            int(payload.get("restarts", 5)),
+            int(payload.get("seed", 0)),
+        ),
+        spectrum,
+        weighting=job.cast_weighting(payload.get("weighting", "modulus")),
+    )
+    return {"fit": None if result is None else result.to_wire()}
+
+
+def _op_discover_start(payload: dict[str, Any]) -> dict[str, Any]:
+    """Enumerate the candidate space and open both plans. Nothing is fitted yet.
+
+    The answer says how much work was just committed to, per element count, which is the
+    number worth seeing before a search that takes minutes rather than after.
+    """
+    started = job.DiscoveryJob(
+        Spectrum.from_wire(payload["spectrum"]),
+        pool=tuple(payload.get("pool") or DEFAULT_POOL),
+        skeleton=payload.get("skeleton"),
+        exhaustive_limit=(
+            None if payload.get("exhaustive_limit") is None
+            else int(payload["exhaustive_limit"])
+        ),
+        exhaustive_min=int(payload.get("exhaustive_min", 1)),
+        max_candidates=int(payload.get("max_candidates", 20_000)),
+        feasibility_filter=bool(payload.get("feasibility_filter", True)),
+        weighting=job.cast_weighting(payload.get("weighting", "modulus")),
+        seed=int(payload.get("seed", 0)),
+        final_restarts=int(payload.get("restarts", 5)),
+        n_refine=(
+            None if payload.get("n_refine") is None else int(payload["n_refine"])
+        ),
+        screen_chunk=int(payload.get("screen_chunk", job.SCREEN_CHUNK)),
+        refit_chunk=int(payload.get("refit_chunk", job.REFIT_CHUNK)),
+    )
+    return job.plan_summary(job.install(started))
+
+
+def _op_discover_screen(payload: dict[str, Any]) -> dict[str, Any]:
+    """Take the last batch's costs, hand out the next batch."""
+    running = job.current(str(payload["job"]))
+    costs = payload.get("costs")
+    if costs is not None:
+        running.submit_screen([job.from_wire_cost(cost) for cost in costs])
+    tasks = running.next_screen()
+    return {
+        "tasks": (
+            None if tasks is None
+            else [[text, job.to_wire_cost(abandon)] for text, abandon in tasks]
+        ),
+        "screened": running.screened,
+        "total": len(running.enumeration.texts),
+        "best": running.best_screened,
+    }
+
+
+def _op_discover_refit(payload: dict[str, Any]) -> dict[str, Any]:
+    """Take the last batch's fits, hand out the next batch, and report the front so far.
+
+    The partial Pareto front comes back with every batch because a search that runs for
+    minutes should show what it already knows. It is built from
+    :attr:`RefitBatch.done` -- the plan's own candidates -- so there is no second place where
+    a fit is decoded or a hopeless topology is dropped.
+    """
+    running = job.current(str(payload["job"]))
+    results = payload.get("results")
+    if results is not None:
+        running.submit_refit(list(results))
+    tasks = running.next_refit()
+    return {
+        "tasks": (
+            None if tasks is None
+            else [[text, restarts, seed] for text, restarts, seed in tasks]
+        ),
+        "refitted": running.refitted,
+        "shortlisted": running.shortlisted,
+        "front": [job.candidate_row(c) for c in running.front],
+    }
+
+
+def _op_discover_report(payload: dict[str, Any]) -> dict[str, Any]:
+    """The report, finished or stopped, with the sentence saying which it is."""
+    return job.report_payload(job.current(str(payload["job"])))
+
+
+def _op_discover_cancel(payload: dict[str, Any]) -> dict[str, Any]:
+    """Stop handing out work. The job stays available so its report can still be read.
+
+    Stopping the fits already dispatched is the caller's half of this: a Web Worker inside a
+    differential evolution stops when it is terminated and not before.
+    """
+    running = job.current(str(payload["job"]))
+    running.cancel()
+    return {"job": running.id, "screened": running.screened, "refitted": running.refitted}
+
+
 # -- Shared helpers ---------------------------------------------------------------------------
 
 
@@ -371,4 +504,11 @@ _OPERATIONS = {
     "edit": _op_edit,
     "preview": _op_preview,
     "fit": _op_fit,
+    "screen_task": _op_screen_task,
+    "refit_task": _op_refit_task,
+    "discover_start": _op_discover_start,
+    "discover_screen": _op_discover_screen,
+    "discover_refit": _op_discover_refit,
+    "discover_report": _op_discover_report,
+    "discover_cancel": _op_discover_cancel,
 }

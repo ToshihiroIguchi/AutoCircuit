@@ -1,11 +1,13 @@
 # Web UI — Phase 6 Plan
 
-Status: steps 1, 2 and 3 built and measured (2026-08-14); steps 4–6 are a draft awaiting
-approval. The one architectural question this plan carried is settled and prototyped — see §2.1 —
-and that prototype changed §2.2 and the work order, which is what prototypes are for. Step 2 did
+Status: steps 1–4 built and measured (2026-08-14); steps 5–6 are a draft awaiting approval.
+The one architectural question this plan carried is settled and prototyped — see §2.1 — and
+that prototype changed §2.2 and the work order, which is what prototypes are for. Step 2 did
 the same to §1: the cold-start figure there came from Node and is wrong for a browser by 3×, see
 §2.3. Step 3 closed gate W1 and, in doing so, replaced an assumption §2.2 had explicitly left
-unmeasured — see §2.4.
+unmeasured — see §2.4. Step 4 closed W2 and W4 and found that **one clause of W2 was not
+achievable and never had been** — see §2.5, and §6, where the gate now carries what was measured
+instead of a softer promise.
 Prerequisite reading: `docs/IMPLEMENTATION_PLAN.md` §9 (the original sketch, now partly
 superseded by measurement), `benchmarks/pyodide/README.md` (every performance number below),
 and `docs/HANDOFF.md` §3.
@@ -272,6 +274,80 @@ assumption nobody has measured". It is measured now, and it would have been **wr
 most circuits, but for exactly the ones with transcendental elements, which is the failure mode
 that would have looked like a bug in an element rather than in a transport.
 
+### 2.5 What step 4 built, and where the gate's own wording was wrong
+
+Step 4 is the Discover screen: a job, with streamed progress, a partial Pareto front, and a
+cancel button that stops the fitting rather than only the display. `BRIDGE_VERSION` is 3 —
+`screen_task`, `refit_task`, `discover_start`, `discover_screen`, `discover_refit`,
+`discover_report` and `discover_cancel` join the nine before them.
+
+**The completeness rule was extracted rather than reimplemented.** `benchmarks/pyodide/`'s
+prototype enumerated for itself — no level boundaries, no candidate ceiling — which is fine for
+a benchmark and would have been a second implementation of the one claim this project exists to
+make. `discover.enumerate_candidates()` now returns an `Enumeration`, which carries the level
+boundaries and derives `complete_up_to` from them in `Enumeration.coverage()`; `_exhaustive` is
+a driver over it, and so is the browser. Three generators now hold every decision the search
+makes — enumeration, screening, refitting — and there are four drivers of them (in-process,
+process pool, benchmark, browser) that hold none.
+
+**The bridge holds state for exactly one thing, and it is not the data.** A search is a pair of
+generators that must survive between batches, so `autocircuit.web.job.DiscoveryJob` lives in the
+orchestrator worker. The workers that do the fitting stay stateless — a spectrum travels with
+every `screen_task` and `refit_task` — which is the property that mattered: a worker can be
+terminated and replaced without the user losing anything.
+
+**A stopped run has to claim less, and the claim it has to drop is not the obvious one.**
+Cancelling during the screen lowers `complete_up_to` through the same arithmetic a `time_limit`
+uses, and that was expected. Cancelling during the *refit* does not touch `complete_up_to` at
+all — the screen really did cover every topology — while leaving a Pareto front built from part
+of the shortlist, which looks exactly like a finished one. `DiscoveryResult.refit_progress` is
+what makes the coverage sentence say "only 8 of the 37 shortlisted topologies have fitted
+parameters: the ranking below is partial". Without it, the honest half of the report would have
+been carrying the dishonest half.
+
+**[measured] Gate W2's results pass exactly; its streaming clause was written before anyone had
+measured a refit.** In Chrome, on the capacitor reference at `exhaustive_limit=4`, four workers:
+741 topologies screened, `complete_up_to` 4, and a Pareto front identical to
+`python -m autocircuit discover --workers 4` row for row — `C1-L1`, `C1-SKINF1`, `C1-L1-SKINF1`,
+`R1-C1-L1-SKINF1` at −306.011, −654.405, −1208.84, −1316.28 — same recommendation, and the
+verbatim report carries the same equivalence class (`C1-L1 == L1-CPE1`) and the same "lowest
+AICc is not supported by the data" caveat. Repeated at `exhaustive_limit=3`: identical again.
+The clock: ~84 s in the browser against 77.6 s for the CLI at four processes.
+
+| what updates | measured interval |
+|--------------|------------------:|
+| tier-1 screen, one batch of 64 fanned across the pool | < 1.5 s throughout |
+| tier-2 refit, per finished fit | up to **8.6 s** |
+| the panel's elapsed clock | 0.25 s |
+
+The gate asks for progress "at least once a second". Tier 1 meets it. **Tier 2 cannot**: the
+smallest thing that can finish there is one full-budget fit, and one of those took 8.6 s. The
+options were to invent motion or to say what is true, so the panel runs a clock of its own —
+the elapsed time ticks, the counts and the front move only when the search actually knows more.
+A progress bar that advances on a timer is a lie about a search that might have hung.
+
+**[measured] Gate W4 passes, and cancelling costs at most one batch of finished refits.**
+Pyodide is single-threaded, so a worker inside a differential evolution never reads a message
+asking it to stop; the pool is terminated and rebuilt instead (~1.5 s per worker, plus its own
+numpy and scipy). Measured in the browser: cancel during the refit, and the report says the
+screen's coverage stands while 0 of 37 topologies were refitted; a search started immediately
+afterwards runs to completion on a fresh pool. The fits that were in flight are discarded rather
+than submitted, because `refit_plan` takes one outcome per task and the only way to submit a
+partial batch is to report the unfinished ones as `null` — which means "this topology could not
+be fitted", a claim about the topology rather than about the interruption.
+
+Two smaller things the browser found that nothing else would have:
+
+- **The version guard fired on the first load, exactly as designed.** `protocol.ts` still said
+  bridge 2 while Python answered 3, and the page refused to run rather than mis-dispatching.
+- **The elapsed clock ran backwards.** A progress report is stamped when the run emits it and
+  rendered some time later, so a fresh report can be behind the clock extrapolated from the
+  previous one. The displayed value is monotone now.
+
+One deviation from §2 worth recording: the pool is **not** created at page load. Four more
+Pyodide workers would be added to a cold start that is already ~13 s, for every visitor who
+never presses Discover; it is built on the first search and kept afterwards.
+
 ## 3. Screens
 
 Following ZView's workflow, which is what the target users know:
@@ -291,11 +367,17 @@ Following ZView's workflow, which is what the target users know:
    shows its state and the canvas locks while it runs. It is still the interactive path — no
    streaming, no cancel — but "no progress UI needed" was optimism from a machine where the same
    fit takes 0.2 s.
-3. **Discover** — the job screen. Pool selection, `exhaustive_limit`, live progress, streamed
+3. **Discover** — ~~the job screen. Pool selection, `exhaustive_limit`, live progress, streamed
    partial Pareto front, cancel. Progress comes from the batch loop itself rather than from
    `on_progress`: the driver knows how many candidates each batch carried, which is what the
-   prototype already prints. The completeness line (`complete_up_to`) is displayed as a
-   first-class result, not a footnote — it is the thing the genetic search could never say.
+   prototype already prints.~~ **Built** (§2.5). Progress comes from finer than the batch loop —
+   the driver fans a batch task by task, so it counts finished tasks without shrinking the
+   batch, which is the one thing a driver could do that the search would notice. The
+   completeness line (`complete_up_to`) is displayed as a first-class result, not a footnote —
+   it is the thing the genetic search could never say — and it is rendered verbatim, together
+   with the sentence a cancelled run adds to it. The browser searches exhaustively only: there
+   is no generator behind the genetic stage, so above the element limit *nothing was looked at*,
+   and the panel says so rather than leaving "full auto" to be assumed.
 4. **Report** — equivalence classes shown as classes, never as a ranked list with a winner;
    JSON / CSV / netlist download; the DRT structure probe beside the search as the CLI already
    prints it.
@@ -321,7 +403,7 @@ Plots: linked Nyquist / Bode(|Z|, θ) / residuals, zoom-synced, log axes. Plotly
 | 1 | ~~Lossless `FitResult` across a worker boundary, so tier 2 fans out too~~ | **done** — §2.2; 287 s → 123 s |
 | 2 | ~~Vite/React scaffold, data import, plots, Lin-KK panel~~ | **done** — §2.3 |
 | 3 | ~~Circuit canvas + live preview + manual fit~~ | **done** — §2.4; gate W1 measured |
-| 4 | Discovery job screen: progress, streaming, cancel, completeness | M |
+| 4 | ~~Discovery job screen: progress, streaming, cancel, completeness~~ | **done** — §2.5; gates W2 and W4 measured |
 | 5 | Report: equivalence classes, exports, DRT panel | M |
 | 6 | Example datasets, loading states, dark/light, deploy to Pages | S |
 
@@ -335,14 +417,20 @@ Plots: linked Nyquist / Bode(|Z|, θ) / residuals, zoom-synced, log axes. Plotly
   interpreters, only its answer is.
 - **W2** — `discover` at `exhaustive_limit=4` on the capacitor reference completes in the
   browser, streams progress at least once a second, and reports the same `complete_up_to` and
-  equivalence classes as the CLI. *(The result half of this already passes headlessly, §2.1;
-  what the UI adds is the streaming and the display.)*
+  equivalence classes as the CLI. **[measured] The results pass exactly** (§2.5), in a real
+  browser and not only headlessly. **The streaming clause passes for tier 1 and cannot pass for
+  tier 2**: one refit is the smallest thing that can finish there and one took 8.6 s, so what
+  updates every second is the elapsed clock, while the counts and the front update per finished
+  fit. The gate was written before anyone had measured how long a browser refit takes; it is
+  recorded here rather than quietly reinterpreted.
 - **W3** — cold load to an interactive first fit under 10 s on a mid-range laptop. **[measured]
   Does not pass: ~13 s to a usable page, before any fit.** §2.3 has the breakdown and says which
   stage is worth attacking. Failing this gate does not block steps 3–5; it is a step 6 item that
   now has a number instead of an assumption.
 - **W4** — cancel actually stops the work (not just the UI), and a cancelled run reports the
-  coverage it reached rather than a wrong number.
+  coverage it reached rather than a wrong number. **[measured] Passes** (§2.5): the pool is
+  terminated, since nothing else interrupts a running fit in a single-threaded interpreter, and
+  the report distinguishes a complete screen from a shortlist that was only partly refitted.
 - **W5** — the site works offline after first load, and from `file://` as well as Pages.
 
 ## 7. Out of scope

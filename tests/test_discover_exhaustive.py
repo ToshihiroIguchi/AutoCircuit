@@ -10,6 +10,7 @@ it drops to a smaller number (never a false one) when a budget cuts the run shor
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -20,15 +21,22 @@ from autocircuit.core.discover import (
     MIN_REFINE_PER_SIZE,
     REFINE_CEILING_FACTOR,
     SCREEN_BUDGET,
+    DiscoveryResult,
+    Enumeration,
     ScreenTask,
     _screen_all,
     _screen_one,
     _screening_aicc,
     _shortlist,
     discover,
+    enumerate_candidates,
     screen_plan,
 )
-from autocircuit.core.enumerate import count_topologies, enumerate_topologies
+from autocircuit.core.enumerate import (
+    DEFAULT_DEGENERACY_BUDGET,
+    count_topologies,
+    enumerate_topologies,
+)
 from autocircuit.core.simulate import log_frequencies, simulate
 
 SEMICIRCLE = {"R1.R": 20.0, "R2.R": 1e3, "C1.C": 1e-8}
@@ -113,6 +121,47 @@ def test_completeness_is_lowered_rather_than_faked_when_the_budget_bites() -> No
     covered = sum(count_topologies(("R", "C"), n) for n in range(1, result.complete_up_to + 1))
     assert result.n_evaluated == covered
     assert str(result.complete_up_to) in result.completeness()
+
+
+def test_a_search_that_evaluated_nothing_says_so_instead_of_claiming_coverage() -> None:
+    """An empty report has two causes, and the coverage line has to tell them apart.
+
+    A pool that cannot build anything structurally consistent with the data evaluates nothing,
+    and "every plausible topology up to N elements was evaluated" is then true of an empty set
+    -- which reads as an assurance. Here R and C alone meet a spectrum that is inductive above
+    its resonance, and the feasibility screen rejects every candidate.
+    """
+    inductive = simulate(
+        "C1-R1-L1",
+        log_frequencies(1e2, 1e9, 10),
+        {"C1.C": 1e-6, "R1.R": 1e-2, "L1.L": 5e-10},
+        noise=0.01,
+        seed=0,
+    )
+    result = discover(
+        inductive, pool=("R", "C"), mode="exhaustive", exhaustive_limit=3, seed=0
+    )
+    assert result.n_evaluated == 0
+    assert result.candidates == []
+    assert "no topology was evaluated at all" in result.completeness()
+    assert "every plausible topology" not in result.completeness()
+
+
+def test_a_second_stage_that_was_stopped_says_the_front_is_partial() -> None:
+    """A complete screen does not make a half-refitted shortlist look like a finished report."""
+    finished = DiscoveryResult(
+        candidates=[], pareto=[], n_evaluated=41, generations=0, elapsed_s=1.0,
+        pool=("R", "C"), mode="exhaustive", complete_up_to=3,
+    )
+    stopped = replace(finished, refit_progress=(8, 37))
+
+    assert "partial" not in finished.completeness()
+    sentence = stopped.completeness()
+    # The screen's claim survives -- it is about the screen -- and the qualification lands on
+    # the same line rather than in a footnote a reader can skim past.
+    assert "up to 3 elements" in sentence
+    assert "8 of the 37 shortlisted" in sentence
+    assert "partial" in sentence
 
 
 def test_evolve_mode_never_claims_completeness() -> None:
@@ -332,3 +381,61 @@ def test_screen_plan_matches_the_in_process_screen() -> None:
         on_progress=None, time_limit=None, started=0.0,
     )
     assert [text for _, text in driven] == [text for _, text in reference]
+
+
+# -- The enumeration, and the coverage claim that comes out of it -----------------------------
+#
+# These stand between discover() and any other driver of the two tiers -- the browser is one --
+# because the completeness claim is derived here and nowhere else.
+
+
+def _enumeration(**kwargs: object) -> Enumeration:
+    defaults: dict[str, object] = dict(
+        pool=("R", "C"),
+        skeleton=None,
+        limit=3,
+        floor=1,
+        max_candidates=20_000,
+        feasibility_filter=False,
+        feasibility_budget=DEFAULT_DEGENERACY_BUDGET,
+    )
+    defaults.update(kwargs)
+    return enumerate_candidates(_semicircle(), **defaults)  # type: ignore[arg-type]
+
+
+def test_enumeration_holds_every_topology_in_size_order() -> None:
+    plan = _enumeration()
+    assert len(plan.texts) == sum(count_topologies(("R", "C"), n) for n in range(1, 4))
+    sizes = [len(Circuit.parse(text).leaves) for text in plan.texts]
+    assert sizes == sorted(sizes)
+    assert [n for n, _ in plan.boundaries] == [1, 2, 3]
+    assert plan.boundaries[-1][1] == len(plan.texts)
+
+
+def test_coverage_counts_whole_levels_only() -> None:
+    """A screen cut short mid-level claims the level below it, never the one it is inside."""
+    plan = _enumeration()
+    assert plan.coverage(len(plan.texts)) == 3
+    for n, end in plan.boundaries:
+        assert plan.coverage(end) == n
+        assert plan.coverage(end - 1) == (None if n == 1 else n - 1)
+    assert plan.coverage(0) is None
+
+
+def test_coverage_is_forfeited_when_the_smallest_sizes_were_skipped() -> None:
+    plan = _enumeration(floor=2)
+    assert plan.coverage(len(plan.texts)) is None
+
+
+def test_enumeration_drops_a_level_it_cannot_afford_whole() -> None:
+    plan = _enumeration(limit=5, max_candidates=5)
+    assert plan.coverage(len(plan.texts)) == plan.boundaries[-1][0] < 5
+
+
+def test_seed_circuits_are_appended_after_the_levels() -> None:
+    """A seed adds a candidate; it does not add to what any level claims to have covered."""
+    plain = _enumeration()
+    seeded = _enumeration(extra=["R1-p(R2,C1)-C2-R3"])
+    assert seeded.texts[: len(plain.texts)] == plain.texts
+    assert len(seeded.texts) == len(plain.texts) + 1
+    assert seeded.boundaries == plain.boundaries

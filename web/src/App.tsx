@@ -9,13 +9,15 @@ import type { LoadStage } from "./worker/protocol";
 import type { LoadedSpectrum, SpectrumWire, VersionsWire } from "./core/types";
 import { StatusBar } from "./components/StatusBar";
 import { DataScreen, type FileError } from "./screens/DataScreen";
-import { FitScreen } from "./screens/FitScreen";
+import { DiscoverScreen } from "./screens/DiscoverScreen";
+import { FitScreen, INITIAL_CIRCUIT } from "./screens/FitScreen";
 
-type Screen = "data" | "fit";
+type Screen = "data" | "fit" | "discover";
 
 const SCREENS: ReadonlyArray<readonly [Screen, string]> = [
   ["data", "Data"],
   ["fit", "Fit"],
+  ["discover", "Discover"],
 ];
 
 function nextId(): string {
@@ -35,6 +37,10 @@ export function App() {
   const [bootError, setBootError] = useState<string | null>(null);
 
   const [screen, setScreen] = useState<Screen>("data");
+  // Owned here, not by FitScreen, because the Discover screen offers this same circuit as a
+  // search skeleton -- a partly drawn circuit is already exactly what `discover(skeleton=...)`
+  // takes (see FitScreen's own header comment).
+  const [circuit, setCircuit] = useState(INITIAL_CIRCUIT);
   const [spectra, setSpectra] = useState<LoadedSpectrum[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [fileErrors, setFileErrors] = useState<FileError[]>([]);
@@ -210,6 +216,9 @@ export function App() {
   }, [ready, handleFiles]);
 
   const selected = useMemo(() => spectra.find((s) => s.id === selectedId) ?? null, [spectra, selectedId]);
+  // "" is a real value while the field is mid-edit (FitScreen shows its own parse error for
+  // it); Discover only wants a skeleton when there is one, so a blank field means null.
+  const skeleton = circuit.trim() === "" ? null : circuit;
 
   return (
     <div className="app">
@@ -247,8 +256,16 @@ export function App() {
           onApplyTrim={applyTrim}
           onResetTrim={resetTrim}
         />
+      ) : screen === "fit" ? (
+        <FitScreen
+          client={client}
+          ready={ready}
+          spectrum={selected}
+          circuit={circuit}
+          onCircuit={setCircuit}
+        />
       ) : (
-        <FitScreen client={client} ready={ready} spectrum={selected} />
+        <DiscoverScreen client={client} ready={ready} spectrum={selected} skeleton={skeleton} />
       )}
     </div>
   );

@@ -241,6 +241,17 @@ class DiscoveryResult:
     rather than left with the caller: nothing outside the skeleton was evaluated, so nothing
     in the report is evidence for or against it. See :meth:`completeness`.
     """
+    refit_progress: tuple[int, int] | None = None
+    """``(refitted, shortlisted)`` when the second tier was stopped part-way, else None.
+
+    A search that screened everything and then had its refit cut short -- which is what
+    cancelling from the browser does, since the screen is the stage that can be resumed and
+    the refit is the stage that takes minutes -- produces a report that looks exactly like a
+    finished one. ``complete_up_to`` is still true, because it describes the *screen*; the
+    ranking and the Pareto front below it are built from part of the shortlist. That
+    difference is invisible in the numbers, which is this project's characteristic failure
+    (docs/HANDOFF.md section 3), so it travels with the claims rather than with the caller.
+    """
 
     @property
     def best(self) -> Candidate | None:
@@ -391,27 +402,65 @@ class DiscoveryResult:
         by a true sentence, which is this mode's central risk
         (docs/PARTIAL_TOPOLOGY_PLAN.md sections 3.1 and 7).
         """
+        if self.n_evaluated == 0:
+            # [measured] Reachable, and it looks healthy without this: the component pool
+            # ("R", "C") against a spectrum that turns inductive above its resonance has *every*
+            # candidate rejected by the structural feasibility screen, so the search evaluates
+            # nothing and the sentence below would still have said "every plausible topology up
+            # to 3 elements was evaluated" -- true of an empty set, and read by a human as an
+            # assurance. An empty report has two very different causes and they are worth
+            # distinguishing: no candidate to fit, or nothing that fitted.
+            return self._with_refit_note(
+                "Coverage: no topology was evaluated at all. Every candidate this pool can "
+                "build was ruled out before any fitting -- structurally inconsistent with the "
+                "data, or outside the element limit -- so this report is empty for want of "
+                "candidates, not because nothing fitted. Widen the pool or raise the limit."
+            )
         if self.complete_up_to is None or self.complete_up_to < 1:
             if self.skeleton is not None:
-                return (
+                return self._with_refit_note(
                     "Coverage: sampled, not exhaustive, and restricted to topologies "
                     f"containing {self.skeleton} -- absence from this report is not evidence "
                     "against a topology."
                 )
-            return (
+            return self._with_refit_note(
                 "Coverage: sampled, not exhaustive -- absence from this report is not "
                 "evidence against a topology."
             )
         if self.skeleton is not None:
-            return (
+            return self._with_refit_note(
                 f"Coverage: every plausible topology with up to {self.complete_up_to} "
                 f"elements that contains {self.skeleton} was evaluated, with the added "
                 "elements taken from this pool. Topologies without that skeleton were never "
                 "considered, so this report is not evidence against them."
             )
-        return (
+        return self._with_refit_note(
             f"Coverage: every plausible topology with up to {self.complete_up_to} elements "
             f"from this pool was evaluated."
+        )
+
+    def _with_refit_note(self, coverage: str) -> str:
+        """The coverage sentence, plus what a half-finished second tier does to it.
+
+        The screen is what the first sentence describes and it can be complete while the
+        numbers underneath it are not: only the refitted candidates have publishable
+        statistics, so a shortlist that was stopped part-way leaves a ranking that may still
+        change. Saying so on the same line is the same rule a skeleton follows -- a reader who
+        skims past the qualification has been misled by a true sentence.
+        """
+        if self.refit_progress is None:
+            return coverage
+        done, total = self.refit_progress
+        if total == 0:
+            return (
+                f"{coverage} The run was stopped before anything reached the second stage, so "
+                "there are no fitted parameters to report -- only the coverage above."
+            )
+        return (
+            f"{coverage} The run was stopped during the second stage, so only {done} of the "
+            f"{total} shortlisted topologies have fitted parameters: the ranking and the "
+            "Pareto front below are partial, and the ones never refitted are absent for that "
+            "reason rather than on the evidence."
         )
 
     def summary(self, spectrum: Spectrum | None = None, limit: int = 10) -> str:
@@ -1125,7 +1174,39 @@ def _evolve(
 # -- Exhaustive search ---------------------------------------------------------------------
 
 
-def _exhaustive(
+class Enumeration(NamedTuple):
+    """The topologies an exhaustive stage will screen, and what coverage they can claim.
+
+    The two halves belong together: ``boundaries`` records how many topologies had been
+    queued once each element count was complete, and that is the only thing from which
+    :meth:`coverage` can be derived. Splitting them would put the completeness rule somewhere
+    that does not know where the levels ended.
+    """
+
+    texts: tuple[str, ...]
+    """Every candidate to screen, in ascending element count."""
+    boundaries: tuple[tuple[int, int], ...]
+    """``(element count, topologies queued once that count was complete)`` per whole level."""
+    floor: int
+    """Smallest element count enumerated. Above 1 there is no completeness claim to make."""
+
+    def coverage(self, n_scored: int) -> int | None:
+        """Largest element count whose topologies were *all* screened, from a screen that got
+        through ``n_scored`` of them.
+
+        Topologies are screened in size order, so a truncated screen -- out of time, or
+        cancelled from a browser -- still covers whole levels, and this is what says how many.
+        Starting above one element forfeits the claim entirely: "all topologies up to N" is
+        only true when the smaller sizes were looked at too. A skeleton is not such a start,
+        even though its levels begin at its own size: no topology smaller than the skeleton
+        can contain it, so the sizes below it are empty rather than skipped.
+        """
+        if self.floor != 1:
+            return None
+        return next((n for n, end in reversed(self.boundaries) if end <= n_scored), None)
+
+
+def enumerate_candidates(
     spectrum: Spectrum,
     *,
     pool: tuple[str, ...],
@@ -1135,17 +1216,17 @@ def _exhaustive(
     max_candidates: int,
     feasibility_filter: bool,
     feasibility_budget: int,
-    weighting: Weighting,
-    seed: int,
-    n_refine: int,
-    final_restarts: int,
-    workers: int,
-    on_progress: Callable[[int, int, str | None], None] | None,
-    time_limit: float | None,
-    started: float,
     extra: Sequence[str] | None = None,
-) -> tuple[list[Candidate], int | None, int]:
-    """Enumerate, screen and refit. Returns (candidates, complete_up_to, topologies seen)."""
+) -> Enumeration:
+    """Everything the exhaustive stage will screen, and nothing about how to screen it.
+
+    Separated from :func:`_exhaustive` for the same reason :func:`screen_plan` and
+    :func:`refit_plan` were: a browser drives the two tiers itself, and if it enumerated for
+    itself there would be a second implementation of which topologies exist, where a level
+    stops being affordable, and what may then be claimed -- the last of which is the whole
+    point of exhaustive discovery. It takes a spectrum only to derive the endpoint behaviour
+    the feasibility filter tests against.
+    """
     behaviour = (
         EndpointBehaviour.from_spectrum(spectrum) if feasibility_filter else None
     )
@@ -1197,6 +1278,43 @@ def _exhaustive(
             seen.add(circuit.canonical_form())
             texts.append(circuit.to_string())
 
+    return Enumeration(tuple(texts), tuple(boundaries), floor)
+
+
+def _exhaustive(
+    spectrum: Spectrum,
+    *,
+    pool: tuple[str, ...],
+    skeleton: Node | None,
+    limit: int,
+    floor: int,
+    max_candidates: int,
+    feasibility_filter: bool,
+    feasibility_budget: int,
+    weighting: Weighting,
+    seed: int,
+    n_refine: int,
+    final_restarts: int,
+    workers: int,
+    on_progress: Callable[[int, int, str | None], None] | None,
+    time_limit: float | None,
+    started: float,
+    extra: Sequence[str] | None = None,
+) -> tuple[list[Candidate], int | None, int]:
+    """Enumerate, screen and refit. Returns (candidates, complete_up_to, topologies seen)."""
+    plan = enumerate_candidates(
+        spectrum,
+        pool=pool,
+        skeleton=skeleton,
+        limit=limit,
+        floor=floor,
+        max_candidates=max_candidates,
+        feasibility_filter=feasibility_filter,
+        feasibility_budget=feasibility_budget,
+        extra=extra,
+    )
+    texts = list(plan.texts)
+
     # One worker pool for the whole run: both tiers use it, so the ~1 s interpreter start-up
     # each process pays on Windows is amortised across everything rather than paid twice.
     with _worker_pool(workers, spectrum, weighting) as executor:
@@ -1213,17 +1331,7 @@ def _exhaustive(
         candidates = _refit_shortlist(
             scored, spectrum, weighting, final_restarts, seed, n_refine, executor
         )
-    # Topologies are screened in size order, so a truncated screen still covers whole levels.
-    # Starting above one element forfeits the claim entirely: "all topologies up to N" is only
-    # true when the smaller sizes were looked at too. A skeleton is not such a start, even
-    # though its levels begin at its own size: no topology smaller than the skeleton can
-    # contain it, so the sizes below it are empty rather than skipped.
-    complete_up_to = (
-        next((n for n, end in reversed(boundaries) if end <= len(scored)), None)
-        if floor == 1
-        else None
-    )
-    return candidates, complete_up_to, len(scored)
+    return candidates, plan.coverage(len(scored)), len(scored)
 
 
 def _screening_aicc(cost: float, n_params: int, n_data: int) -> float:
@@ -1297,6 +1405,36 @@ def _full_fit(
     return result if math.isfinite(result.statistics.aicc) else None
 
 
+def run_screen(
+    task: ScreenTask,
+    spectrum: Spectrum,
+    *,
+    weighting: Weighting,
+    seed: int,
+    budget: ScreenBudget = SCREEN_BUDGET,
+) -> float:
+    """One tier-1 screen, for a worker that was handed the task from somewhere else.
+
+    The desktop's pool reaches :func:`_screen_one` through :func:`_screen_all`; a browser's
+    pool has no such path, because the plan is driven from another worker entirely. This is
+    that entry point, and it exists so the browser runs the same screening budget, the same
+    early-abandon threshold and the same "a hopeless topology scores infinity rather than
+    raising" rule as the command line, instead of a second version assembled in the bridge.
+    """
+    return _screen_one(task, spectrum, weighting=weighting, seed=seed, budget=budget)
+
+
+def run_refit(
+    task: RefitTask, spectrum: Spectrum, *, weighting: Weighting
+) -> FitResult | None:
+    """One tier-2 refit, for the same kind of worker as :func:`run_screen`.
+
+    Returns None when the topology cannot be fitted at all, which :func:`refit_plan` treats as
+    an answer rather than an error.
+    """
+    return _full_fit(task.text, spectrum, weighting, task.restarts, task.seed)
+
+
 def _refit_worker(task: tuple[str, int, int]) -> dict[str, Any] | None:
     """Tier-2 refit in a worker process. The whole FitResult comes back, statistics included.
 
@@ -1328,6 +1466,22 @@ class RefitTask(NamedTuple):
 type RefitOutcome = FitResult | dict[str, Any] | None
 
 
+class RefitBatch(NamedTuple):
+    """One batch of tier-2 work, together with what the batches before it produced.
+
+    ``done`` is here so that a driver can show a partial Pareto front while the rest is still
+    running without rebuilding a :class:`Candidate` for itself -- which would mean a second
+    copy of the decode and of the rule that a topology which cannot be fitted is dropped
+    rather than reported. It is also what a cancelled run has to report from.
+    """
+
+    tasks: list[RefitTask]
+    done: list[Candidate]
+    """Candidates finished so far, best AICc first. Empty in the first batch."""
+    total: int
+    """Shortlist size, so a driver can say how far through the tier it is."""
+
+
 def refit_plan(
     scored: Sequence[tuple[float, str]],
     *,
@@ -1336,7 +1490,7 @@ def refit_plan(
     restarts: int,
     seed: int,
     chunk: int | None = None,
-) -> Generator[list[RefitTask], Sequence[RefitOutcome], list[Candidate]]:
+) -> Generator[RefitBatch, Sequence[RefitOutcome], list[Candidate]]:
     """Tier 2 with the *running* of it left to the caller, mirroring :func:`screen_plan`.
 
     Yields batches of :class:`RefitTask`, expects one outcome per task back through ``send``,
@@ -1358,12 +1512,21 @@ def refit_plan(
     size = max(len(texts) if chunk is None else chunk, 1)
     for start in range(0, len(texts), size):
         window = texts[start : start + size]
-        outcomes = yield [RefitTask(text, restarts, seed) for text in window]
+        outcomes = yield RefitBatch(
+            [RefitTask(text, restarts, seed) for text in window],
+            _ranked(results),
+            len(texts),
+        )
         if len(outcomes) != len(window):
             raise ValueError(
                 f"refit_plan was sent {len(outcomes)} outcomes for {len(window)} tasks"
             )
         results.extend(r for r in map(_as_fit_result, outcomes) if r is not None)
+    return _ranked(results)
+
+
+def _ranked(results: Sequence[FitResult]) -> list[Candidate]:
+    """Fitted topologies as candidates, best AICc first."""
     out = [Candidate(r.circuit, r, 0) for r in results]
     out.sort(key=lambda c: c.aicc)
     return out
@@ -1393,9 +1556,10 @@ def _refit_shortlist(
         scored, n_refine=n_refine, n_data=2 * spectrum.n, restarts=restarts, seed=seed
     )
     try:
-        tasks = next(plan)
+        batch = next(plan)
         while True:
             outcomes: list[RefitOutcome]
+            tasks = batch.tasks
             if executor is not None and len(tasks) > 1:
                 outcomes = list(
                     executor.map(
@@ -1406,7 +1570,7 @@ def _refit_shortlist(
                 outcomes = [
                     _full_fit(t.text, spectrum, weighting, t.restarts, t.seed) for t in tasks
                 ]
-            tasks = plan.send(outcomes)
+            batch = plan.send(outcomes)
     except StopIteration as done:
         return list(done.value)
 

@@ -29,12 +29,15 @@ import { ParameterTable } from "../components/ParameterTable";
 import { PlotsPanel, type ModelOverlay } from "../components/PlotsPanel";
 
 /** The simplest circuit there is. Anything else would be a guess about the device. */
-const INITIAL_CIRCUIT = "R1";
+export const INITIAL_CIRCUIT = "R1";
 
 export interface FitScreenProps {
   client: BridgeClient;
   ready: boolean;
   spectrum: LoadedSpectrum | null;
+  /** Lifted into `App` so the Discover screen can offer this circuit as a search skeleton. */
+  circuit: string;
+  onCircuit: (value: string) => void;
 }
 
 function errorMessage(error: unknown): string {
@@ -59,11 +62,10 @@ function labelAtPath(node: CircuitNodeWire, path: number[]): string | null {
   return child === undefined ? null : labelAtPath(child, rest);
 }
 
-export function FitScreen({ client, ready, spectrum }: FitScreenProps) {
+export function FitScreen({ client, ready, spectrum, circuit: circuitText, onCircuit: setCircuitText }: FitScreenProps) {
   const wire = spectrum?.current ?? null;
 
   const [catalogue, setCatalogue] = useState<CatalogueWire | null>(null);
-  const [circuitText, setCircuitText] = useState(INITIAL_CIRCUIT);
   const [describe, setDescribe] = useState<CircuitWire | null>(null);
   const [circuitError, setCircuitError] = useState<string | null>(null);
   const [values, setValues] = useState<Record<string, number>>({});

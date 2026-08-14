@@ -39,13 +39,27 @@ machine off the network; it is also why `public/` is ~29 MB.
   └─────────────────────────┘     └────────────────────────────────┘
 ```
 
-Two screens so far, under `src/screens/`. `App.tsx` owns the Pyodide client and the loaded
-spectra; a screen is a view over them.
+Three screens so far, under `src/screens/`. `App.tsx` owns the Pyodide client, the loaded
+spectra and the circuit drawn on the Fit screen; a screen is a view over them.
 
 | screen | what it does |
 |--------|--------------|
 | Data | drop a file, see it plotted, trim its frequency window, read the Lin-KK verdict |
 | Fit | draw a circuit, watch it against the data, fit it — with no initial values |
+| Discover | search the topology space against the data: pool, element limit, optional skeleton, streamed progress, cancel, Pareto front |
+
+The Discover screen is a job, not a request — a real search takes minutes even in the browser
+(`docs/WEB_UI_PLAN.md` §1) — and its worker arrangement has two roles rather than one. One
+`BridgeClient` is the *orchestrator*: it holds `autocircuit.web.job.DiscoveryJob` and answers
+`discover_start`/`discover_screen`/`discover_refit`/`discover_report`. A `SearchPool`
+(`src/worker/pool.ts`) of up to four more `BridgeClient`s are *workers*: each is handed one
+topology at a time and answers `screen_task` or `refit_task` with a cost or a whole fit, with no
+memory of the search between calls. `src/core/search.ts`'s `SearchRun` is what drives both roles
+— it fans each batch the orchestrator yields across the pool and feeds the results back — and
+every decision it appears to make (which topologies exist, which earn a refit, what the run may
+claim afterwards) was actually made in Python. The pool is not built until the first Discover
+press, because four more Pyodide workers at page load — each ~1.5 s and its own copy of numpy
+and scipy — would tax every visitor who never searches.
 
 Two rules hold this together, both from `docs/WEB_UI_PLAN.md` §4:
 
@@ -67,9 +81,9 @@ behave exactly as they do on the command line.
 
 ## State
 
-Steps 1–3 of `docs/WEB_UI_PLAN.md` §5: data import, plots and the Lin-KK panel; then the
-schematic canvas, the live preview and the manual fit. The discovery job screen and the report
-are steps 4 and 5.
+Steps 1–4 of `docs/WEB_UI_PLAN.md` §5: data import, plots and the Lin-KK panel; the schematic
+canvas, the live preview and the manual fit; and the discovery job screen. The equivalence-class
+report and the export/DRT panel are step 5.
 
 `npm run smoke` covers the Python path end to end without a browser. Two things it cannot cover,
 which cost a real browser to find: how a panel is *sized* (see `docs/HANDOFF.md` §9 on Plotly

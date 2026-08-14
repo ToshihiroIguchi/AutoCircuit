@@ -2,18 +2,20 @@
 
 Written at the end of the session that built the backend, updated after discovery v2 steps
 1–5, again after the skeleton-constrained mode (all of `docs/PARTIAL_TOPOLOGY_PLAN.md`), and
-again after each step of `docs/WEB_UI_PLAN.md` (steps 1–3 so far). Read this first, then `CLAUDE.md`, then the plan
-for whichever part you are touching.
+again after each step of `docs/WEB_UI_PLAN.md` (steps 1–4 so far). Read this first, then
+`CLAUDE.md`, then the plan for whichever part you are touching.
 
 ## 1. Where things stand
 
-The command-line backend is **complete and verified**: 640 tests pass
+The command-line backend is **complete and verified**: 669 tests pass
 (`python -m pytest tests -q`, 6–7 min — and that is one full run, not a union of subsets).
-Phases 0–5 of `docs/IMPLEMENTATION_PLAN.md` are done. Phase 6 (web UI) has its **steps 1, 2 and
-3 built and measured**: a lossless `FitResult` across a worker boundary, so the browser fans out
-both tiers of the search (§8); the Data screen — import, plots and the Lin-KK verdict — running
-the same core through Pyodide (§9); and the Fit screen — schematic canvas, live preview and a
-manual fit that needs no initial values (§10), which closed gate W1.
+Phases 0–5 of `docs/IMPLEMENTATION_PLAN.md` are done. Phase 6 (web UI) has its **steps 1–4 built
+and measured**: a lossless `FitResult` across a worker boundary, so the browser fans out both
+tiers of the search (§8); the Data screen — import, plots and the Lin-KK verdict — running the
+same core through Pyodide (§9); the Fit screen — schematic canvas, live preview and a manual fit
+that needs no initial values (§10), which closed gate W1; and the Discover screen — the topology
+search as a job, with streamed progress, a partial Pareto front and a cancel that terminates the
+workers (§11), which closed gates W2 and W4.
 
 **Discovery v2 is fully implemented** (see §2) and all five gates pass: G1 30/30 across the
 three reference spectra, G2 exactly reproducing the measured counts table, G3 with the truth
@@ -560,3 +562,62 @@ Two smaller browser findings, of the kind only a browser produces:
 - **JavaScript switches to exponential notation only below 1e-7**, which prints a 3.3 µF
   capacitance as `0.0000033`. The parameter table formats below 1e-3 and above 1e6 as
   exponential instead, so a value can be checked against a datasheet at a glance.
+
+## 11. Web UI step 4 — the Discover screen
+
+`docs/WEB_UI_PLAN.md` §2.5 is the record. `BRIDGE_VERSION` is now **3**, and the browser runs
+the topology search itself: one orchestrator worker holding the plan, a pool of up to four more
+answering `screen_task` and `refit_task`.
+
+- **`discover.enumerate_candidates()` and `Enumeration.coverage()` are new**, lifted out of
+  `_exhaustive`, which is now a driver over them. This is the same move `screen_plan` and
+  `refit_plan` were: the completeness claim is derived in one place, and the browser drives it
+  rather than re-deriving it. `benchmarks/pyodide/orchestrate.py` still enumerates for itself,
+  which is correct for a benchmark and would not be for the app.
+- **`refit_plan` yields `RefitBatch(tasks, done, total)`.** `done` is what a partial Pareto
+  front is drawn from; building it in the driver would have meant a second decode of a
+  `FitResult` and a second copy of the rule that a topology which cannot be fitted is dropped.
+- **`DiscoveryResult.refit_progress` is the honesty of a cancelled run.** Cancelling during the
+  screen lowers `complete_up_to`, which is the obvious half. Cancelling during the *refit* does
+  not touch it — the screen really did cover everything — and leaves a front built from part of
+  the shortlist that looks exactly like a finished one. The coverage sentence now says "only 8
+  of the 37 shortlisted topologies have fitted parameters".
+- **A search whose pool evaluates nothing says so.** [measured] With pool `("R", "C")` against a
+  spectrum that turns inductive, the feasibility screen rejects every candidate, `n_evaluated`
+  is 0 — and the old sentence still read "every plausible topology with up to 3 elements was
+  evaluated", which is true of an empty set and reads as an assurance. `completeness()` now
+  distinguishes "no candidate to fit" from "nothing fitted". Found by the smoke script, not by
+  the tests.
+- **`autocircuit.web.job` holds the only state the bridge has.** A search is a pair of
+  generators that must survive between batches; the workers doing the fitting stay stateless,
+  which is what lets one be terminated and replaced without losing anything.
+- **`run_screen`/`run_refit` are the pool worker's entry points**, public so the browser runs
+  the CLI's screening budget, abandon threshold and "a hopeless topology scores infinity rather
+  than raising" rule instead of a second version assembled in the bridge.
+
+[measured] **Gate W2's results pass exactly and its streaming clause does not.** In Chrome, at
+`exhaustive_limit=4` on the capacitor reference with four workers: 741 topologies,
+`complete_up_to` 4, a Pareto front matching `discover --workers 4` row for row and AICc for AICc
+(−306.011, −654.405, −1208.84, −1316.28), the same recommendation, and a verbatim report
+carrying the same equivalence class `C1-L1 == L1-CPE1`. ~84 s against the CLI's 77.6 s. But the
+refit updates only when a fit finishes, and **the largest gap between two of them was 8.6 s** —
+tier 1 streams under 1.5 s throughout, tier 2 cannot stream at all in the sense the gate meant.
+The panel therefore runs its own 0.25 s clock: the elapsed time ticks, the counts and the front
+move only when the search knows more. Inventing motion in a progress bar would hide a hung
+search.
+
+[measured] **Gate W4 passes.** Cancel terminates the pool — Pyodide is single-threaded, so a
+worker inside a differential evolution never reads a stop message — and rebuilds it for the next
+run (~1.5 s per worker). The in-flight batch is discarded rather than part-submitted: a missing
+outcome would have to travel as `null`, which means "could not be fitted" and is a claim about
+the topology rather than about the interruption.
+
+Three things the browser found that nothing else did:
+
+- **The version guard fired on the first load.** `web/src/worker/protocol.ts` still said bridge
+  2 while Python answered 3; the page refused to run. Bump both when adding an operation.
+- **The elapsed clock ran backwards** by about a second, because a progress report is stamped
+  when the run emits it and rendered later. The displayed value is monotone now.
+- **The pool is not built at page load**, contrary to `docs/WEB_UI_PLAN.md` §2: four more
+  Pyodide workers on top of a ~13 s cold start, for every visitor who never searches. It comes
+  up on the first Discover press and is kept afterwards.

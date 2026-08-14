@@ -125,14 +125,14 @@ def next_refit() -> str:
     plan = _state["refit_plan"]
     try:
         if _state["refit_pending"] is None:
-            tasks = next(plan)
+            batch = next(plan)
         else:
-            tasks = plan.send(_state["refit_pending"])
+            batch = plan.send(_state["refit_pending"])
     except StopIteration as done:
         _state["candidates"] = list(done.value)
         return json.dumps(None)
     _state["refit_pending"] = None
-    return json.dumps([[task.text, task.restarts, task.seed] for task in tasks])
+    return json.dumps([[task.text, task.restarts, task.seed] for task in batch.tasks])
 
 
 def submit_refit(results_json: str) -> None:
