@@ -73,9 +73,10 @@ static-site Web UI running the same core via WASM (Pyodide).
    search is allowed to claim — and §3.2 is where a guess was replaced by a measurement: a
    wrong skeleton is invisible in the residuals and in chi², and surfaces only as an asserted
    element the fit had to switch off.
-5. `docs/WEB_UI_PLAN.md` — phase 6, web UI. **Step 1 done and measured** (a lossless
-   `FitResult` across a worker boundary: the browser now fans out both tiers, 287 s → 123 s);
-   **steps 2–6, the UI itself, are a draft awaiting approval.**
+5. `docs/WEB_UI_PLAN.md` — phase 6, web UI. **Steps 1 and 2 done and measured** (a lossless
+   `FitResult` across a worker boundary, so the browser fans out both tiers, 287 s → 123 s; and
+   the Data screen, whose Lin-KK verdicts match the CLI's digit for digit); **steps 3–6 are a
+   draft awaiting approval.** Its §2.3 is where a browser contradicted a number taken from Node.
 
 Update these when decisions change.
 

@@ -2,11 +2,48 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field, replace
 from typing import Any
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
+
+from autocircuit.core.wire import (
+    decode_array,
+    decode_complex_array,
+    encode_array,
+    encode_complex_array,
+)
+
+#: Version of :meth:`Spectrum.to_wire`, for the same reason :data:`autocircuit.core.fit.
+#: WIRE_VERSION` exists: a worker and its orchestrator can be different builds, and a silently
+#: mismatched payload would surface as a wrong plot rather than as an error.
+WIRE_VERSION = 1
+
+
+def _json_safe(value: Any) -> Any:
+    """Coerce one metadata value into something ``json.dumps(allow_nan=False)`` accepts.
+
+    Metadata is free-form -- readers put provenance in it and anyone may add more -- so unlike
+    the numeric payloads it cannot be encoded by knowing its type in advance. Anything that is
+    not already a JSON scalar or a list of them becomes its ``repr``: metadata is shown to the
+    user, never computed with, so a lossy rendering is the right failure mode and a payload
+    that cannot be delivered at all is not.
+    """
+    if value is None or isinstance(value, str | bool):
+        return value
+    if isinstance(value, np.generic):
+        return _json_safe(value.item())
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else repr(value)
+    if isinstance(value, list | tuple):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    return repr(value)
 
 
 @dataclass(frozen=True)
@@ -85,6 +122,33 @@ class Spectrum:
         if not mask.any():
             raise ValueError("frequency window selects no points")
         return replace(self, f=self.f[mask], z=self.z[mask])
+
+    def to_wire(self) -> dict[str, Any]:
+        """JSON-safe form of this spectrum, for the boundary between browser threads.
+
+        The measured data has to *travel* rather than be recomputed on the far side. The
+        step-1 benchmark got away with rebuilding it -- each worker re-ran ``simulate()`` from
+        the same parameters and seed -- because its data was synthetic; a spectrum the user
+        loaded from a file has no such recipe.
+        """
+        return {
+            "version": WIRE_VERSION,
+            "f": encode_array(self.f),
+            "z": encode_complex_array(self.z),
+            "metadata": {str(key): _json_safe(value) for key, value in self.metadata.items()},
+        }
+
+    @classmethod
+    def from_wire(cls, payload: dict[str, Any]) -> Spectrum:
+        """Inverse of :meth:`to_wire`."""
+        version = int(payload.get("version", 0))
+        if version != WIRE_VERSION:
+            raise ValueError(f"Spectrum wire format version {version} is not {WIRE_VERSION}")
+        return cls(
+            f=decode_array(payload["f"]),
+            z=decode_complex_array(payload["z"]),
+            metadata=dict(payload.get("metadata", {})),
+        )
 
     def __len__(self) -> int:
         return self.n

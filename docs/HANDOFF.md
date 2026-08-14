@@ -7,10 +7,12 @@ for whichever part you are touching.
 
 ## 1. Where things stand
 
-The command-line backend is **complete and verified**: 583 tests pass
-(`python -m pytest tests -q`, ~5 min). Phases 0–5 of `docs/IMPLEMENTATION_PLAN.md` are done.
-Phase 6 (web UI) has its **step 1 built and measured** — a lossless `FitResult` across a worker
-boundary, so the browser fans out both tiers of the search (§8) — and no UI yet.
+The command-line backend is **complete and verified**: 605 tests pass
+(`python -m pytest tests -q`, 6 min — and that is one full run, not a union of subsets).
+Phases 0–5 of `docs/IMPLEMENTATION_PLAN.md` are done. Phase 6 (web UI) has its **steps 1 and 2
+built and measured**: a lossless `FitResult` across a worker boundary, so the browser fans out
+both tiers of the search (§8), and the Data screen — import, plots and the Lin-KK verdict —
+running the same core through Pyodide (§9).
 
 **Discovery v2 is fully implemented** (see §2) and all five gates pass: G1 30/30 across the
 three reference spectra, G2 exactly reproducing the measured counts table, G3 with the truth
@@ -56,6 +58,7 @@ Module map (`src/autocircuit/`):
 | `core/drt.py` | regularised distribution of relaxation times; structure probing only |
 | `core/discover.py` | exhaustive and genetic topology search, Pareto front, equivalence classes |
 | `core/wire.py` | lossless JSON encoding of the arrays that cross a worker boundary |
+| `web/bridge.py` | the browser's only entry point: JSON in, JSON out, no decisions |
 | `core/spice.py` | netlist export + NNLS Foster-form ladder synthesis |
 | `io/` | generic CSV, ZView/ZPlot, Touchstone, Keysight readers |
 | `cli/main.py` | argparse CLI |
@@ -227,7 +230,15 @@ recorded in the code as a comment and in `docs/IMPLEMENTATION_PLAN.md` marked **
 - **numpy and scipy are the only permitted runtime dependencies** — this is what keeps the
   Pyodide target viable. The CLI uses stdlib `argparse` for this reason.
 - **PowerShell mangles quotes** in `python -c @'...'@`; heredocs lose `"` characters. Write a
-  script into the scratchpad directory and run the file instead.
+  script into the scratchpad directory and run the file instead. The backtick is PowerShell's
+  escape character, so a JavaScript template literal passed to `node -e` is eaten the same way.
+- **`*>` redirects as UTF-16LE and `1>` as UTF-8 *with a BOM*.** Reading the latter back in
+  Python needs `encoding="utf-8-sig"`, or it fails as a `cp932` decode error, which points at
+  the wrong thing entirely.
+- **Never rewrite a source file with PowerShell.** `Get-Content -Raw` decodes as `cp932`
+  regardless of what the file is, so a round trip through `Get-Content | ... | Set-Content`
+  silently turns `Ω` into `ﾎｩ` and `…` into `窶ｦ`. It looks like a successful edit. Use the
+  editing tools, or Python with an explicit encoding.
 - **`python -` hangs** (stdin is the null device). Never pipe a script into Python.
 - **`native.exe | Select-Object -First N` returns exit code 255** by closing the pipe early.
   That is not a program failure — re-run without the truncation before believing an error.
@@ -237,8 +248,15 @@ recorded in the code as a comment and in `docs/IMPLEMENTATION_PLAN.md` marked **
   `python -m pytest tests -q -k "not test_fit and not test_discover"` (~4 s) — note that the
   `not test_discover` filter also drops `test_discover_exhaustive.py`, which is where the
   exhaustive mode is covered.
-- **Node 24 is available**, which is what `benchmarks/pyodide/` uses to run the package under
-  WASM without a browser. Its `npm install` and the first `loadPackage` both need network.
+- **Node 24 is available**, which is what `benchmarks/pyodide/` and `web/` use to run the
+  package under WASM without a browser. `npm install` needs network; `loadPackage` does not any
+  more, because `web/scripts/build-assets.mjs` vendors the numpy and scipy wheels beside the
+  Pyodide runtime in `web/public/pyodide/` and both the site and `npm run smoke` load from
+  there. The npm `pyodide` package does not ship those wheels, but running Pyodide under Node
+  once leaves them cached in its own directory, which is where the script looks first.
+- **`unpackArchive` rejects a Node `Buffer`.** `readFileSync` returns one, and the error is
+  `RuntimeError: Unknown typed array type 'Buffer'` from inside the wasm — wrap it:
+  `new Uint8Array(readFileSync(...))`.
 - **`Compress-Archive` produces zips Python cannot unpack as a package.** It writes backslash
   path separators, so `zipfile` extracts files literally named `autocircuit\__init__.py` and
   the failure only shows up as `ModuleNotFoundError`. Build such archives with Python
@@ -289,13 +307,14 @@ every decision about what the report may claim stayed on the expensive model.
    skipped. `exhaustive_min` stays available to anyone who wants that trade explicitly.
 1. ~~**Skeleton mode: gate P2, and §3.3.**~~ Both done; see §7.
 2. **Web UI (phase 6)** — the biggest remaining piece, and now the only one.
-   `docs/WEB_UI_PLAN.md` steps 2–6 are a **draft awaiting approval**; its step 1 is built (§8).
-   Nothing in the plan's architecture is open any more: orchestration stays in Python behind
-   `discover.screen_plan()` and `discover.refit_plan()`, both tiers fan out across Pyodide
-   workers, and the browser reproduces the CLI's discovery output to an AICc difference of 0.0
-   in 123 s where it took 287 s. What is left is the UI itself — Vite/React scaffold, data
-   import and plots, the circuit canvas (which is also the skeleton editor, so mode 2 rides
-   along for the cost of one button), the discovery job screen, and the report.
+   `docs/WEB_UI_PLAN.md` steps 3–6 are a **draft awaiting approval**; steps 1 and 2 are built
+   (§8, §9). Nothing in the plan's architecture is open any more: orchestration stays in Python
+   behind `discover.screen_plan()` and `discover.refit_plan()`, both tiers fan out across
+   Pyodide workers, and the browser reproduces the CLI's discovery output to an AICc difference
+   of 0.0 in 123 s where it took 287 s. What is left is the circuit canvas (which is also the
+   skeleton editor, so mode 2 rides along for the cost of one button), the discovery job
+   screen, the report, and — with a measured number rather than an assumption behind it now —
+   the cold start, which is ~13 s and fails gate W3.
 3. ngspice round-trip in CI. The test suite already proves the netlist is *electrically*
    right via its own nodal-analysis engine (`tests/test_spice.py`); a real simulator would
    also prove it is *dialect* right.
@@ -428,7 +447,54 @@ capacitor reference matches the pre-fan-out run candidate for candidate, front f
 recommendation included. The clock is what moved: **287 s → 123 s**, tier 2 from 232 s to 86 s,
 against CPython's 90 s at four processes.
 
-One thing this leaves for step 2: the *spectrum* still reaches each worker by being recomputed
-there (`simulate(...)` in the worker's own bootstrap), which is fine for a benchmark whose data
-is synthetic and wrong for a UI where the user loads a file. `encode_complex_array` is what that
-wants; there is no new format to design, only a message to add.
+~~One thing this leaves for step 2: the *spectrum* still reaches each worker by being recomputed
+there.~~ Closed by step 2: `Spectrum.to_wire()/from_wire()` exist and the browser now carries the
+spectrum. `benchmarks/pyodide/screen_task_worker.mjs` still rebuilds its own with `simulate()`,
+which is correct for a benchmark whose data is synthetic and known to both sides.
+
+## 9. Web UI step 2 — the Data screen
+
+`docs/WEB_UI_PLAN.md` §2.3 is the record; this is what exists and what to know before touching
+it. `web/` is a Vite + React + TypeScript app; `web/README.md` is its map.
+
+```powershell
+cd web; npm install; npm run dev      # http://localhost:5173
+npm run smoke                          # the Python path under Pyodide, headless, ~6 s
+npm run build                          # -> web/dist/
+```
+
+- **`src/autocircuit/web/bridge.py` is the entire Python surface the browser sees.** One
+  `handle(request) -> str`, four operations (`version`, `read`, `trim`, `validate`), every
+  response `json.dumps(..., allow_nan=False)`, and every exception turned into a response
+  because a Pyodide worker that dies costs 1.5 s plus its own numpy and scipy to replace.
+- **A dropped file is written into the Pyodide filesystem and read from there** by
+  `autocircuit.io.read_many`, so sniffing, extension hints and multi-sweep readers behave
+  exactly as they do for the CLI. Only the path crosses the wire. `BridgeClient.readFile` puts
+  the user's own file name back into any error message, since the reader's diagnostic otherwise
+  names the scratch path the worker invented.
+- **`web/src/core/wire.ts` decodes and cannot encode, on purpose.** A spectrum is held in the
+  form Python produced it and handed back unaltered; an encoder would be a second implementation
+  of the float format for the browser to disagree with the CLI through.
+- **`web/public/` is generated and gitignored** — `web/scripts/build-assets.mjs` builds the
+  source archive with the *same* `benchmarks/pyodide/make_zip.py` the benchmark uses and vendors
+  the Pyodide runtime plus the numpy and scipy wheels (~29 MB) so nothing is fetched from a CDN.
+  `npm run dev` and `npm run build` both run it first.
+- **Do not size a Plotly panel with `layout.height`.** With `responsive: true` a plot measures
+  the element it was given, and a CSS grid item with no height of its own measures zero at the
+  moment it is first drawn — two of the four panels came out permanently 10 px tall and the
+  other two did not, which looks like a Plotly bug and is not. `.plots-panel__plot` sets the
+  height in CSS and the layout has none.
+
+[measured] The browser's verdicts match the CLI's: three files (generic CSV, ZView, and a
+deliberately drifted sweep) read with the format sniffed correctly and their Lin-KK element
+counts, residuals and runs *z* agree with `python -m autocircuit validate` digit for digit,
+including the failing one. Linked zoom across the three frequency-axis panels was checked in a
+real browser, as was recovery from an unreadable file — the other files in the same drop still
+load.
+
+[measured] **Cold start is ~13 s, and it is not the download**: 14.2 s cold against 12.9 s with
+a warm cache, split 6.6 s Pyodide boot / 0.8 s numpy+scipy / 5.8 s unpack-and-import. Node does
+the same work in ~4 s. Gate W3 asks for under 10 s *to a first fit* and therefore fails today;
+the import is the item worth attacking, and a wheel instead of a source archive is the first
+thing to measure. Single-run figures from an automated Chrome — the ratio is the result, not the
+seconds.

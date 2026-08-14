@@ -8,6 +8,7 @@ import. That failure is silent until the import.
 
 from __future__ import annotations
 
+import argparse
 import pathlib
 import zipfile
 
@@ -16,15 +17,24 @@ SRC = ROOT / "src"
 OUT = pathlib.Path(__file__).with_name("src.zip")
 
 
-def main() -> None:
-    with zipfile.ZipFile(OUT, "w", zipfile.ZIP_DEFLATED) as archive:
+def build(out: pathlib.Path) -> None:
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as archive:
         for path in sorted(SRC.rglob("*.py")):
             if "__pycache__" in path.parts:
                 continue
             archive.write(path, path.relative_to(SRC).as_posix())
-    with zipfile.ZipFile(OUT) as archive:
+    with zipfile.ZipFile(out) as archive:
         count = len(archive.namelist())
-    print(f"{OUT} -> {count} files, {OUT.stat().st_size:,} bytes")
+    print(f"{out} -> {count} files, {out.stat().st_size:,} bytes")
+
+
+def main() -> None:
+    # The web build calls this too, with its own output path: one archive builder rather than a
+    # second copy under web/ that could drift from this one and ship a different core.
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("-o", "--output", type=pathlib.Path, default=OUT)
+    build(parser.parse_args().output)
 
 
 if __name__ == "__main__":

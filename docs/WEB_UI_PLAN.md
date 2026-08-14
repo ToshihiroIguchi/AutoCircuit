@@ -1,9 +1,9 @@
 # Web UI — Phase 6 Plan
 
-Status: draft for approval (2026-08-09; step 1 built 2026-08-14). No UI exists yet. The one
-architectural question it carried is settled and prototyped — see §2.1 — and that prototype
-changed §2.2 and the work order, which is what prototypes are for. Step 1 of that order is now
-done and measured; steps 2–6, which are the UI itself, are still awaiting approval.
+Status: steps 1 and 2 built and measured (2026-08-14); steps 3–6 are a draft awaiting approval.
+The one architectural question this plan carried is settled and prototyped — see §2.1 — and that
+prototype changed §2.2 and the work order, which is what prototypes are for. Step 2 did the same
+to §1: the cold-start figure there came from Node and is wrong for a browser by 3×, see §2.3.
 Prerequisite reading: `docs/IMPLEMENTATION_PLAN.md` §9 (the original sketch, now partly
 superseded by measurement), `benchmarks/pyodide/README.md` (every performance number below),
 and `docs/HANDOFF.md` §3.
@@ -19,7 +19,7 @@ budgets, (b) Rust/WASM port of the fitness inner loop". Both hedges can be dropp
 | How much slower is WASM? | 1.3–1.8× on numerical work, 3.9× on the import | `benchmarks/pyodide` |
 | Does the fitter need a smaller web budget? | **No** | same fit budget, 1.3× |
 | Rust port of the inner loop? | **No** | the cost is already in WASM-compiled numpy/scipy |
-| Cold start to first fit | ~4 s (1.2 boot + 1.1 packages + 1.6 import) | same |
+| Cold start to first fit | ~4 s under Node — **~13 s in a browser**, §2.3 | same, then step 2 |
 | `discover` at `exhaustive_limit=4`, 1 thread | 169 s | same |
 | Worker pool speed-up (tier 1) | ~2.3× at 4 workers, saturating; 8 is worse than 6 | `run_workers.mjs` |
 | Does the browser get the CLI's answer? | **Yes, to an AICc difference of 0.0** | `run_orchestrated.mjs` |
@@ -62,6 +62,8 @@ and against what threshold; JavaScript only moves batches and costs between them
 - **The core is shipped as source, not a wheel.** `benchmarks/pyodide/make_zip.py` already
   demonstrates the mechanism (`unpackArchive` into the Pyodide FS, put it on `sys.path`).
   A wheel is nicer but adds a build step for no measured benefit; revisit if it matters.
+  **It now might**: importing the package from that archive is 5.8 s of the browser's 13 s cold
+  start (§2.3), against 1.6 s under Node, and it is the largest single item.
 - **Worker pool sized 4 by default**, `navigator.hardwareConcurrency` capped at 4, because the
   measured speed-up saturates there and eight workers were *slower* than six. Each worker costs
   ~1.5 s of start-up and its own copy of numpy/scipy, so the pool is created once at load and
@@ -153,13 +155,73 @@ fitted response, residuals, standard errors and correlation matrix — is unchan
 after, and the browser's report on the capacitor reference matches the pre-fan-out run
 candidate for candidate.
 
+### 2.3 What step 2 built, and what a browser measured that Node could not
+
+Step 2 is the Data screen: import, plots, and the Lin-KK panel. It is `web/` — Vite, React and
+TypeScript — plus one new Python module, and `web/README.md` is its map.
+
+**`autocircuit.web.bridge` is the whole Python surface.** One function, `handle(request) -> str`,
+JSON in and JSON out, dispatching four operations: `version`, `read`, `trim`, `validate`. Three
+of its properties are load-bearing rather than stylistic:
+
+- **A bad file is a message, not a dead worker.** Reading whatever the user dropped is the one
+  operation guaranteed to meet input nobody anticipated, and a Pyodide worker that raises costs
+  ~1.5 s plus its own copy of numpy and scipy to replace. Every exception becomes a response.
+- **Responses are serialised with `allow_nan=False`**, for the reason in §2.2: the default dump
+  emits tokens `JSON.parse` rejects, so it proves nothing.
+- **The bridge holds no state.** A spectrum travels with each request rather than living in the
+  worker under a handle, which is what will let step 4's pool hand the same spectrum to every
+  worker, and what makes a worker replaceable without the user losing their data.
+
+The file itself never crosses the wire as JSON: JavaScript writes the bytes into the Pyodide
+filesystem and sends the path, so the browser reads through `autocircuit.io.read_many` against a
+real path and gets the CLI's format sniffing, extension hints and multi-sweep readers unchanged.
+`Spectrum.to_wire()/from_wire()` and `KKResult.to_wire()` join `FitResult`'s from step 1 —
+which also closes the loose end §2.2 left, since a spectrum now travels rather than being
+recomputed on the far side.
+
+On the JavaScript side, `web/src/core/wire.ts` decodes and **deliberately cannot encode**: a
+spectrum is held in exactly the form Python produced it and handed back unaltered, so there is
+no second implementation of the float format for the browser to disagree with the CLI through.
+
+**[measured] The browser reproduces the CLI's verdict.** Three files — a capacitor sweep as
+generic CSV, a cell as ZView, and the same cell with a synthetic drift — read with the format
+sniffed correctly, and their Lin-KK verdicts, element counts, residuals and runs *z* match
+`python -m autocircuit validate` on the same files digit for digit, including the failing one.
+The drifted sweep's residuals show exactly what the runs test caught.
+
+**[measured] Cold start is ~13 s in a browser, not the ~4 s §1 predicted, and it is not the
+download.** From navigation to a usable page, on the production build: 14.2 s cold, 12.9 s with
+a warm HTTP cache — so ~1.3 s of that is transfer, and the assets are served from the same
+origin (§2 below) rather than a CDN. The stages, from the worker's own progress messages:
+
+| stage | browser | Node (`benchmarks/pyodide`) |
+|-------|--------:|----------------------------:|
+| Pyodide boot | 6.6 s | 1.2 s |
+| numpy + scipy | 0.8 s | 1.1 s |
+| unpack + `import autocircuit` | 5.8 s | 1.6 s |
+| **total to ready** | **~13 s** | **~4 s** |
+
+The two interpreter-bound stages are 3–5× worse in the browser while the package load is
+slightly *better*, which is the same shape as §1's other rows — WASM numerics are fine, the
+interpreter is what costs. Single-run figures from an automated Chrome on this machine, so treat
+the ratio rather than the seconds as the result. What it settles: **gate W3 does not pass today**
+(it asks for under 10 s to an interactive first fit, and 13 s is before any fit exists), the
+loading state built in step 2 is not optional, and the lever worth pulling is the import — the
+package is unpacked from a zip and imported from source, and a wheel or a precompiled bytecode
+cache is the obvious thing to measure next. That is a step 6 problem; it is recorded here so it
+is not discovered there.
+
 ## 3. Screens
 
 Following ZView's workflow, which is what the target users know:
 
-1. **Data** — drag-drop import (all four readers already exist), a table of loaded spectra,
+1. **Data** — ~~drag-drop import (all four readers already exist), a table of loaded spectra,
    frequency-window trimming, and the Lin-KK verdict shown *before* anything is fitted. The
-   validator's runs-test explanation text is already written; reuse it verbatim.
+   validator's runs-test explanation text is already written; reuse it verbatim.~~ **Built**
+   (§2.3). Validation runs automatically on load and after every trim, so the verdict is not
+   something the user has to go and ask for, and `KKResult.summary()` is rendered verbatim
+   rather than paraphrased.
 2. **Fit** — circuit canvas (drag-drop series/parallel blocks reading like a schematic) with a
    live model preview overlaid on the data before fitting. This is the differentiator and it
    should feel like the point of the app: no initial values, press Fit, get parameters with
@@ -192,7 +254,7 @@ Plots: linked Nyquist / Bode(|Z|, θ) / residuals, zoom-synced, log axes. Plotly
 |------|----------|------|
 | 0 | ~~Pyodide worker harness, orchestration decision~~ | **done** — §2.1, `benchmarks/pyodide/run_orchestrated.mjs` |
 | 1 | ~~Lossless `FitResult` across a worker boundary, so tier 2 fans out too~~ | **done** — §2.2; 287 s → 123 s |
-| 2 | Vite/React scaffold, data import, plots, Lin-KK panel | M |
+| 2 | ~~Vite/React scaffold, data import, plots, Lin-KK panel~~ | **done** — §2.3 |
 | 3 | Circuit canvas + live preview + manual fit | L |
 | 4 | Discovery job screen: progress, streaming, cancel, completeness | M |
 | 5 | Report: equivalence classes, exports, DRT panel | M |
@@ -207,7 +269,10 @@ Plots: linked Nyquist / Bode(|Z|, θ) / residuals, zoom-synced, log axes. Plotly
   browser, streams progress at least once a second, and reports the same `complete_up_to` and
   equivalence classes as the CLI. *(The result half of this already passes headlessly, §2.1;
   what the UI adds is the streaming and the display.)*
-- **W3** — cold load to an interactive first fit under 10 s on a mid-range laptop.
+- **W3** — cold load to an interactive first fit under 10 s on a mid-range laptop. **[measured]
+  Does not pass: ~13 s to a usable page, before any fit.** §2.3 has the breakdown and says which
+  stage is worth attacking. Failing this gate does not block steps 3–5; it is a step 6 item that
+  now has a number instead of an assumption.
 - **W4** — cancel actually stops the work (not just the UI), and a cancelled run reports the
   coverage it reached rather than a wrong number.
 - **W5** — the site works offline after first load, and from `file://` as well as Pages.

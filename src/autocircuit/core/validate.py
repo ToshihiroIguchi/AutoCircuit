@@ -22,15 +22,20 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
 
 from .fit import Weighting, weight_vectors
 from .spectrum import Spectrum
+from .wire import encode_array, encode_complex_array, encode_float
 
 Float = NDArray[np.float64]
 Complex = NDArray[np.complex128]
+
+#: Version of :meth:`KKResult.to_wire`; see :data:`autocircuit.core.fit.WIRE_VERSION`.
+WIRE_VERSION = 1
 
 #: Default stopping value for Schoenleber's mu criterion (0.85 is the value in the paper).
 DEFAULT_MU_CRITERION = 0.85
@@ -89,6 +94,36 @@ class KKResult:
                 "  produce confident but meaningless parameters.",
             ]
         return "\n".join(lines)
+
+    def to_wire(self, spectrum: Spectrum) -> dict[str, Any]:
+        """JSON-safe form of this verdict, for a browser thread that has to display it.
+
+        There is no ``from_wire``: the far side of this boundary is JavaScript, which plots the
+        residuals and prints the verdict rather than rebuilding a :class:`KKResult`. The
+        rendered :meth:`summary` travels with the numbers on purpose -- the explanation of what
+        a failed KK test means is science, so the UI shows the text the CLI shows rather than
+        writing its own account of it.
+        """
+        return {
+            "version": WIRE_VERSION,
+            "n_elements": self.n_elements,
+            "mu": encode_float(self.mu),
+            "tau": encode_array(self.tau),
+            "resistances": encode_array(self.resistances),
+            "r_ohm": encode_float(self.r_ohm),
+            "inductance": encode_float(self.inductance),
+            "capacitance": encode_float(self.capacitance),
+            "z_fit": encode_complex_array(self.z_fit),
+            "residual_real": encode_array(self.residual_real),
+            "residual_imag": encode_array(self.residual_imag),
+            "max_residual": encode_float(self.max_residual),
+            "rms_residual": encode_float(self.rms_residual),
+            "runs_z": encode_float(self.runs_z),
+            "systematic": self.systematic,
+            "passed": self.passed,
+            "residual_limit": encode_float(self.residual_limit),
+            "summary": self.summary(spectrum),
+        }
 
 
 def _design_matrix(

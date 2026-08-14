@@ -133,6 +133,11 @@ def read_many(path: str | Path, *, format: str | None = None, **hints: Any) -> l
     expose their own ``read_many`` in the reader module, used automatically here.
     """
     p = Path(path)
+    if not p.exists():
+        # Checked here as well as in read(), or every reader fails on the open and the caller is
+        # told the format could not be determined -- which sends whoever reads that message
+        # looking at the file's contents rather than at its name.
+        raise FileNotFoundError(p)
     candidates = [format] if format is not None else _sniff_candidates(p)
 
     attempts: list[str] = []

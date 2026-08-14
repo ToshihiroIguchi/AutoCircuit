@@ -1,0 +1,556 @@
+/* AutoCircuit -- Data screen. Dense, technical, instrument-software styling: a compact table,
+   small type for numbers, monospace for anything numeric. Palette lives in custom properties so
+   a dark/light switch (a later step) only has to redefine this block. Only the light palette is
+   defined for now, per the current step's scope. */
+
+:root {
+  --surface-1: #fcfcfb;
+  --surface-2: #f2f1ee;
+  --page-plane: #f9f9f7;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #898781;
+  --gridline: #e1e0d9;
+  --border: rgba(11, 11, 11, 0.12);
+  --series-1: #2a78d6; /* measured data */
+  --series-2: #eb6834; /* Lin-KK fit overlay */
+  --status-good: #0ca30c;
+  --status-good-bg: #e4f6e4;
+  --status-critical: #d03b3b;
+  --status-critical-bg: #fbe8e7;
+  --status-warning: #fab219;
+  --status-warning-bg: #fdf1da;
+  --status-neutral-bg: #ececea;
+
+  --font-ui: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", "SFMono-Regular", Consolas, "Liberation Mono",
+    monospace;
+
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--page-plane);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 16px 24px;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+.app-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+}
+
+.app-header h1 {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  margin: 0;
+}
+
+/* ---- status bar ---- */
+
+.status-bar {
+  font-size: 11px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.status-bar--error {
+  color: var(--status-critical);
+}
+
+.status-bar__spinner {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--gridline);
+  border-top-color: var(--series-1);
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.status-bar__steps {
+  display: flex;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.status-bar__step {
+  color: var(--text-muted);
+}
+
+.status-bar__step--current {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.status-bar__step--done {
+  color: var(--status-good);
+}
+
+.status-bar__step:not(:last-child)::after {
+  content: "\2192";
+  margin-left: 8px;
+  color: var(--gridline);
+}
+
+.status-bar__build,
+.status-bar__formats {
+  font-family: var(--font-mono);
+}
+
+/* ---- drop zone ---- */
+
+.drop-zone {
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  background: var(--surface-1);
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  transition:
+    border-color 0.1s ease,
+    background 0.1s ease;
+}
+
+.drop-zone--active {
+  border-color: var(--series-1);
+  background: var(--surface-2);
+}
+
+.drop-zone--disabled {
+  opacity: 0.6;
+}
+
+.drop-zone__hint {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.file-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-2);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.file-button:has(.file-button__input:focus-visible) {
+  outline: 2px solid var(--series-1);
+  outline-offset: 2px;
+}
+
+.file-button__input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---- file errors ---- */
+
+.file-errors {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.file-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  background: var(--status-critical-bg);
+  color: var(--status-critical);
+  font-size: 12px;
+}
+
+.file-error__name {
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+.file-error__message {
+  flex: 1;
+}
+
+.file-error__dismiss {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 4px;
+}
+
+/* ---- layout ---- */
+
+.app-main {
+  display: grid;
+  /* One column: the table above the panels rather than beside them. Side by side, neither got
+     the width it needs -- the table clipped its |Z| and KK columns, which are the ones it is
+     scanned for, while the four plots were squeezed into half the page. */
+  grid-template-columns: 1fr;
+  gap: 14px;
+  align-items: start;
+}
+
+.app-left,
+.app-right {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.app-left {
+  overflow-x: auto;
+}
+
+.panel-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  margin: 0 0 6px;
+}
+
+.empty-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* ---- spectra table ---- */
+
+.spectra-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--surface-1);
+  border: 1px solid var(--gridline);
+  border-radius: 4px;
+  overflow: hidden;
+  font-size: 12px;
+}
+
+.spectra-table th,
+.spectra-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--gridline);
+  text-align: left;
+}
+
+.spectra-table th {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  font-weight: 600;
+  background: var(--surface-2);
+}
+
+.spectra-table td.num,
+.spectra-table th.num {
+  font-family: var(--font-mono);
+  text-align: right;
+  /* A frequency range broken across three lines is unreadable, and these columns are what the
+     table is scanned for. The panel scrolls sideways instead; see .app-left. */
+  white-space: nowrap;
+}
+
+.spectra-table__row {
+  cursor: pointer;
+}
+
+.spectra-table__row:hover {
+  background: var(--surface-2);
+}
+
+.spectra-table__row--selected {
+  background: #e6f0fb;
+}
+
+.spectra-table__label {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spectra-table__remove {
+  font-size: 11px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface-1);
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+
+.spectra-table__remove:hover {
+  color: var(--status-critical);
+  border-color: var(--status-critical);
+}
+
+/* ---- KK badge ---- */
+
+.kk-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  font-family: var(--font-mono);
+}
+
+.kk-badge__symbol {
+  font-size: 10px;
+}
+
+.kk-badge--pass {
+  background: var(--status-good-bg);
+  color: var(--status-good);
+}
+
+.kk-badge--fail {
+  background: var(--status-critical-bg);
+  color: var(--status-critical);
+}
+
+.kk-badge--checking {
+  background: var(--status-neutral-bg);
+  color: var(--text-secondary);
+}
+
+.kk-badge--na {
+  background: var(--status-warning-bg);
+  color: #8a6100;
+}
+
+.kk-badge--large {
+  font-size: 18px;
+  padding: 6px 16px;
+  border-radius: 5px;
+}
+
+.kk-badge--large .kk-badge__symbol {
+  font-size: 18px;
+}
+
+/* ---- trim panel ---- */
+
+.trim-panel {
+  background: var(--surface-1);
+  border: 1px solid var(--gridline);
+  border-radius: 4px;
+  padding: 10px 12px;
+}
+
+.trim-panel__fields {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.trim-panel__fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 10px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.trim-panel__fields input {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  width: 130px;
+}
+
+.trim-panel__fields button {
+  font-size: 12px;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface-2);
+  cursor: pointer;
+}
+
+.trim-panel__fields button:hover {
+  background: var(--surface-1);
+  border-color: var(--series-1);
+}
+
+.trim-panel__error {
+  margin: 8px 0 0;
+  color: var(--status-critical);
+  font-size: 12px;
+}
+
+/* ---- KK panel ---- */
+
+.kk-panel {
+  background: var(--surface-1);
+  border: 1px solid var(--gridline);
+  border-radius: 4px;
+  padding: 10px 12px;
+}
+
+.kk-panel__pending {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.kk-panel__error {
+  color: var(--status-critical);
+  font-size: 12px;
+}
+
+.kk-panel__verdict {
+  margin-bottom: 10px;
+}
+
+.kk-panel__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 6px 16px;
+  margin: 0 0 10px;
+}
+
+.kk-panel__stats > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid var(--gridline);
+  padding-bottom: 3px;
+}
+
+.kk-panel__stats dt {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.kk-panel__stats dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-align: right;
+}
+
+.kk-panel__summary {
+  background: var(--surface-2);
+  border: 1px solid var(--gridline);
+  border-radius: 3px;
+  padding: 10px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  overflow-x: auto;
+  margin: 0;
+}
+
+/* ---- plots panel ---- */
+
+.plots-panel {
+  background: var(--surface-1);
+  border: 1px solid var(--gridline);
+  border-radius: 4px;
+  padding: 10px 12px;
+}
+
+.plots-panel__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.plots-panel__plot {
+  border: 1px solid var(--gridline);
+  border-radius: 3px;
+  min-width: 0;
+  /* The box is sized here, not by `layout.height`. A responsive Plotly plot measures the
+     element it was given, and a grid item with no height of its own measures zero at the moment
+     it is first drawn -- which left two of the four panels permanently 10 px tall. */
+  height: 300px;
+}
+
+.plots-panel__placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 300px;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
+  padding: 16px;
+}
+
+@media (max-width: 1100px) {
+  .plots-panel__grid {
+    grid-template-columns: 1fr;
+  }
+}
