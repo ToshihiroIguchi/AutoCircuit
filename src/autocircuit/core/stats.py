@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
+
+from .wire import decode_array, decode_float, encode_array, encode_float
 
 Float = NDArray[np.float64]
 
@@ -41,6 +44,44 @@ class Statistics:
     @property
     def dof(self) -> int:
         return self.n_data - self.n_params
+
+    def to_wire(self) -> dict[str, Any]:
+        """Every field, JSON-safe and lossless (see :mod:`autocircuit.core.wire`).
+
+        The correlation matrix and the standard errors are the reason this exists rather than
+        a reuse of ``FitResult.to_dict``: they are what says a model is unidentifiable, and
+        a transport that drops them delivers a fit that looks better than it is.
+        """
+        return {
+            "n_data": self.n_data,
+            "n_params": self.n_params,
+            "ssr": encode_float(self.ssr),
+            "chi2_reduced": encode_float(self.chi2_reduced),
+            "stderr": encode_array(self.stderr),
+            "correlation": encode_array(self.correlation),
+            "aic": encode_float(self.aic),
+            "aicc": encode_float(self.aicc),
+            "bic": encode_float(self.bic),
+            "rank": self.rank,
+            "warnings": list(self.warnings),
+        }
+
+    @classmethod
+    def from_wire(cls, payload: dict[str, Any]) -> Statistics:
+        """Inverse of :meth:`to_wire`."""
+        return cls(
+            n_data=int(payload["n_data"]),
+            n_params=int(payload["n_params"]),
+            ssr=decode_float(payload["ssr"]),
+            chi2_reduced=decode_float(payload["chi2_reduced"]),
+            stderr=decode_array(payload["stderr"]),
+            correlation=decode_array(payload["correlation"]),
+            aic=decode_float(payload["aic"]),
+            aicc=decode_float(payload["aicc"]),
+            bic=decode_float(payload["bic"]),
+            rank=int(payload["rank"]),
+            warnings=tuple(payload["warnings"]),
+        )
 
 
 def compute_statistics(

@@ -33,6 +33,16 @@ from .circuit import Circuit
 from .elements import BoundsContext
 from .spectrum import Spectrum
 from .stats import Statistics, compute_statistics
+from .wire import (
+    decode_array,
+    decode_complex_array,
+    decode_float,
+    decode_mapping,
+    encode_array,
+    encode_complex_array,
+    encode_float,
+    encode_mapping,
+)
 
 Float = NDArray[np.float64]
 Complex = NDArray[np.complex128]
@@ -45,6 +55,11 @@ _PENALTY = 1e30
 
 #: Relative spread across restarts above which parameters are called non-reproducible.
 _RESTART_SPREAD_WARNING = 0.05
+
+#: Version of :meth:`FitResult.to_wire`. A worker and its orchestrator can be different builds
+#: -- a browser tab holding an old Pyodide bundle, say -- and a silently mismatched payload
+#: would surface as a wrong report rather than as an error.
+WIRE_VERSION = 1
 
 
 def weight_vectors(
@@ -130,6 +145,68 @@ class FitResult:
             if spread > _RESTART_SPREAD_WARNING
         ]
         return tuple(self.statistics.warnings) + tuple(extra)
+
+    def to_wire(self) -> dict[str, Any]:
+        """Every field of this object, JSON-safe and lossless, for a worker boundary.
+
+        **This is not :meth:`to_dict` and must not be merged with it.** ``to_dict`` is a
+        *report*: the CLI's ``--json``, shaped for a reader. It carries no ``z_model``, no
+        residuals, no correlation matrix, no rank, no raw values array, no restart count and
+        no fixed-parameter values, so a :class:`Statistics` cannot be rebuilt from it -- and
+        without that, neither can a ``Candidate``, whose Pareto front, recommendation and
+        equivalence classes all need the fitted response and the uncertainties. Widening
+        ``to_dict`` to carry them would put megabytes of arrays into every report file to
+        serve a transport nobody reading that file uses.
+
+        Nothing here is recomputed on arrival. ``z_model`` could in principle be regenerated
+        with ``circuit.impedance()``, and it would be about 300 numbers cheaper per candidate
+        -- against a stage that costs minutes. Skipping it would stake the browser's agreement
+        with the CLI on numpy returning bit-identical results in a second WASM interpreter,
+        which is an assumption nobody has measured. It is carried instead.
+        """
+        return {
+            "version": WIRE_VERSION,
+            "circuit": self.circuit.to_string(),
+            "values": encode_array(self.values),
+            "z_model": encode_complex_array(self.z_model),
+            "residuals": encode_array(self.residuals),
+            "statistics": self.statistics.to_wire(),
+            "weighting": self.weighting,
+            "success": self.success,
+            "message": self.message,
+            "n_restarts": self.n_restarts,
+            "restart_spread": encode_mapping(self.restart_spread),
+            "fixed": encode_mapping(self.fixed),
+            "elapsed_s": encode_float(self.elapsed_s),
+        }
+
+    @classmethod
+    def from_wire(cls, payload: dict[str, Any]) -> FitResult:
+        """Rebuild a :class:`FitResult` from :meth:`to_wire`.
+
+        The circuit is re-parsed from its labelled string, which is the same contract the
+        tier-1 screening worker has always used: a topology crosses a process boundary as
+        text and is parsed on the far side.
+        """
+        version = int(payload.get("version", 0))
+        if version != WIRE_VERSION:
+            raise ValueError(
+                f"FitResult wire format version {version} is not {WIRE_VERSION}"
+            )
+        return cls(
+            circuit=Circuit.parse(payload["circuit"]),
+            values=decode_array(payload["values"]),
+            z_model=decode_complex_array(payload["z_model"]),
+            residuals=decode_array(payload["residuals"]),
+            statistics=Statistics.from_wire(payload["statistics"]),
+            weighting=payload["weighting"],
+            success=bool(payload["success"]),
+            message=str(payload["message"]),
+            n_restarts=int(payload["n_restarts"]),
+            restart_spread=decode_mapping(payload["restart_spread"]),
+            fixed=decode_mapping(payload["fixed"]),
+            elapsed_s=decode_float(payload["elapsed_s"]),
+        )
 
     def to_dict(self) -> dict[str, Any]:
         """JSON-serialisable representation, used by the CLI and the web front end."""

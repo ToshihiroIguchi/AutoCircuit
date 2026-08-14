@@ -1297,15 +1297,82 @@ def _full_fit(
     return result if math.isfinite(result.statistics.aicc) else None
 
 
-def _refit_worker(task: tuple[str, int, int]) -> FitResult | None:
+def _refit_worker(task: tuple[str, int, int]) -> dict[str, Any] | None:
     """Tier-2 refit in a worker process. The whole FitResult comes back, statistics included.
 
-    Returning the finished object rather than just the parameter values keeps the restart
-    spread -- which is how a non-identifiable model announces itself -- instead of quietly
-    losing it to a single-restart reconstruction in the parent.
+    Returning the finished fit rather than just the parameter values keeps the restart spread
+    -- which is how a non-identifiable model announces itself -- instead of quietly losing it
+    to a single-restart reconstruction in the parent.
+
+    It travels as :meth:`FitResult.to_wire` rather than as a pickled object, even though this
+    process pool could pickle it. That is deliberate: it is the one transport a Web Worker can
+    also use, so every parallel run on the desktop exercises the browser's path instead of
+    leaving it to be tested only in the browser.
     """
     text, restarts, seed = task
-    return _full_fit(text, _WORKER["spectrum"], _WORKER["weighting"], restarts, seed)
+    result = _full_fit(text, _WORKER["spectrum"], _WORKER["weighting"], restarts, seed)
+    return None if result is None else result.to_wire()
+
+
+class RefitTask(NamedTuple):
+    """One tier-2 job: a topology, and the full-budget fit settings to run it with."""
+
+    text: str
+    restarts: int
+    seed: int
+
+
+#: What a driver hands back for one :class:`RefitTask`: the fit, its wire form, or ``None`` if
+#: the topology could not be fitted at all. In-process drivers pass the object straight through
+#: rather than serialising it for their own benefit.
+type RefitOutcome = FitResult | dict[str, Any] | None
+
+
+def refit_plan(
+    scored: Sequence[tuple[float, str]],
+    *,
+    n_refine: int,
+    n_data: int,
+    restarts: int,
+    seed: int,
+    chunk: int | None = None,
+) -> Generator[list[RefitTask], Sequence[RefitOutcome], list[Candidate]]:
+    """Tier 2 with the *running* of it left to the caller, mirroring :func:`screen_plan`.
+
+    Yields batches of :class:`RefitTask`, expects one outcome per task back through ``send``,
+    and returns the scored :class:`Candidate` list the report is built from.
+
+    The reason this exists is the same as for the screen: the decisions must have exactly one
+    implementation. Which topologies are worth a full-budget refit is :func:`_shortlist`, and
+    gate G1 rests on its per-element-count quota; what happens to a topology that cannot be
+    fitted, and the ordering of what comes out, are decisions too. A browser driving this from
+    JavaScript fans out the fits and nothing else.
+
+    ``chunk`` exists for that driver rather than for correctness -- unlike the screen, no
+    decision here depends on an earlier batch, so batching costs nothing and buys a partial
+    Pareto front that can be streamed to the UI while the rest is still running
+    (``docs/WEB_UI_PLAN.md`` section 3). ``None`` means one batch.
+    """
+    texts = _shortlist(scored, n_refine, n_data)
+    results: list[FitResult] = []
+    size = max(len(texts) if chunk is None else chunk, 1)
+    for start in range(0, len(texts), size):
+        window = texts[start : start + size]
+        outcomes = yield [RefitTask(text, restarts, seed) for text in window]
+        if len(outcomes) != len(window):
+            raise ValueError(
+                f"refit_plan was sent {len(outcomes)} outcomes for {len(window)} tasks"
+            )
+        results.extend(r for r in map(_as_fit_result, outcomes) if r is not None)
+    out = [Candidate(r.circuit, r, 0) for r in results]
+    out.sort(key=lambda c: c.aicc)
+    return out
+
+
+def _as_fit_result(outcome: RefitOutcome) -> FitResult | None:
+    if outcome is None or isinstance(outcome, FitResult):
+        return outcome
+    return FitResult.from_wire(outcome)
 
 
 def _refit_shortlist(
@@ -1317,15 +1384,31 @@ def _refit_shortlist(
     n_refine: int,
     executor: multiprocessing.pool.Pool | None = None,
 ) -> list[Candidate]:
-    """Tier 2: refit the shortlist at full budget. Only these numbers are ever reported."""
-    texts = _shortlist(scored, n_refine, 2 * spectrum.n)
-    if executor is not None and len(texts) > 1:
-        results = list(executor.map(_refit_worker, [(t, restarts, seed) for t in texts]))
-    else:
-        results = [_full_fit(text, spectrum, weighting, restarts, seed) for text in texts]
-    out = [Candidate(r.circuit, r, 0) for r in results if r is not None]
-    out.sort(key=lambda c: c.aicc)
-    return out
+    """Tier 2: refit the shortlist at full budget. Only these numbers are ever reported.
+
+    A thin driver over :func:`refit_plan`, exactly as :func:`_screen_parallel` is over
+    :func:`screen_plan`: it runs the fits and holds no opinion about which ones to run.
+    """
+    plan = refit_plan(
+        scored, n_refine=n_refine, n_data=2 * spectrum.n, restarts=restarts, seed=seed
+    )
+    try:
+        tasks = next(plan)
+        while True:
+            outcomes: list[RefitOutcome]
+            if executor is not None and len(tasks) > 1:
+                outcomes = list(
+                    executor.map(
+                        _refit_worker, [(t.text, t.restarts, t.seed) for t in tasks]
+                    )
+                )
+            else:
+                outcomes = [
+                    _full_fit(t.text, spectrum, weighting, t.restarts, t.seed) for t in tasks
+                ]
+            tasks = plan.send(outcomes)
+    except StopIteration as done:
+        return list(done.value)
 
 
 @contextlib.contextmanager
