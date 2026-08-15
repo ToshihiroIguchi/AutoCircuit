@@ -2,9 +2,9 @@
 
 Written at the end of the session that built the backend, updated after discovery v2 steps
 1–5, again after the skeleton-constrained mode (all of `docs/PARTIAL_TOPOLOGY_PLAN.md`), and
-again after each step of `docs/WEB_UI_PLAN.md` (all seven now), and again after the ngspice
-round-trip (§15). Read this first, then `CLAUDE.md`, then the plan for whichever part you are
-touching.
+again after each step of `docs/WEB_UI_PLAN.md` (all seven now), again after the ngspice
+round-trip (§15), and again after taking both workflows off Node 20 (§16). Read this first, then
+`CLAUDE.md`, then the plan for whichever part you are touching.
 
 ## 1. Where things stand
 
@@ -12,8 +12,9 @@ The command-line backend is **complete and verified**: 712 tests pass
 (`python -m pytest tests -q`, ~6 min rested — and that is one full run, not a union of subsets).
 Nineteen of them are the ngspice round-trip (§15) and **skip on this machine**, because ngspice
 does not run on Windows; `.github/workflows/tests.yml` installs it, and §4 says how to run them
-here through WSL. [measured] On `ubuntu-latest` **all 712 run, in 417 s**, the round-trip among
-them. Phases 0–6 of `docs/IMPLEMENTATION_PLAN.md` are done. Phase 6 (web UI) has **all seven steps built
+here through WSL. [measured] On `ubuntu-latest` **all 712 run**, the round-trip among them, in
+417 s on one run and 520 s on another — same suite, different runner, so the spread is not a
+regression (§16). Phases 0–6 of `docs/IMPLEMENTATION_PLAN.md` are done. Phase 6 (web UI) has **all seven steps built
 and measured**: a lossless `FitResult` across a worker boundary, so the browser fans out both
 tiers of the search (§8); the Data screen — import, plots and the Lin-KK verdict — running the
 same core through Pyodide (§9); the Fit screen — schematic canvas, live preview and a manual fit
@@ -896,9 +897,7 @@ to be *dialect* right and not only electrically right.
   is 19 passed and exit 0, hidden it is 19 skipped and **exit 1**. On the first CI run (7m52s):
   ngspice 42, `19 passed in 0.64s` at that step, and `712 passed in 417.29s` for the suite —
   including the wall-clock test that had failed thermally here minutes earlier.
-- **Both workflows carry a Node 20 deprecation annotation.** `actions/checkout@v4` and
-  `actions/setup-python@v5` are being forced onto Node 24 by the runner and work; they will stop
-  when GitHub drops the fallback. Not fixed here, and not urgent.
+- **Both workflows carried a Node 20 deprecation annotation.** Fixed since; see §16.
 
 Three things a real simulator said that nothing here could:
 
@@ -921,3 +920,46 @@ Three things a real simulator said that nothing here could:
 - **The netlist now carries the deck that drives it.** `_how_to_drive()` in `core/spice.py` emits
   the four lines above the `.subckt`, with this fit's own band in the `.ac` line, plus the DC-open
   note. A user handed a two-terminal `.subckt` otherwise has to guess at both.
+## 16. Both workflows off Node 20, and a README that admits the site exists
+
+Nothing computes differently. Two things changed: the five actions the workflows call, and the
+front page.
+
+- **The annotation named more actions than the workflow files do.** [measured] Before the change,
+  the three warnings on commit `46b4785` were: `checkout@v4, setup-node@v4, setup-python@v5,
+  upload-artifact@v4` on the Pages build job, `deploy-pages@v4` on the Pages deploy job, and
+  `checkout@v4, setup-python@v5` on Tests. `upload-artifact@v4` appears nowhere in this
+  repository — it is the upload step *inside* the composite `upload-pages-artifact@v3` — and
+  `deploy-pages@v4` sits in a second job whose annotations have to be asked for separately.
+  Counting the `uses:` lines gives three actions to bump; reading the annotations gives five.
+  Ask the API, per job: `gh api repos/OWNER/REPO/check-runs/<job-id>/annotations`.
+- **The bumps are to the current majors**: `checkout@v7`, `setup-python@v7`, `setup-node@v7`,
+  `upload-pages-artifact@v5`, `deploy-pages@v5`. Two cross a documented behaviour change:
+  - `setup-node@v5` added automatic caching driven by a `packageManager` field in package.json.
+    It reads the repository root, which has no package.json at all here, so the explicit
+    `cache: npm` with `cache-dependency-path: web/package-lock.json` is what was and still is
+    doing the work. It is not redundant; the workflow says so in a comment.
+  - **`upload-pages-artifact@v4` stopped putting hidden files in the artifact**, and `web/dist`
+    has exactly one: `.bytecode-stamp`, written by `scripts/precompile.mjs` so it can skip a
+    rebuild whose inputs have not moved. Nothing in the browser fetches it and CI builds from an
+    empty checkout every time, so the published site is unchanged. [measured] The run log shows
+    `include-hidden-files: false`, and against the deployed site every asset the page loads
+    answers 200 while `/.bytecode-stamp` answers **404**. If a dotfile the site actually serves
+    ever appears, that input has to be set to `true`.
+- **[measured] After: zero annotations on any job of either run** (Pages `31878793165`, Tests
+  `31878793147`), against three before. Both green — but both were green *before* as well, which
+  is why the annotation count is the measurement and the tick is not.
+- **[measured] The Tests run still did the work**: ngspice 42, `19 passed` at the round-trip step,
+  `712 passed in 519.90s`. That is 520 s against the 417 s of the previous run; the suite is the
+  same, the runner is not. **Do not read a wall-clock difference between two GitHub runners as a
+  regression.**
+- **[measured] The deployed site was opened in a real browser afterwards**, not just curled:
+  boot 5.33 s, packages 7.78 s, unpack 0.26 s, import 1.90 s, worker ready 16.46 s after
+  navigation, no console errors; loading the Randles example gives `generic_csv`, 71 points,
+  `19.6 Ω .. 387 Ω`, and a Lin-KK **PASS** on 16 Voigt elements. A deploy action that changed
+  major version is not verified by a green deploy step.
+- **The README now links the site** and describes it, and one sentence in it had quietly become
+  false: "the same code to run in a browser under Pyodide *later*" was written before phase 6.
+  The cold-start figure quoted there is the one measured **from the public URL** (21 s cold,
+  5-11 s with the runtime cached), not the `localhost` 5 s — §14 says not to mix the two, and the
+  flattering number is the one a reader will not experience.

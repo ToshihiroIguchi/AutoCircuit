@@ -3,6 +3,10 @@
 Equivalent circuit analysis of passive-component frequency characteristics — **without
 user-supplied initial values**.
 
+**Run it in your browser: <https://toshihiroiguchi.github.io/AutoCircuit/>** — nothing to
+install, and nothing to upload. The page runs this package under Pyodide, so the fitting happens
+on your machine and the data never leaves it.
+
 Software such as ZView requires the analyst to guess starting parameters before a fit will
 converge, which makes the answer depend on the analyst. AutoCircuit derives its own search
 bounds from the measured data and finds the parameters by global optimization, so the same
@@ -35,7 +39,7 @@ pip install -e .
 ```
 
 Requires Python 3.12+. The only runtime dependencies are numpy and scipy, which is what allows
-the same code to run in a browser under Pyodide later.
+the same code to run in a browser under Pyodide — see below.
 
 ## Quick start
 
@@ -196,6 +200,26 @@ second opinion, and `--no-drt` turns that off. When the data is not a sum of rel
 — a capacitor with skin effect, say — DRT says so instead of reporting a count.
 
 See `docs/IMPLEMENTATION_PLAN.md` for the design and the literature it is based on.
+
+## In the browser
+
+<https://toshihiroiguchi.github.io/AutoCircuit/> runs this package unchanged, on a CPython
+compiled to WebAssembly that starts inside the page. There is no server and there will not be
+one, so nothing you open is uploaded anywhere; the four screens are Data (read a file, see the Kramers-Kronig verdict), Fit
+(draw a circuit, fit it), Discover (run the topology search, with progress and a stop button) and
+Report (download the results).
+
+The point of running the real package rather than a re-implementation is that the two cannot
+drift: the browser's Lin-KK verdicts match the CLI's, its fits match to every reported digit, its
+search returns the same Pareto front row for row, and every file it downloads is written by the
+same Python function `autocircuit fit --json`, `--spice` and `discover --json` use. Example
+spectra are built into the site, so there is something to try without a measurement of your own.
+
+One honest number: a first visit has to fetch and start a Python runtime, and that is 41 MB.
+Measured from the public URL on the development machine, a cold visit reached a usable page in
+21 s, and a later one with the runtime cached in 5–11 s — that spread is the machine's own load,
+not the network. After that a fit takes a second or two, as it does on the command line. See
+`web/README.md` to build or serve it yourself.
 
 ## Development
 
