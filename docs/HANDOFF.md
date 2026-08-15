@@ -2,14 +2,17 @@
 
 Written at the end of the session that built the backend, updated after discovery v2 steps
 1–5, again after the skeleton-constrained mode (all of `docs/PARTIAL_TOPOLOGY_PLAN.md`), and
-again after each step of `docs/WEB_UI_PLAN.md` (all six now). Read this first, then
-`CLAUDE.md`, then the plan for whichever part you are touching.
+again after each step of `docs/WEB_UI_PLAN.md` (all seven now), and again after the ngspice
+round-trip (§15). Read this first, then `CLAUDE.md`, then the plan for whichever part you are
+touching.
 
 ## 1. Where things stand
 
-The command-line backend is **complete and verified**: 693 tests pass
-(`python -m pytest tests -q`, ~6 min — and that is one full run, not a union of subsets).
-Phases 0–5 of `docs/IMPLEMENTATION_PLAN.md` are done. Phase 6 (web UI) has **all seven steps built
+The command-line backend is **complete and verified**: 712 tests pass
+(`python -m pytest tests -q`, ~6 min rested — and that is one full run, not a union of subsets).
+Nineteen of them are the ngspice round-trip (§15) and **skip on this machine**, because ngspice
+does not run on Windows; `.github/workflows/tests.yml` installs it, and §4 says how to run them
+here through WSL. Phases 0–6 of `docs/IMPLEMENTATION_PLAN.md` are done. Phase 6 (web UI) has **all seven steps built
 and measured**: a lossless `FitResult` across a worker boundary, so the browser fans out both
 tiers of the search (§8); the Data screen — import, plots and the Lin-KK verdict — running the
 same core through Pyodide (§9); the Fit screen — schematic canvas, live preview and a manual fit
@@ -250,6 +253,9 @@ recorded in the code as a comment and in `docs/IMPLEMENTATION_PLAN.md` marked **
   So: a failure *only* there, with a number in the 60–80 s range, is thermal, not a regression.
   Check it in isolation and against a stash before believing it, and **do not widen the bound**;
   it is the only test that would catch a time limit that stopped working.
+  [measured, 2026-08-15, again] It failed at 67.1 s inside a 537 s full run and passed at 48.1 s
+  in isolation a minute later, with no code between them. That is the second time; the protocol
+  above is what it is for.
 - **numpy and scipy are the only permitted runtime dependencies** — this is what keeps the
   Pyodide target viable. The CLI uses stdlib `argparse` for this reason.
 - **PowerShell mangles quotes** in `python -c @'...'@`; heredocs lose `"` characters. Write a
@@ -267,7 +273,8 @@ recorded in the code as a comment and in `docs/IMPLEMENTATION_PLAN.md` marked **
   That is not a program failure — re-run without the truncation before believing an error.
 - **Background jobs redirected with `Out-File` buffer until completion.** To wait on one, use
   `Monitor` with an `until grep -q ...` loop (it runs bash), not chained sleeps.
-- Full suite ~3.7 min (387 tests); the fast subset is
+- Full suite ~6 min rested and 9 min loaded (712 tests, 19 of them skipped here); the fast subset
+  is
   `python -m pytest tests -q -k "not test_fit and not test_discover"` (~4 s) — note that the
   `not test_discover` filter also drops `test_discover_exhaustive.py`, which is where the
   exhaustive mode is covered.
@@ -284,6 +291,15 @@ recorded in the code as a comment and in `docs/IMPLEMENTATION_PLAN.md` marked **
   path separators, so `zipfile` extracts files literally named `autocircuit\__init__.py` and
   the failure only shows up as `ModuleNotFoundError`. Build such archives with Python
   (`benchmarks/pyodide/make_zip.py`).
+- **ngspice does not run on this machine, and WSL is how it was verified anyway.** There is no
+  winget package for it, but `wsl -d Ubuntu-24.04` is installed and `apt-get install ngspice`
+  gives exactly the ngspice 42 that `ubuntu-latest` gives CI. `python3-numpy`, `python3-scipy`
+  and `python3-pytest` were installed there too, so the round-trip can be run before it is
+  pushed: `cd /mnt/c/Users/toshi/python/AutoCircuit && PYTHONPATH=$PWD/src python3 -m pytest
+  tests/test_spice_ngspice.py -q`. It takes ~1 s. Note WSL has numpy 1.26 / scipy 1.11 against
+  the Windows side's 2.5 / 1.17, which is a second interpreter for free. **Do not invoke `wsl`
+  through the Bash tool** — Git Bash rewrites `/mnt/c/...` into `C:/Program Files/Git/mnt/c/...`
+  and the path is not found. Use PowerShell, and put anything with quoting in a script file.
 - **Every push to `main` republishes the public site.** `.github/workflows/pages.yml` builds and
   deploys <https://toshihiroiguchi.github.io/AutoCircuit/> on push. It gates on `tsc --noEmit` and
   `npm run smoke`, so a broken build fails rather than shipping — but a push is now an act of
@@ -369,9 +385,11 @@ every decision about what the report may claim stayed on the expensive model.
      that republishes on every push.
    - **Do not try `file://` again.** It is not a bundling problem: a `file://` page cannot
      `fetch` a sibling file, and Pyodide fetches its wasm, its stdlib and its wheels.
-3. ngspice round-trip in CI. The test suite already proves the netlist is *electrically*
-   right via its own nodal-analysis engine (`tests/test_spice.py`); a real simulator would
-   also prove it is *dialect* right.
+3. ~~ngspice round-trip in CI.~~ **Done** — `tests/test_spice_ngspice.py` and
+   `.github/workflows/tests.yml`; see §15. One decision worth not reopening: **the round-trip
+   compares ngspice against the suite's own nodal engine, not against the model.** Comparing
+   against the model would leave the ladder-synthesis error at ~1e-2 in front of a dialect fault
+   three orders of magnitude smaller.
 4. Gamry `.DTA` and BioLogic `.mpt` readers, once real files exist to test against.
 5. ~~Pyodide performance measurement~~ — **done**, `benchmarks/pyodide/`. WASM costs 1.3–1.8×
    on the numerical work, not the order of magnitude the plan feared, so no reduced web budget
@@ -849,3 +867,51 @@ network-error page: a static site with no service worker is only as offline-capa
 browser's HTTP cache, which does not cover the entry document. A service worker would fix it and
 would put a cache between every visitor and a site that republishes on every push. The gate is
 retired with both halves stated rather than left open against work nobody intends to do.
+
+## 15. The ngspice round-trip, and the repository's first test workflow
+
+`docs/IMPLEMENTATION_PLAN.md` §7 is the record. Open item 3 is closed: the netlist is now known
+to be *dialect* right and not only electrically right.
+
+- **`tests/test_spice_ngspice.py`** exports nine circuits — R alone, C+ESR+ESL, two RC blocks, a
+  nested `p(R1,C1-p(R2,L1))-R3`, Randles with a Warburg, a CPE, a finite Warburg, a skin-effect
+  capacitor and a `SKINW` wire — drives each with a 1 A AC current source, and reads the port
+  voltage back out of ngspice's **binary** rawfile. It skips itself when ngspice is not on PATH.
+- **The comparison is against `test_spice.py`'s own nodal engine, not against the model, and that
+  is the whole design.** Against the model the four ladder-synthesised elements sit at ~1e-2 by
+  construction, which would hide any dialect fault smaller than itself; against the engine the
+  synthesis error cancels exactly, because both are reading the same file. [measured] **exactly
+  zero for the lone resistor and 4.6e-15 .. 4.5e-12 for the other eight**, ladders included; the
+  diagnostic count is 9 for each of the two DC-open cases and 0 for the other seven. The
+  tolerance asserted is 1e-9. Incidentally the ladder values themselves differ between scipy 1.11
+  and 1.17 in their last digits, and the agreement does not move — which is what it means for
+  this test to be about the reading of a file rather than about its contents.
+- **`.github/workflows/tests.yml` is the repository's second workflow and its first for tests.**
+  It installs ngspice, then runs ruff, mypy and the suite. The round-trip gets a step of its own
+  that greps the summary for `skipped` and fails on it — **a skipped test reports as a pass**, so
+  an ngspice that failed to install would retire the gate and leave the run green. That is the
+  same failure this project has now hit four times in other forms (§3, §11, §12). [measured] The
+  guard was run both ways before it was pushed, by hiding `/usr/bin/ngspice` in WSL: installed it
+  is 19 passed and exit 0, hidden it is 19 skipped and **exit 1**.
+
+Three things a real simulator said that nothing here could:
+
+- **ngspice exits 0 with a failed operating point.** Every model beginning with a capacitor is a
+  DC open at its port, so the op point comes out singular and both gmin stepping and source
+  stepping fail — and the AC sweep that follows is still right to 4.5e-12, because an AC analysis
+  of a linear network does not depend on the operating point. A round-trip gated on the return
+  code would have passed a deck ngspice had given up on. The test therefore asserts on the
+  *diagnostics*: a network with a DC path at its port must produce none at all, and one without
+  may produce only the operating-point family — an unknown device, an unparsable value or a node
+  name read differently all land outside it. [measured] An unknown device is `Error on line`,
+  exit 1, and **no rawfile written at all**, which is why the harness treats a missing rawfile as
+  a failure rather than as nothing to compare; `test_the_round_trip_notices_a_netlist_ngspice_
+  cannot_read` pins that.
+- **`.option rshunt=1e12` silences those diagnostics and is the wrong fix here.** [measured] It
+  costs up to **7.2e-7** in |Z| — five orders worse than the quantity being measured, and not
+  simply |Z|/R, because the ladder's own internal nodes get shunted too (the CPE case is 10× its
+  port-level prediction). The test deck therefore adds nothing to help the simulator. The netlist
+  header mentions the option, with its cost, for users who want a clean log.
+- **The netlist now carries the deck that drives it.** `_how_to_drive()` in `core/spice.py` emits
+  the four lines above the `.subckt`, with this fit's own band in the `.ac` line, plus the DC-open
+  note. A user handed a two-terminal `.subckt` otherwise has to guess at both.

@@ -1,0 +1,66 @@
+# Lint, type-check and run the test suite -- including the ngspice round-trip, which is the one
+# check that cannot run on the development machine (ngspice is not packaged for Windows through
+# any installer this project can assume).
+#
+# The suite already proves the exported netlist is *electrically* right, by solving it with a
+# nodal-analysis engine written for the purpose. What only a real simulator can prove is that it
+# is *dialect* right. That is what installing ngspice here buys, and it is why the round-trip has
+# a step of its own: a skipped test reports as a pass, so a missing ngspice would quietly retire
+# the gate while leaving the run green.
+
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install the package and the development tools
+        run: pip install -e ".[dev]"
+
+      # The simulator the round-trip runs against. Ubuntu ships ngspice 42.
+      - name: Install ngspice
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ngspice
+          ngspice --version | head -3
+
+      - name: Lint
+        run: python -m ruff check .
+
+      - name: Type check
+        run: python -m mypy
+
+      # Run this before the suite and check the summary: tests/test_spice_ngspice.py skips itself
+      # when ngspice is absent, so "0 passed, 19 skipped" is a green result that proves nothing.
+      - name: SPICE round-trip against a real ngspice
+        run: |
+          set -eo pipefail
+          python -m pytest tests/test_spice_ngspice.py -q -rs | tee ngspice-result.txt
+          if grep -qi "skipped" ngspice-result.txt; then
+            echo "::error::the ngspice round-trip skipped instead of running"
+            exit 1
+          fi
+
+      # The whole suite. One test in it is a wall-clock assertion
+      # (test_discover.py::test_time_limit_stops_the_search, 60 s for a 5 s limit); on a machine
+      # under load it is thermal rather than a regression -- see docs/HANDOFF.md section 4 before
+      # widening anything.
+      - name: Test suite
+        run: python -m pytest tests -q
+        timeout-minutes: 30

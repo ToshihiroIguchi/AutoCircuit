@@ -316,6 +316,31 @@ class _NetlistBuilder:
             self.lines.append(f"R_{label}_link {previous} {b} 1e-12")
 
 
+def _how_to_drive(name: str, f_min: float, f_max: float) -> list[str]:
+    """The deck that turns this subcircuit back into an impedance, and the one snag in it.
+
+    [measured, ngspice 42] Every model that begins with a capacitor is an open circuit at DC, so
+    the operating point comes out singular and gmin and source stepping both fail -- while ngspice
+    still exits 0 and still computes the right AC answer, because an AC analysis of a linear
+    network does not depend on the operating point. Saying so here is cheaper than letting each
+    user discover it; ``tests/test_spice_ngspice.py`` is where it is pinned.
+    """
+    return [
+        "*",
+        "* To recover Z(f) from this subcircuit, drive its port with a 1 A AC current source",
+        "* and read the port voltage:",
+        "*",
+        f"*   X1 probe 0 {name}",
+        "*   I1 0 probe DC 0 AC 1",
+        f"*   .ac dec 20 {_fmt(f_min)} {_fmt(f_max)}",
+        "*",
+        "* Z(f) is then V(probe). A network beginning with a capacitor is a DC open, so ngspice",
+        "* may report a singular matrix at the operating point; the AC result is unaffected, and",
+        "* `.option rshunt=1e12` silences it at a cost of up to ~1e-6 in |Z|.",
+        "*",
+    ]
+
+
 def to_netlist(
     circuit: Circuit,
     values: Float | dict[str, float],
@@ -369,7 +394,7 @@ def to_netlist(
         circuit.param_names, array, circuit.param_specs(), strict=True
     ):
         out.append(f"*   {param_name} = {_fmt(float(value))} {spec.unit}")
-    out.append("*")
+    out.extend(_how_to_drive(name, f_min, f_max))
     out.append(f".subckt {name} 1 2")
     out.extend(builder.lines)
     out.append(f".ends {name}")

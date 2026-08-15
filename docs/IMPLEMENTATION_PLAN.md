@@ -362,7 +362,23 @@ unconstrained problem, where GCV is valid; the reported distribution is then rec
   a SPICE AC sweep would. Pure R/C/L circuits — including nested cases such as
   `p(R1,C1-p(R2,L1))-R3` — must reproduce the model to 1e-9; circuits with fractional elements
   to within the synthesis tolerance. This catches node-allocation bugs, which a formula-level
-  test cannot. An ngspice round-trip remains desirable but is not required for correctness.
+  test cannot.
+- **[measured] And a real ngspice reads it the same way.** `tests/test_spice_ngspice.py` exports
+  nine circuits, simulates each with ngspice 42 and compares against *that same nodal engine*
+  rather than against the model — which is the point: comparing against the model leaves the
+  ladder error at ~1e-2, three orders of magnitude above any dialect fault it would be hiding.
+  Agreement is **exactly zero for a lone resistor and 4.6e-15 to 4.5e-12 for the other eight**,
+  the four ladder-synthesised elements included, so the netlist is dialect-right as well as
+  electrically right. Two things the simulator said that nothing else could:
+  - **A model beginning with a capacitor is a DC open, and ngspice's operating point fails on
+    it** — singular matrix, gmin stepping failed, source stepping failed — **while still exiting
+    0** and still computing the right AC answer, because an AC analysis of a linear network does
+    not depend on the operating point. A round-trip gated on the return code would have called
+    that a pass; this one asserts on the diagnostics. The netlist header now tells the user, and
+    gives the deck that drives it.
+  - **`.option rshunt=1e12` silences those diagnostics and costs up to 7e-7 in |Z|** — worse than
+    the quantity being measured, and not simply |Z|/R because the ladder's internal nodes are
+    shunted too. So the test deck adds nothing to help the simulator.
 
 ## 8. Data I/O
 
@@ -435,9 +451,9 @@ one-off 1.6 s import. Consequences, all now measured rather than guessed:
 | 1 | Core: elements + circuit AST + DSL parser + synthetic generator | **done** — 12 elements, all analytically tested; batched evaluation |
 | 2 | Fitting engine | **done** — recovers a 9-circuit synthetic suite at 0% and 1% noise with no initial values; calibrated uncertainties; Lin-KK |
 | 3 | CLI | **done** — `fit`, `discover`, `validate`, `simulate`, `convert`, `elements` |
-| 4 | SPICE export | **done** — NNLS Foster-form ladder synthesis; netlist verified by nodal analysis. ngspice round-trip still outstanding. |
+| 4 | SPICE export | **done** — NNLS Foster-form ladder synthesis; netlist verified by nodal analysis and, in CI, by a real ngspice (agreement 5e-15 .. 4.5e-12 over nine circuits). |
 | 5 | Topology discovery | **done** — genetic search, then the exhaustive-first redesign of §6.1, all seven steps of `docs/DISCOVERY_V2_PLAN.md` including DRT structure probing (§6.2) |
-| 6 | Web UI | **step 1 done** — a `FitResult` crosses a worker boundary losslessly, so the browser fans out both tiers of the search (287 s → 123 s on the capacitor reference). Steps 2–6 of `docs/WEB_UI_PLAN.md`, which are the UI itself, await approval. |
+| 6 | Web UI | **done** — all seven steps of `docs/WEB_UI_PLAN.md`; the site is live at <https://toshihiroiguchi.github.io/AutoCircuit/>. Gates W1, W2, W4 and W6 pass, W3 passes on a rested machine and not on a loaded one, W5 is retired. |
 
 Test corpus actually used: series/parallel RC, capacitor C+ESR+ESL, capacitor with `SKINF`,
 Randles with Warburg, two-block Maxwell-Wagner, three-block brick layer with CPE, depressed
@@ -445,13 +461,10 @@ semicircle, and a wire with `SKINW` — each at 0% and 1% noise.
 
 ### 10.1 Next steps
 
-1. **Web UI (phase 6)** — the largest remaining piece; its step 1 (the worker-boundary
-   transport) is done, and steps 2–6 are the UI itself.
-2. **ngspice round-trip in CI** — the nodal-analysis engine in the test suite proves the
-   netlist is electrically right; running a real simulator would also prove it is *dialect*
-   right.
-3. **Performance for the browser** — the fit is ~0.5 s for three parameters and ~1.2 s for six
-   on CPython; Pyodide will be slower. Measure before optimising further.
+1. ~~**Web UI (phase 6)**~~ — done; see the table above and `docs/HANDOFF.md` §8–§14.
+2. ~~**ngspice round-trip in CI**~~ — done; see §7 and `docs/HANDOFF.md` §15.
+3. ~~**Performance for the browser**~~ — measured (§9 above), and the cold start was attacked in
+   web-UI step 7. What is left there is the wheel install (2.2–4.4 s) and the 41 MB transfer.
 4. **More readers** — Gamry `.DTA`, BioLogic `.mpt` (P1 in §8) once real files are available.
 
 ## 11. References

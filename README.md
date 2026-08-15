@@ -124,6 +124,15 @@ internal impedance of a solid round conductor. The fitter evaluates them exactly
 frequency domain; the RL-ladder approximations found in the literature are needed only for
 time-domain SPICE, and are generated automatically at export time.
 
+**The exported netlist is checked twice.** The test suite parses the emitted `.subckt` back and
+solves it by nodal analysis, which catches node-allocation bugs a formula-level test cannot; and
+CI then runs a real ngspice over nine exported circuits and compares against that same engine,
+which is what makes the file *dialect* right rather than only electrically right. The two agree
+to within 4.5e-12, ladder-synthesised elements included. Every netlist carries the deck that
+drives it, and the one snag: a model beginning with a capacitor is an open circuit at DC, so
+ngspice reports a singular operating point — harmlessly, since an AC analysis of a linear network
+does not depend on one.
+
 **Topology discovery is not magic.** Different topologies are frequently exact
 reparameterisations of one another — `R1-p(R2,C1)` and `p(R1,C1-R2)` describe exactly the same
 set of Nyquist semicircles and fit any such data identically. AutoCircuit detects and reports
