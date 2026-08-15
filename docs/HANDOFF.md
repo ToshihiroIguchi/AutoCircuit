@@ -12,7 +12,8 @@ The command-line backend is **complete and verified**: 712 tests pass
 (`python -m pytest tests -q`, ~6 min rested — and that is one full run, not a union of subsets).
 Nineteen of them are the ngspice round-trip (§15) and **skip on this machine**, because ngspice
 does not run on Windows; `.github/workflows/tests.yml` installs it, and §4 says how to run them
-here through WSL. Phases 0–6 of `docs/IMPLEMENTATION_PLAN.md` are done. Phase 6 (web UI) has **all seven steps built
+here through WSL. [measured] On `ubuntu-latest` **all 712 run, in 417 s**, the round-trip among
+them. Phases 0–6 of `docs/IMPLEMENTATION_PLAN.md` are done. Phase 6 (web UI) has **all seven steps built
 and measured**: a lossless `FitResult` across a worker boundary, so the browser fans out both
 tiers of the search (§8); the Data screen — import, plots and the Lin-KK verdict — running the
 same core through Pyodide (§9); the Fit screen — schematic canvas, live preview and a manual fit
@@ -892,7 +893,12 @@ to be *dialect* right and not only electrically right.
   an ngspice that failed to install would retire the gate and leave the run green. That is the
   same failure this project has now hit four times in other forms (§3, §11, §12). [measured] The
   guard was run both ways before it was pushed, by hiding `/usr/bin/ngspice` in WSL: installed it
-  is 19 passed and exit 0, hidden it is 19 skipped and **exit 1**.
+  is 19 passed and exit 0, hidden it is 19 skipped and **exit 1**. On the first CI run (7m52s):
+  ngspice 42, `19 passed in 0.64s` at that step, and `712 passed in 417.29s` for the suite —
+  including the wall-clock test that had failed thermally here minutes earlier.
+- **Both workflows carry a Node 20 deprecation annotation.** `actions/checkout@v4` and
+  `actions/setup-python@v5` are being forced onto Node 24 by the runner and work; they will stop
+  when GitHub drops the fallback. Not fixed here, and not urgent.
 
 Three things a real simulator said that nothing here could:
 
