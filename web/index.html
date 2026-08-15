@@ -13,6 +13,26 @@
       name="description"
       content="Equivalent circuit analysis of impedance data, without user-supplied initial values."
     />
+    <!-- The theme is stamped here, before the first paint, so someone who asked for a dark page
+         does not get a white one for the second it takes the bundle to arrive -- let alone for the
+         thirteen it takes Pyodide to. src/core/theme.ts applies the same rule for every later
+         change; this is the one place the rule is written twice, and that is what it buys. -->
+    <script>
+      (function () {
+        var stored = null;
+        try {
+          stored = localStorage.getItem("autocircuit.theme");
+        } catch (error) {
+          // Storage can be unavailable; the system preference is still a good answer.
+        }
+        document.documentElement.dataset.theme =
+          stored === "light" || stored === "dark"
+            ? stored
+            : window.matchMedia("(prefers-color-scheme: dark)").matches
+              ? "dark"
+              : "light";
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

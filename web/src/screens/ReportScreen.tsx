@@ -29,6 +29,7 @@ import { ExcludedPanel } from "../components/ExcludedPanel";
 import { ExportPanel, type ExportItem } from "../components/ExportPanel";
 import { ParetoTable } from "../components/ParetoTable";
 import { SkeletonFindings } from "../components/SkeletonFindings";
+import { RuntimeNotice } from "../components/RuntimeNotice";
 
 export interface ReportScreenProps {
   client: BridgeClient;
@@ -132,15 +133,19 @@ export function ReportScreen({
 
   if (report === null && manualFit === null && spectrum === null) {
     return (
-      <p className="empty-hint">
-        Nothing to report yet. Load a spectrum on the Data screen, then fit a circuit you already
-        know on the Fit screen or search for one on the Discover screen.
-      </p>
+      <>
+        <RuntimeNotice ready={ready} />
+        <p className="empty-hint">
+          Nothing to report yet. Load a spectrum on the Data screen, then fit a circuit you already
+          know on the Fit screen or search for one on the Discover screen.
+        </p>
+      </>
     );
   }
 
   return (
     <div className="report-screen">
+      <RuntimeNotice ready={ready} />
       {report === null ? (
         <p className="empty-hint">
           No search has finished in this session. The Discover screen runs one; its coverage

@@ -1,7 +1,13 @@
-// The four load stages the bridge client reports, then a discreet build line once ready. Cold
-// start is about 5 s (Pyodide boot, then numpy/scipy, then the AutoCircuit import) so this is the
-// only thing on screen for a few seconds -- it must say what is happening, not just spin.
+// The four load stages the bridge client reports, then a discreet build line once ready. A cold
+// start was measured at ~13 s in a browser -- Pyodide's own boot and the package import, not the
+// download (`docs/WEB_UI_PLAN.md` section 2.3) -- so for a quarter of a minute this is the only
+// thing on screen, and it must say what is happening rather than just spin.
+//
+// It also runs a clock, for the reason the search panel runs one: the stages move when a stage
+// really finishes, and nothing here advances on a timer. A bar that fills itself would be a claim
+// about progress this page cannot make, and would look exactly the same if the worker had died.
 
+import { useEffect, useRef, useState } from "react";
 import type { LoadStage } from "../worker/protocol";
 import type { VersionsWire } from "../core/types";
 
@@ -19,7 +25,24 @@ export interface StatusBarProps {
   bootError: string | null;
 }
 
+/** Seconds since the page started loading, ticking while `running` and frozen afterwards. */
+function useElapsed(running: boolean): number {
+  const started = useRef(performance.now());
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!running) return;
+    const timer = window.setInterval(
+      () => setElapsed((performance.now() - started.current) / 1000),
+      250,
+    );
+    return () => window.clearInterval(timer);
+  }, [running]);
+  return elapsed;
+}
+
 export function StatusBar({ stage, detail, versions, bootError }: StatusBarProps) {
+  const elapsed = useElapsed(versions === null && bootError === null);
+
   if (bootError !== null) {
     return (
       <div className="status-bar status-bar--error" role="alert">
@@ -50,6 +73,7 @@ export function StatusBar({ stage, detail, versions, bootError }: StatusBarProps
             </li>
           ))}
         </ol>
+        <span className="status-bar__elapsed">{elapsed.toFixed(1)} s</span>
       </div>
     );
   }

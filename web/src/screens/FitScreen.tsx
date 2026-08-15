@@ -27,6 +27,7 @@ import { ElementPalette } from "../components/ElementPalette";
 import { FitPanel } from "../components/FitPanel";
 import { ParameterTable } from "../components/ParameterTable";
 import { PlotsPanel, type ModelOverlay } from "../components/PlotsPanel";
+import { RuntimeNotice } from "../components/RuntimeNotice";
 
 /** The simplest circuit there is. Anything else would be a guess about the device. */
 export const INITIAL_CIRCUIT = "R1";
@@ -288,15 +289,19 @@ export function FitScreen({
 
   if (spectrum === null) {
     return (
-      <p className="empty-hint">
-        Load a spectrum on the Data screen first: a circuit is fitted to data, and the search
-        bounds are derived from the data too.
-      </p>
+      <>
+        <RuntimeNotice ready={ready} />
+        <p className="empty-hint">
+          Load a spectrum on the Data screen first: a circuit is fitted to data, and the search
+          bounds are derived from the data too.
+        </p>
+      </>
     );
   }
 
   return (
     <div className="fit-screen">
+      <RuntimeNotice ready={ready} />
       <div className="fit-screen__build">
         {catalogue !== null && (
           <ElementPalette catalogue={catalogue} armedCode={armedCode} onArm={setArmedCode} />

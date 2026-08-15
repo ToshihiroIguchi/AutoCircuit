@@ -6,14 +6,9 @@
 import { useMemo, useState } from "react";
 import type Plotly from "plotly.js";
 import type { LoadedSpectrum } from "../core/types";
+import { usePlotTokens, type PlotTokens } from "../core/theme";
 import { decodeArray, decodeComplexArray } from "../core/wire";
 import { Plot, type RelayoutEvent } from "./Plot";
-
-// Categorical slots 1 (blue) and 2 (orange) from the project's data-viz palette: measured data
-// and the KK model overlay, an adjacent pair validated for colorblind-safe contrast.
-const MEASURED_COLOR = "#2a78d6";
-const FIT_COLOR = "#eb6834";
-const AXIS_LINE_COLOR = "#c3c2b7";
 
 type XRange = [number, number] | null;
 
@@ -84,6 +79,9 @@ export function PlotsPanel({
   model?: ModelOverlay | null;
 }) {
   const [xRange, setXRange] = useState<XRange>(null);
+  const tokens = usePlotTokens();
+  const base = plotLayoutBase(tokens);
+  const axis = axisBase(tokens);
   const { f, re, im, magnitude, phaseDeg } = useDecodedSpectrum(spectrum);
   const kk = useKKOverlay(spectrum);
   const overlay = model ?? kk;
@@ -117,8 +115,8 @@ export function PlotsPanel({
   }
 
   const freqAxis: Partial<Plotly.LayoutAxis> = xRange
-    ? { type: "log", range: xRange, title: { text: "Frequency (Hz)" } }
-    : { type: "log", autorange: true, title: { text: "Frequency (Hz)" } };
+    ? { ...axis, type: "log", range: xRange, title: { text: "Frequency (Hz)" } }
+    : { ...axis, type: "log", autorange: true, title: { text: "Frequency (Hz)" } };
 
   const nyquistData: Plotly.Data[] = [
     {
@@ -127,7 +125,7 @@ export function PlotsPanel({
       name: "Measured",
       x: Array.from(re),
       y: Array.from(im, (v) => -v),
-      marker: { color: MEASURED_COLOR, size: 5 },
+      marker: { color: tokens.measured, size: 5 },
     },
   ];
   if (fit !== null) {
@@ -137,18 +135,18 @@ export function PlotsPanel({
       name: fit.label,
       x: Array.from(fit.re),
       y: Array.from(fit.im, (v) => -v),
-      line: { color: FIT_COLOR, width: 1 },
+      line: { color: tokens.model, width: 1 },
     });
   }
   const nyquistLayout: Partial<Plotly.Layout> = {
-    ...PLOT_LAYOUT_BASE,
+    ...base,
     showlegend: fit !== null,
     title: panelTitle("Nyquist"),
-    xaxis: { title: { text: "Re(Z) (Ω)" }, zeroline: true, zerolinecolor: AXIS_LINE_COLOR },
+    xaxis: { ...axis, title: { text: "Re(Z) (Ω)" }, zeroline: true },
     yaxis: {
+      ...axis,
       title: { text: "-Im(Z) (Ω)" },
       zeroline: true,
-      zerolinecolor: AXIS_LINE_COLOR,
       scaleanchor: "x",
       scaleratio: 1,
     },
@@ -161,7 +159,7 @@ export function PlotsPanel({
       name: "Measured",
       x: Array.from(f),
       y: Array.from(magnitude),
-      marker: { color: MEASURED_COLOR, size: 5 },
+      marker: { color: tokens.measured, size: 5 },
     },
   ];
   if (fit !== null) {
@@ -171,15 +169,15 @@ export function PlotsPanel({
       name: fit.label,
       x: Array.from(f),
       y: Array.from(fit.magnitude),
-      line: { color: FIT_COLOR, width: 1 },
+      line: { color: tokens.model, width: 1 },
     });
   }
   const magnitudeLayout: Partial<Plotly.Layout> = {
-    ...PLOT_LAYOUT_BASE,
+    ...base,
     showlegend: fit !== null,
     title: panelTitle("Bode magnitude"),
     xaxis: freqAxis,
-    yaxis: { type: "log", title: { text: "|Z| (Ω)" } },
+    yaxis: { ...axis, type: "log", title: { text: "|Z| (Ω)" } },
   };
 
   const phaseData: Plotly.Data[] = [
@@ -189,7 +187,7 @@ export function PlotsPanel({
       name: "Measured",
       x: Array.from(f),
       y: Array.from(phaseDeg),
-      marker: { color: MEASURED_COLOR, size: 5 },
+      marker: { color: tokens.measured, size: 5 },
     },
   ];
   if (fit !== null) {
@@ -201,28 +199,28 @@ export function PlotsPanel({
       name: fit.label,
       x: Array.from(f),
       y: Array.from(fit.phaseDeg),
-      line: { color: FIT_COLOR, width: 1 },
+      line: { color: tokens.model, width: 1 },
     });
   }
   const phaseLayout: Partial<Plotly.Layout> = {
-    ...PLOT_LAYOUT_BASE,
+    ...base,
     showlegend: fit !== null,
     title: panelTitle("Bode phase"),
     xaxis: freqAxis,
-    yaxis: { title: { text: "arg(Z) (deg)" } },
+    yaxis: { ...axis, title: { text: "arg(Z) (deg)" } },
   };
 
   const hasResiduals =
     overlay !== null && overlay.residualReal !== null && overlay.residualImag !== null;
   const residualLayout: Partial<Plotly.Layout> = {
-    ...PLOT_LAYOUT_BASE,
+    ...base,
     showlegend: true,
     title: panelTitle(overlay?.residualTitle ?? "Residuals"),
     xaxis: freqAxis,
     yaxis: {
+      ...axis,
       title: { text: `Residual (${overlay?.residualUnit ?? "%"})` },
       zeroline: true,
-      zerolinecolor: AXIS_LINE_COLOR,
     },
   };
 
@@ -246,7 +244,7 @@ export function PlotsPanel({
         {hasResiduals && overlay !== null ? (
           <Plot
             className="plots-panel__plot"
-            data={residualData(f, overlay)}
+            data={residualData(f, overlay, tokens)}
             layout={residualLayout}
             onRelayout={handleFreqRelayout}
           />
@@ -264,7 +262,11 @@ export function PlotsPanel({
   );
 }
 
-function residualData(f: Float64Array, overlay: ModelOverlay): Plotly.Data[] {
+function residualData(
+  f: Float64Array,
+  overlay: ModelOverlay,
+  tokens: PlotTokens,
+): Plotly.Data[] {
   // A fraction is drawn as a percentage; anything else is drawn as it arrived. The Lin-KK
   // residuals are relative, the fit's are the weighted ones it minimised, and rescaling the
   // second like the first would put a percent sign on a number that is not one.
@@ -276,8 +278,8 @@ function residualData(f: Float64Array, overlay: ModelOverlay): Plotly.Data[] {
       name: "Re(Z) residual",
       x: Array.from(f),
       y: Array.from(overlay.residualReal ?? [], (v) => v * scale),
-      marker: { color: MEASURED_COLOR, size: 4 },
-      line: { color: MEASURED_COLOR, width: 1 },
+      marker: { color: tokens.measured, size: 4 },
+      line: { color: tokens.measured, width: 1 },
     },
     {
       type: "scatter",
@@ -285,21 +287,42 @@ function residualData(f: Float64Array, overlay: ModelOverlay): Plotly.Data[] {
       name: "Im(Z) residual",
       x: Array.from(f),
       y: Array.from(overlay.residualImag ?? [], (v) => v * scale),
-      marker: { color: FIT_COLOR, size: 4 },
-      line: { color: FIT_COLOR, width: 1 },
+      marker: { color: tokens.model, size: 4 },
+      line: { color: tokens.model, width: 1 },
     },
   ];
 }
 
-const PLOT_LAYOUT_BASE: Partial<Plotly.Layout> = {
-  margin: { l: 56, r: 16, t: 32, b: 44 },
-  // No height here on purpose: `.plots-panel__plot` sets it in CSS and the responsive config
-  // makes Plotly fill that box. See the comment there for what happens when it is the other
-  // way round.
-  font: { family: "system-ui, -apple-system, 'Segoe UI', sans-serif", size: 11 },
-  showlegend: false,
-  legend: { orientation: "h", x: 1, xanchor: "right", y: 1.02, yanchor: "bottom", font: { size: 10 } },
-  paper_bgcolor: "transparent",
-  plot_bgcolor: "transparent",
-};
+// The backgrounds stay transparent so the panel behind them supplies the plane, which is what
+// makes a theme switch reach the plots at all; everything drawn *on* that plane is a canvas and
+// has to be told its colour explicitly.
+function plotLayoutBase(tokens: PlotTokens): Partial<Plotly.Layout> {
+  return {
+    margin: { l: 56, r: 16, t: 32, b: 44 },
+    // No height here on purpose: `.plots-panel__plot` sets it in CSS and the responsive config
+    // makes Plotly fill that box. See the comment there for what happens when it is the other
+    // way round.
+    font: {
+      family: "system-ui, -apple-system, 'Segoe UI', sans-serif",
+      size: 11,
+      color: tokens.text,
+    },
+    showlegend: false,
+    legend: {
+      orientation: "h",
+      x: 1,
+      xanchor: "right",
+      y: 1.02,
+      yanchor: "bottom",
+      font: { size: 10 },
+    },
+    paper_bgcolor: "transparent",
+    plot_bgcolor: "transparent",
+  };
+}
+
+/** Gridlines and axis lines. Plotly's defaults are a near-white grid, invisible on a dark plane. */
+function axisBase(tokens: PlotTokens): Partial<Plotly.LayoutAxis> {
+  return { gridcolor: tokens.grid, linecolor: tokens.axis, zerolinecolor: tokens.axis };
+}
 

@@ -7,6 +7,7 @@ import type { LoadedSpectrum } from "../core/types";
 import { DropZone } from "../components/DropZone";
 import { KKPanel } from "../components/KKPanel";
 import { PlotsPanel } from "../components/PlotsPanel";
+import { SamplePanel } from "../components/SamplePanel";
 import { SpectraTable } from "../components/SpectraTable";
 import { TrimPanel } from "../components/TrimPanel";
 
@@ -35,6 +36,8 @@ export function DataScreen(props: DataScreenProps) {
   return (
     <>
       <DropZone disabled={!props.ready} dragActive={props.dragActive} onFiles={props.onFiles} />
+
+      <SamplePanel disabled={!props.ready} onFile={(file) => props.onFiles([file])} />
 
       {props.fileErrors.length > 0 && (
         <ul className="file-errors">

@@ -17,6 +17,7 @@ import type { SearchPool } from "../worker/pool";
 import { ParetoTable } from "../components/ParetoTable";
 import { SearchPanel } from "../components/SearchPanel";
 import { SearchProgressPanel } from "../components/SearchProgress";
+import { RuntimeNotice } from "../components/RuntimeNotice";
 
 export interface DiscoverScreenProps {
   client: BridgeClient;
@@ -159,15 +160,19 @@ export function DiscoverScreen({
 
   if (spectrum === null) {
     return (
-      <p className="empty-hint">
-        Load a spectrum on the Data screen first: a search is a search against data, and the
-        candidate topologies are screened and refitted against it.
-      </p>
+      <>
+        <RuntimeNotice ready={ready} />
+        <p className="empty-hint">
+          Load a spectrum on the Data screen first: a search is a search against data, and the
+          candidate topologies are screened and refitted against it.
+        </p>
+      </>
     );
   }
 
   return (
     <div className="discover-screen">
+      <RuntimeNotice ready={ready} />
       <SearchPanel
         poolNames={catalogue === null ? [poolName] : Object.keys(catalogue.pools)}
         poolName={poolName}

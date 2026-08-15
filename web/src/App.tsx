@@ -23,8 +23,10 @@ import type {
   VersionsWire,
 } from "./core/types";
 import { ExcludedRun, idleExcluded, type ExcludedProgress } from "./core/excluded";
+import { ThemeContext, useTheme } from "./core/theme";
 import { SearchPool } from "./worker/pool";
 import { StatusBar } from "./components/StatusBar";
+import { ThemeToggle } from "./components/ThemeToggle";
 import { DataScreen, type FileError } from "./screens/DataScreen";
 import {
   DiscoverScreen,
@@ -110,6 +112,8 @@ export function App() {
   const [detail, setDetail] = useState("Starting the Python runtime");
   const [versions, setVersions] = useState<VersionsWire | null>(null);
   const [bootError, setBootError] = useState<string | null>(null);
+
+  const { choice: themeChoice, resolved: theme, setChoice: setTheme } = useTheme();
 
   const [screen, setScreen] = useState<Screen>("data");
   // Owned here, not by FitScreen, because the Discover screen offers this same circuit as a
@@ -396,6 +400,7 @@ export function App() {
       <header className="app-header">
         <h1>AutoCircuit</h1>
         <StatusBar stage={stage} detail={detail} versions={versions} bootError={bootError} />
+        <ThemeToggle choice={themeChoice} onChoice={setTheme} />
       </header>
 
       <nav className="app-tabs">
@@ -412,56 +417,61 @@ export function App() {
         ))}
       </nav>
 
-      {screen === "data" ? (
-        <DataScreen
-          ready={ready}
-          dragActive={dragActive}
-          spectra={spectra}
-          selected={selected}
-          selectedId={selectedId}
-          fileErrors={fileErrors}
-          onFiles={handleFiles}
-          onSelect={setSelectedId}
-          onRemove={removeSpectrum}
-          onDismissError={dismissFileError}
-          onApplyTrim={applyTrim}
-          onResetTrim={resetTrim}
-        />
-      ) : screen === "fit" ? (
-        <FitScreen
-          client={client}
-          ready={ready}
-          spectrum={selected}
-          circuit={circuit}
-          onCircuit={setCircuit}
-          onFit={setManualFit}
-        />
-      ) : screen === "discover" ? (
-        <DiscoverScreen
-          client={client}
-          ready={ready}
-          spectrum={selected}
-          skeleton={skeleton}
-          acquirePool={acquirePool}
-          settings={search}
-          onSettings={changeSearch}
-          onReport={setDiscovery}
-        />
-      ) : (
-        <ReportScreen
-          client={client}
-          ready={ready}
-          spectra={spectra}
-          spectrum={selected}
-          discovery={discovery}
-          manualFit={manualFit}
-          excluded={excluded}
-          drt={drt}
-          onRunExcluded={() => void runExcluded()}
-          onCancelExcluded={cancelExcluded}
-          onRunDrt={(wire) => void runDrt(wire)}
-        />
-      )}
+      {/* Only the plots read this, and they read it as a value rather than as CSS -- Plotly draws
+          into a canvas, which no stylesheet reaches. It wraps the screens rather than the page
+          because nothing above here has a colour that is not already a custom property. */}
+      <ThemeContext.Provider value={theme}>
+        {screen === "data" ? (
+          <DataScreen
+            ready={ready}
+            dragActive={dragActive}
+            spectra={spectra}
+            selected={selected}
+            selectedId={selectedId}
+            fileErrors={fileErrors}
+            onFiles={handleFiles}
+            onSelect={setSelectedId}
+            onRemove={removeSpectrum}
+            onDismissError={dismissFileError}
+            onApplyTrim={applyTrim}
+            onResetTrim={resetTrim}
+          />
+        ) : screen === "fit" ? (
+          <FitScreen
+            client={client}
+            ready={ready}
+            spectrum={selected}
+            circuit={circuit}
+            onCircuit={setCircuit}
+            onFit={setManualFit}
+          />
+        ) : screen === "discover" ? (
+          <DiscoverScreen
+            client={client}
+            ready={ready}
+            spectrum={selected}
+            skeleton={skeleton}
+            acquirePool={acquirePool}
+            settings={search}
+            onSettings={changeSearch}
+            onReport={setDiscovery}
+          />
+        ) : (
+          <ReportScreen
+            client={client}
+            ready={ready}
+            spectra={spectra}
+            spectrum={selected}
+            discovery={discovery}
+            manualFit={manualFit}
+            excluded={excluded}
+            drt={drt}
+            onRunExcluded={() => void runExcluded()}
+            onCancelExcluded={cancelExcluded}
+            onRunDrt={(wire) => void runDrt(wire)}
+          />
+        )}
+      </ThemeContext.Provider>
     </div>
   );
 }
