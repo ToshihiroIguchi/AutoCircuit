@@ -1,0 +1,80 @@
+# Builds the static site and publishes it to GitHub Pages.
+#
+# The build needs Python as well as Node: `npm run assets` archives the package with
+# benchmarks/pyodide/make_zip.py and then generates the example spectra by running the project's
+# own `simulate` command, which is what keeps the site from shipping data the command line would
+# not itself produce. It also fetches the numpy and scipy wheels, since the npm `pyodide` package
+# carries the runtime but not those -- see web/scripts/build-assets.mjs.
+#
+# Nothing here computes anything for the site: there is no server and there will not be one
+# (docs/WEB_UI_PLAN.md section 7). This publishes files.
+
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One publication at a time. A newer commit waits rather than cancelling a deployment already in
+# flight, because a half-replaced site is worse than a slightly old one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # numpy and scipy, which `simulate` needs and which are the only runtime dependencies this
+      # package has (CLAUDE.md).
+      - name: Install the package
+        run: pip install -e .
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install the front end
+        run: npm ci
+        working-directory: web
+
+      # Runs the asset build, then `tsc --noEmit`, then vite. A type error fails the deployment
+      # rather than shipping past it.
+      - name: Build the site
+        run: npm run build
+        working-directory: web
+
+      # The Python path end to end under Pyodide, headless. It is the only check here that
+      # exercises what the browser will actually run, so a site that cannot read a file or finish
+      # a search does not get published.
+      - name: Check the Python path under Pyodide
+        run: npm run smoke
+        working-directory: web
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
