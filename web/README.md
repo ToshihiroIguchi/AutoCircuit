@@ -4,14 +4,17 @@ The same Python core the CLI runs, in a static site: Vite + React on the front, 
 it. There is no server and there will not be one — see `docs/WEB_UI_PLAN.md` §7.
 
 Live at **<https://toshihiroiguchi.github.io/AutoCircuit/>**, published by
-`.github/workflows/pages.yml` on every push to `main`. That workflow gates on `tsc --noEmit` and
-on `npm run smoke`, so a push that breaks the Python path fails instead of replacing the site.
+`.github/workflows/pages.yml` on every push to `main`. That workflow gates on `npm run check`
+— the types and the schematic's geometry — and on `npm run smoke`, so a push that breaks the
+Python path fails instead of replacing the site.
 
 ```powershell
 cd web
 npm install
 npm run dev          # http://localhost:5173
 npm run build        # -> dist/, deployable as static files
+npm run check        # tsc --noEmit, then the schematic geometry
+npm run schematic    # the canvas's geometry alone -- docs/SCHEMATIC_PLAN.md §5
 npm run smoke        # the Python path under Pyodide, headless, no browser
 ```
 
@@ -103,6 +106,11 @@ Two rules hold this together, both from `docs/WEB_UI_PLAN.md` §4:
   parsed and sends back "this action, at this path"; the `edit` operation performs the surgery
   and answers with the circuit that resulted. The canvas cannot write a circuit string, which is
   what keeps the grammar from having a second implementation here.
+- **The schematic is computed, not laid out.** `src/core/schematic.ts` turns that tree into
+  coordinates and `CircuitCanvas` paints them into an SVG, with the handles as HTML buttons in a
+  layer above it. Wires are segments between computed points rather than borders on boxes, which
+  is what makes them checkable — `npm run schematic`, and `docs/SCHEMATIC_PLAN.md` for why the
+  previous version could not be.
 
 A file the user drops is written into the Pyodide filesystem and read from there by
 `autocircuit.io.read_many`, so format sniffing, the extension hints and the multi-sweep readers

@@ -897,106 +897,136 @@ body {
 }
 
 /* ---- circuit canvas ----
-   The schematic is laid out with flexbox rather than drawn: a series run is a row, a parallel
-   block is a stack of rows between two rails. The wires are borders on those boxes, so the
-   picture reflows with the page instead of needing a coordinate system. */
+   The schematic is computed rather than laid out: src/core/schematic.ts turns the parsed tree into
+   coordinates, and this file only says what the ink looks like. Two layers share those
+   coordinates -- an SVG that paints the circuit and takes no clicks, and absolutely positioned
+   buttons that take every click. No rule below draws a wire, which is the reason an affordance can
+   no longer be mistaken for a conductor: the dashed "add a branch" line that used to sit inside a
+   parallel block's rails is a button now, outside them. */
 
 .canvas {
   display: flex;
-  align-items: center;
-  gap: 0;
   overflow-x: auto;
-  padding: 14px 6px;
+  /* Room above the top row for the hover tools, which sit just clear of an element's label. */
+  padding: 16px 6px 6px;
   min-height: 74px;
 }
 
-.canvas__terminal {
-  flex: 0 0 12px;
-  height: 1px;
-  background: var(--text-secondary);
-}
-
-.cc-series {
-  display: flex;
-  align-items: center;
-}
-
-.cc-parallel {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 4px;
-  border-left: 1px solid var(--text-secondary);
-  border-right: 1px solid var(--text-secondary);
-  padding: 4px 0;
+.cc {
   position: relative;
+  flex: 0 0 auto;
 }
 
-.cc-parallel__branches {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+.cc__paint {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  overflow: visible;
 }
 
-.cc-branch {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.cc__wires line {
+  stroke: var(--text-secondary);
+  stroke-width: 1.25;
 }
 
-/* The stubs that join a branch to the two rails. Without them a short branch floats between
-   them and the block stops reading as a connection. */
-.cc-branch::before,
-.cc-branch::after {
-  content: "";
-  flex: 1 0 10px;
-  height: 1px;
-  background: var(--text-secondary);
+/* Three or more wires meeting. Two meeting is a corner and gets no dot. */
+.cc__junction {
+  fill: var(--text-secondary);
 }
 
-.cc-element {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  position: relative;
+/* A symbol is stroked in the text colour and filled with the surface, so nothing shows through
+   the body of an element that has one. */
+.cc-sym line,
+.cc-sym path,
+.cc-sym rect {
+  stroke: var(--text-primary);
+  stroke-width: 1.25;
+  stroke-linecap: round;
+  fill: none;
 }
 
-.cc-element__body {
+/* Opaque, and specific enough to beat the `fill: none` above: a boxed element is wider than the
+   leads the layout drew up to it, so an unfilled box would have two stubs poking into it. */
+.cc-sym .cc-sym__fill {
+  fill: var(--surface-1);
+}
+
+.cc-sym__label {
   font-family: var(--font-mono);
-  font-size: 12px;
-  min-width: 54px;
-  padding: 8px 10px;
-  border: 1px solid var(--text-secondary);
-  border-radius: 2px;
-  background: var(--surface-1);
+  font-size: 11px;
+  fill: var(--text-secondary);
+  stroke: none;
+  text-anchor: middle;
+}
+
+/* The code inside the box of an element that has no standard symbol -- see ElementSymbol.tsx. */
+.cc-sym__code {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  fill: var(--text-secondary);
+  stroke: none;
+  text-anchor: middle;
+}
+
+.cc-sym--selected line,
+.cc-sym--selected path,
+.cc-sym--selected rect {
+  stroke: var(--series-1);
+}
+
+.cc-sym--selected .cc-sym__fill {
+  fill: var(--row-selected-bg);
+}
+
+.cc-sym--selected .cc-sym__label,
+.cc-sym--selected .cc-sym__code {
+  fill: var(--series-1);
+}
+
+/* The handles over one element: a transparent hit area the size of its cell, and the two tools
+   that appear on it. They are see-through on purpose -- the drawing underneath is the element. */
+.cc-el {
+  position: absolute;
+}
+
+.cc-el__pick {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: none;
   cursor: pointer;
 }
 
-.cc-element__body:hover {
-  border-color: var(--series-1);
+.cc-el__pick:hover {
+  box-shadow: inset 0 0 0 1px var(--accent-ring);
 }
 
-.cc-element--selected .cc-element__body {
-  border-color: var(--series-1);
-  box-shadow: 0 0 0 2px var(--accent-ring);
+.cc-el--selected .cc-el__pick,
+.cc-el__pick:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--series-1);
+  outline: none;
 }
 
-.cc-element__tools {
+.cc-el__tools {
   display: flex;
   gap: 2px;
   position: absolute;
-  top: -13px;
-  right: -6px;
+  top: -14px;
+  right: -8px;
   opacity: 0;
   transition: opacity 80ms linear;
 }
 
-.cc-element:hover .cc-element__tools,
-.cc-element--selected .cc-element__tools {
+.cc-el:hover .cc-el__tools,
+.cc-el--selected .cc-el__tools,
+.cc-el__tools:focus-within {
   opacity: 1;
 }
 
-.cc-element__tool {
+.cc-el__tool {
   font-family: inherit;
   font-size: 10px;
   line-height: 1;
@@ -1010,72 +1040,82 @@ body {
   cursor: pointer;
 }
 
-.cc-element__tool:hover:not(:disabled) {
+.cc-el__tool:hover:not(:disabled) {
   border-color: var(--series-1);
   color: var(--series-1);
 }
 
-.cc-element__tool--remove:hover:not(:disabled) {
+.cc-el__tool--remove:hover:not(:disabled) {
   border-color: var(--status-critical);
   color: var(--status-critical);
 }
 
-.cc-element__tool:disabled {
+.cc-el__tool:disabled {
   opacity: 0.35;
   cursor: default;
 }
 
-/* A slot is the wire between two elements: a thin line that grows a + when it can take one. */
+/* A slot is a place an element can go, and it looks like a button rather than like wiring: faint
+   while the pointer is anywhere on the schematic, plainer once the palette has armed something. */
 .cc-slot {
-  position: relative;
-  flex: 0 0 auto;
-  width: 22px;
-  height: 22px;
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 0;
   border: none;
   background: none;
-  color: transparent;
+  font-family: var(--font-ui);
   font-size: 11px;
   line-height: 1;
   cursor: pointer;
+  opacity: 0;
+  transition: opacity 80ms linear;
 }
 
-.cc-slot::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 50%;
-  height: 1px;
-  background: var(--text-secondary);
+.cc:hover .cc-slot {
+  opacity: 0.5;
+}
+
+.cc--armed .cc-slot {
+  opacity: 0.75;
 }
 
 .cc-slot:hover:not(:disabled),
 .cc-slot:focus-visible {
-  color: var(--series-1);
+  opacity: 1;
+  outline: none;
+}
+
+.cc-slot span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface-1);
+  color: var(--text-secondary);
 }
 
 .cc-slot:hover:not(:disabled) span,
 .cc-slot:focus-visible span {
-  position: relative;
-  display: inline-block;
-  background: var(--surface-1);
-  border: 1px solid var(--series-1);
-  border-radius: 50%;
-  width: 15px;
-  height: 15px;
+  border-color: var(--series-1);
+  color: var(--series-1);
 }
 
-.cc-slot--branch {
+.cc-slot:disabled {
+  cursor: default;
+}
+
+/* The one that adds a branch to a parallel block sits below it, wide enough to read as a button
+   and never on the line of a wire. */
+.cc-slot--branch span {
   width: 100%;
-  height: 16px;
-}
-
-.cc-slot--branch::before {
-  left: 25%;
-  right: 25%;
-  border-top: 1px dashed var(--text-muted);
-  background: none;
+  height: 100%;
+  border-radius: 9px;
+  background: var(--surface-2);
 }
 
 .circuit-panel__field {

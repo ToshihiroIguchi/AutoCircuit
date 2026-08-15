@@ -98,6 +98,16 @@ static-site Web UI running the same core via WASM (Pyodide).
    built, because a service worker would put a cache between every visitor and a site that
    republishes on every push. A gate written from an expectation is withdrawn with the measurement
    beside it, never reworded into something the build already does.
+6. `docs/SCHEMATIC_PLAN.md` — how the Fit screen draws the circuit. **Implemented; gates S1–S4
+   measured.** The picture is computed rather than laid out: `web/src/core/schematic.ts` turns the
+   parsed tree into coordinates, which is what makes "every wire is axis-aligned", "no wire ends
+   in mid-air" and "a junction dot exactly where three or more wires meet" assertions rather than
+   screenshots — `npm run schematic`, and `npm run check` runs it, so a broken schematic cannot
+   be published. Its §3 is the part to read before adding an element symbol: R, C and L are drawn
+   as IEC 60617 has them, and everything else is drawn as a box carrying its code **because no
+   standard symbol for a CPE or a Warburg exists**, which is a fact about the field and not a
+   placeholder to be improved on. §5 records the five mutants the geometry gate was shown to
+   catch, one of which it did not catch until a check was added for it.
 
 Update these when decisions change.
 

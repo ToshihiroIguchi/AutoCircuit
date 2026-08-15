@@ -642,6 +642,10 @@ Plots: linked Nyquist / Bode(|Z|, θ) / residuals, zoom-synced, log axes. Plotly
 - **The web UI must not fork the science.** Every number it displays comes from the same
   functions the CLI calls. If the browser needs different behaviour, it gets a different
   *argument*, not a different code path.
+- **The schematic must not assert a connection the circuit does not have.** The canvas draws
+  wires and nothing else that looks like one: an editing affordance is a button, never a line.
+  The geometry that makes this checkable, and the gate that checks it, are in
+  `docs/SCHEMATIC_PLAN.md`; `npm run check` runs it.
 
 ## 5. Work order
 

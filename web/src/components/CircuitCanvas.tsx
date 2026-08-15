@@ -1,14 +1,28 @@
 // The schematic, drawn from the tree Python parsed and edited by sending positions back to it.
 //
-// Every box and every slot here carries a `path`: the list of child indices that addresses it
+// Every symbol and every handle here carries a `path`: the list of child indices that addresses it
 // from the root, which is exactly what `autocircuit.core.circuit.subtree_at` takes. So an edit
 // is "insert an R after this path", never "rebuild the string like this". This file knows how a
 // series block and a parallel block look; it does not know what either one means, and it cannot
 // produce a circuit the command line would read differently, because it never writes one.
+//
+// It is drawn in two layers over the same coordinates, and the split is the point:
+//
+//   * an SVG that paints the circuit -- wires, junction dots, symbols -- and takes no clicks;
+//   * absolutely positioned HTML buttons for everything that can be done to it.
+//
+// Keeping them apart is what stops the picture from lying. The previous canvas drew its "add a
+// branch here" affordance as a dashed line inside a parallel block's rails, where it read as a
+// third branch wired to nothing; here an affordance is a button, a wire is a wire, and no handle
+// is ever drawn as a conductor. It also keeps the handles as real <button>s -- focusable,
+// labelled, drop targets -- rather than SVG shapes wearing ARIA roles.
 
-import { Fragment } from "react";
+import { useMemo } from "react";
 import type { DragEvent } from "react";
 import type { CircuitNodeWire } from "../core/types";
+import type { SlotPlacement } from "../core/schematic";
+import { GEOMETRY, layoutSchematic } from "../core/schematic";
+import { ElementSymbol } from "./ElementSymbol";
 
 export interface CircuitCanvasProps {
   tree: CircuitNodeWire;
@@ -46,153 +60,113 @@ function samePath(a: number[] | null, b: number[]): boolean {
 }
 
 export function CircuitCanvas(props: CircuitCanvasProps) {
+  const layout = useMemo(() => layoutSchematic(props.tree), [props.tree]);
+  const { armedCode, busy, onSelect, onRemove } = props;
+
   return (
     <div className="canvas">
-      <span className="canvas__terminal" aria-hidden="true" />
-      <Chain node={props.tree} {...props} />
-      <span className="canvas__terminal" aria-hidden="true" />
-    </div>
-  );
-}
+      <div
+        className={`cc${armedCode === null ? "" : " cc--armed"}`}
+        style={{ width: layout.width, height: layout.height }}
+      >
+        <svg
+          className="cc__paint"
+          width={layout.width}
+          height={layout.height}
+          viewBox={`0 0 ${layout.width} ${layout.height}`}
+          aria-hidden="true"
+          focusable="false"
+        >
+          <g className="cc__wires">
+            {layout.wires.map((wire, index) => (
+              <line
+                key={`w${index}`}
+                x1={wire.x1}
+                y1={wire.y1}
+                x2={wire.x2}
+                y2={wire.y2}
+                shapeRendering="crispEdges"
+              />
+            ))}
+          </g>
+          {layout.junctions.map((dot, index) => (
+            <circle key={`j${index}`} className="cc__junction" cx={dot.x} cy={dot.y} r={2.5} />
+          ))}
+          {layout.elements.map((element) => (
+            <ElementSymbol
+              key={element.path.join(".")}
+              placement={element}
+              selected={samePath(props.selectedPath, element.path)}
+            />
+          ))}
+        </svg>
 
-/**
- * A run of elements in series, with a slot before, between and after each of them.
- *
- * A lone element is drawn as a run of one, so the same slots appear around it. That is not a
- * special case in the model: inserting in series next to a leaf and appending to the block it
- * sits in are the same operation on the Python side, because `series(...)` flattens.
- */
-function Chain({ node, ...props }: CircuitCanvasProps & { node: CircuitNodeWire }) {
-  const children = node.kind === "series" ? node.children : [node];
-  const first = children[0] as CircuitNodeWire;
-  return (
-    <div className="cc-series">
-      <Slot
-        {...props}
-        path={first.path}
-        action="series"
-        position="before"
-        label={describe(first)}
-      />
-      {children.map((child) => (
-        <Fragment key={child.path.join(".")}>
-          <Node node={child} {...props} />
-          <Slot
-            {...props}
-            path={child.path}
-            action="series"
-            position="after"
-            label={describe(child)}
-          />
-        </Fragment>
-      ))}
-    </div>
-  );
-}
+        {layout.elements.map((element) => {
+          const selected = samePath(props.selectedPath, element.path);
+          return (
+            <div
+              key={element.path.join(".")}
+              className={`cc-el${selected ? " cc-el--selected" : ""}`}
+              style={{ left: element.x, top: element.y, width: element.w, height: element.h }}
+            >
+              <button
+                type="button"
+                className="cc-el__pick"
+                onClick={() => onSelect(element.path)}
+                title={`${element.name} (${element.code})`}
+                aria-pressed={selected}
+                aria-label={`Select ${element.label}, ${element.name}`}
+              />
+              <span className="cc-el__tools">
+                <button
+                  type="button"
+                  className="cc-el__tool"
+                  disabled={busy || armedCode === null}
+                  onClick={() =>
+                    armedCode !== null && props.onInsert(element.path, "parallel", "after", armedCode)
+                  }
+                  title={
+                    armedCode === null
+                      ? "Pick an element in the palette first"
+                      : `Put ${armedCode} in parallel with ${element.label}`
+                  }
+                  aria-label={`Add an element in parallel with ${element.label}`}
+                >
+                  &#8741;
+                </button>
+                <button
+                  type="button"
+                  className="cc-el__tool cc-el__tool--remove"
+                  disabled={busy}
+                  onClick={() => onRemove(element.path)}
+                  title={`Delete ${element.label}`}
+                  aria-label={`Delete ${element.label}`}
+                >
+                  &times;
+                </button>
+              </span>
+            </div>
+          );
+        })}
 
-function Node({ node, ...props }: CircuitCanvasProps & { node: CircuitNodeWire }) {
-  if (node.kind === "element") {
-    return <ElementBox node={node} selected={samePath(props.selectedPath, node.path)} {...props} />;
-  }
-  if (node.kind === "series") {
-    // Parsing flattens nested series, so this is unreachable for a real circuit; drawing it as
-    // a chain rather than throwing keeps a future tree shape from blanking the screen.
-    return <Chain node={node} {...props} />;
-  }
-  return (
-    <div className="cc-parallel">
-      <div className="cc-parallel__branches">
-        {node.children.map((child) => (
-          <div className="cc-branch" key={child.path.join(".")}>
-            <Chain node={child} {...props} />
-          </div>
+        {layout.slots.map((slot) => (
+          <Slot key={slot.key} slot={slot} {...props} />
         ))}
       </div>
-      <Slot
-        {...props}
-        path={node.path}
-        action="parallel"
-        position="after"
-        label={describe(node)}
-        branch
-      />
-    </div>
-  );
-}
-
-function describe(node: CircuitNodeWire): string {
-  if (node.kind === "element") return node.label;
-  return node.kind === "series" ? "this series block" : "this parallel block";
-}
-
-function ElementBox({
-  node,
-  selected,
-  busy,
-  onSelect,
-  onInsert,
-  onRemove,
-  armedCode,
-}: CircuitCanvasProps & { node: CircuitNodeWire & { kind: "element" }; selected: boolean }) {
-  return (
-    <div className={`cc-element${selected ? " cc-element--selected" : ""}`}>
-      <button
-        type="button"
-        className="cc-element__body"
-        onClick={() => onSelect(node.path)}
-        title={`${node.name} (${node.code})`}
-        aria-pressed={selected}
-      >
-        {node.label}
-      </button>
-      <span className="cc-element__tools">
-        <button
-          type="button"
-          className="cc-element__tool"
-          disabled={busy || armedCode === null}
-          onClick={() => armedCode !== null && onInsert(node.path, "parallel", "after", armedCode)}
-          title={
-            armedCode === null
-              ? "Pick an element in the palette first"
-              : `Put ${armedCode} in parallel with ${node.label}`
-          }
-          aria-label={`Add an element in parallel with ${node.label}`}
-        >
-          &#8741;
-        </button>
-        <button
-          type="button"
-          className="cc-element__tool cc-element__tool--remove"
-          disabled={busy}
-          onClick={() => onRemove(node.path)}
-          title={`Delete ${node.label}`}
-          aria-label={`Delete ${node.label}`}
-        >
-          &times;
-        </button>
-      </span>
     </div>
   );
 }
 
 function Slot({
-  path,
-  action,
-  position,
-  label,
-  branch = false,
+  slot,
   busy,
   armedCode,
   onInsert,
-}: CircuitCanvasProps & {
-  path: number[];
-  action: "series" | "parallel";
-  position: "before" | "after";
-  label: string;
-  branch?: boolean;
-}) {
+}: CircuitCanvasProps & { slot: SlotPlacement }) {
+  const branch = slot.action === "parallel";
+
   function place(code: string): void {
-    if (!busy) onInsert(path, action, position, code);
+    if (!busy) onInsert(slot.path, slot.action, slot.position, code);
   }
 
   function handleDrop(event: DragEvent): void {
@@ -210,11 +184,14 @@ function Slot({
     }
   }
 
-  const what = branch ? "as a new branch of" : `${position}`;
+  const width = branch ? 34 : GEOMETRY.slotSize;
+  const height = branch ? GEOMETRY.chipH : GEOMETRY.slotSize;
+  const what = branch ? "as a new branch of" : slot.position;
   return (
     <button
       type="button"
       className={`cc-slot${branch ? " cc-slot--branch" : ""}`}
+      style={{ left: slot.x - width / 2, top: slot.y - height / 2, width, height }}
       disabled={busy}
       onClick={() => armedCode !== null && place(armedCode)}
       onDragOver={handleDragOver}
@@ -222,9 +199,9 @@ function Slot({
       title={
         armedCode === null
           ? "Drag an element here, or pick one in the palette and click"
-          : `Insert ${armedCode} ${what} ${label}`
+          : `Insert ${armedCode} ${what} ${slot.label}`
       }
-      aria-label={`Insert an element ${what} ${label}`}
+      aria-label={`Insert an element ${what} ${slot.label}`}
     >
       <span aria-hidden="true">+</span>
     </button>
