@@ -21,6 +21,11 @@ benchmarks/pyodide/*.txt
 web/public/pyodide/
 web/public/autocircuit-src.zip
 web/public/samples/
+# Bytecode compiled by web/scripts/precompile.mjs, and the record of what it was compiled from.
+# Only valid for the exact interpreter Pyodide ships, which is why it is built and not committed.
+web/public/pyodide-bytecode.zip
+web/public/.bytecode-stamp
+web/.build/
 web/dist/
 # Scratch output of the browser automation used to check the web UI by hand.
 .playwright-mcp/

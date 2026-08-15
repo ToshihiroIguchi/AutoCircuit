@@ -73,8 +73,8 @@ static-site Web UI running the same core via WASM (Pyodide).
    search is allowed to claim — and §3.2 is where a guess was replaced by a measurement: a
    wrong skeleton is invisible in the residuals and in chi², and surfaces only as an asserted
    element the fit had to switch off.
-5. `docs/WEB_UI_PLAN.md` — phase 6, web UI. **All six steps done and measured**, and the site is
-   live at <https://toshihiroiguchi.github.io/AutoCircuit/> (a lossless
+5. `docs/WEB_UI_PLAN.md` — phase 6, web UI. **Complete: all seven steps done and measured**, and
+   the site is live at <https://toshihiroiguchi.github.io/AutoCircuit/> (a lossless
    `FitResult` across a worker boundary, so the browser fans out both tiers, 287 s → 123 s; the
    Data screen, whose Lin-KK verdicts match the CLI's digit for digit; the Fit screen, whose
    fits match the CLI's to every reported digit — gate W1; the Discover screen, whose search
@@ -87,9 +87,15 @@ static-site Web UI running the same core via WASM (Pyodide).
    a measurement showed one clause of a gate to be unachievable — tier-2 progress cannot stream
    once a second, because one refit takes several — and the gate was rewritten around what was
    measured rather than quietly reinterpreted, §2.6 is where a report that can be *stopped*
-   turned out to need a weaker sentence than the one it was written with, and §2.7 is where a
-   step shipped with two of its gates still open and said so instead of reading them down.
-   **Gates W3 (cold start, ~13 s against 10 s) and W5 (offline / `file://`) remain open.**
+   turned out to need a weaker sentence than the one it was written with, §2.7 is where a
+   step shipped with two of its gates still open and said so instead of reading them down, and
+   §2.8 is where those two were answered in opposite ways. **W3 passes** — the cold start went
+   ~13 s → 5.2 s once the build began shipping bytecode instead of source, so a first fit is
+   finished ~6.6 s after navigation — and **W5 is retired**: its `file://` half was measured to be
+   impossible for any packaging of this application, and its offline half was declined rather than
+   built, because a service worker would put a cache between every visitor and a site that
+   republishes on every push. A gate written from an expectation is withdrawn with the measurement
+   beside it, never reworded into something the build already does.
 
 Update these when decisions change.
 

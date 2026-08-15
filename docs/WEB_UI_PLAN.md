@@ -1,8 +1,9 @@
 # Web UI — Phase 6 Plan
 
-Status: **all six steps built and measured** (2026-08-15). The site is deployed and public:
-<https://toshihiroiguchi.github.io/AutoCircuit/>. Two gates are still open and neither was
-attacked in step 6 — W3 (cold start) and W5 (offline / `file://`); see §2.7 and §6.
+Status: **complete** (2026-08-15) — all seven steps built and measured, and every gate answered.
+The site is deployed and public: <https://toshihiroiguchi.github.io/AutoCircuit/>. W1, W2, W3,
+W4 and W6 pass; **W5 is retired**, because its `file://` half was measured to be impossible and
+its offline half was declined rather than quietly dropped — see §2.8 and §6.
 The one architectural question this plan carried is settled and prototyped — see §2.1 — and
 that prototype changed §2.2 and the work order, which is what prototypes are for. Step 2 did
 the same to §1: the cold-start figure there came from Node and is wrong for a browser by 3×, see
@@ -12,7 +13,9 @@ achievable and never had been** — see §2.5, and §6, where the gate now carri
 instead of a softer promise. Step 5 added a gate rather than closing one: W6, that a downloaded
 file is the file the command line writes, see §2.6. Step 6 shipped it — and shipped it with two
 gates open, which is recorded in §2.7 rather than smoothed over: the work it did not do is the
-work W3 needs.
+work W3 needs. Step 7 did that work and closed W3 by shipping bytecode instead of source, and
+then measured W5's `file://` half to be unreachable in principle — see §2.8, and §6, where a
+gate written from an expectation is retired rather than reworded.
 Prerequisite reading: `docs/IMPLEMENTATION_PLAN.md` §9 (the original sketch, now partly
 superseded by measurement), `benchmarks/pyodide/README.md` (every performance number below),
 and `docs/HANDOFF.md` §3.
@@ -501,6 +504,77 @@ about, and reporting it as if it were would be exactly the kind of quiet reinter
 exists to refuse. W5 (offline after first load, and `file://`) is untested; the assets are all
 same-origin and relative, which is a reason to expect it to work and not a measurement of it.
 
+### 2.8 What step 7 built, the gate it closed, and the gate it retired
+
+Step 7 is the two gates step 6 left open. One of them is now met; the other turned out to ask for
+something a browser will not do, and is withdrawn rather than reworded into something easier.
+
+**The site stops making every visitor compile Python.** A CPython import parses and compiles a
+`.py` and caches the result beside it — in a browser, on a filesystem that dies with the tab, so
+the compile is paid again by everyone. `web/scripts/precompile.mjs` does it once, at build time,
+*inside Pyodide* (a `.pyc` is only valid for the interpreter that wrote it, and this machine runs
+3.13 while the browser runs 3.14 — which is also why none of it can be checked in). Three
+artefacts come out: `python_stdlib.zip` rebuilt with a `.pyc` beside every `.py`, because
+zipimport prefers the bytecode and Pyodide's own boot imports 559 stdlib modules; a
+`pyodide-bytecode.zip` overlay unpacked into site-packages after the wheels are installed, holding
+the 576 numpy and scipy modules an `import autocircuit.web` touches; and the package archive
+rewritten with its own bytecode folded in beside the sources.
+
+**[measured] Each artefact was measured on its own** (Node, one process, alternating so machine
+drift cannot favour one row):
+
+| stdlib | overlay | package | boot | import | total |
+|--------|---------|---------|-----:|-------:|------:|
+| source | — | source | 1.36 s | 3.20 s | 5.89 s |
+| bytecode | — | source | 0.34 s | 2.72 s | 4.27 s |
+| bytecode | ✓ | source | 0.20 s | 0.99 s | 2.50 s |
+| bytecode | ✓ | bytecode | 0.34 s | 0.92 s | 2.60 s |
+
+The stdlib is worth ~1 s of it and the overlay ~1.7 s; the package's own 29 modules are worth
+~0.07 s and are included because they cost 0.27 MB and travel in an archive that already exists.
+
+**Invalidation is chosen per artefact, and it is not a detail.** None of the bytecode is
+timestamp-invalidated — the wheels are unpacked at run time with whatever mtime the browser
+invents, so a timestamp would read as stale and be recompiled, buying nothing. The stdlib zip
+gets PEP 552 *unchecked* hashes, because its sources and bytecode are one file and cannot come
+apart. The overlay and the package get *checked* hashes: a browser can hold one of those in its
+cache across a deployment and lay it over sources it was not compiled from, and unchecked
+bytecode would simply run — the kind of wrong nobody ever notices. Checked bytecode is
+recompiled when it does not match, and [measured] costs nothing visible (2.50 s → 2.60 s above
+is within this machine's drift; a same-run comparison put the checked build at 3.10 s against an
+8.78 s all-source baseline).
+
+**[measured] Cold start in a browser: ~13 s → 5.2 s, and W3 passes.** Edge 151, this machine,
+production build, a fresh port per run so the HTTP cache is genuinely cold: 5.10 / 5.70 / 4.86 s
+from navigation to a usable page, against 12.75 / 19.15 / 25.36 s for the same build without the
+bytecode, measured in the same session minutes apart. Loading the Randles example adds 0.2 s and
+fitting `R1-p(C1,R2-W1)` to it takes 1.17–1.25 s, so **a first fit is complete about 6.6 s after
+navigation**, against the gate's 10 s. The stage breakdown is now boot 0.78 s, wheels 2.2 s,
+unpack 0.23 s, import 1.5–2.0 s: the wheel install is the largest remaining stage, and the
+interpreter-bound work that §2.3 identified is no longer where the time goes. Two things this
+measurement taught, both worth keeping:
+
+- **The worker reports its own timings now** (`LoadTimings`, one `console.info` line per worker),
+  because the numbers differ by machine and browser, and a figure a visitor can read off their
+  own console is worth more than any number this project could hard-code.
+- **The page's readiness must be timed by the page.** Polling the DOM through a browser
+  automation tool measured 10.8 s where the worker's own line said 5.10 s — the poll only starts
+  when the tool's round trip lands, and it reports the moment it first looks rather than the
+  moment the page was ready. Every figure above is from the worker's clock.
+
+**[measured] W5 is withdrawn: `file://` cannot work, and offline is not being built.** Driving
+Edge over the DevTools protocol (the usual automation refuses `file://` URLs), the built
+`dist/index.html` opened as a file renders nothing: the module script and the stylesheet are both
+blocked by CORS from origin `null`. That is not a bundling choice this project can make
+differently — probing the same page shows `fetch('./autocircuit-src.zip')` blocked, a module
+worker blocked (`cannot be accessed from origin 'null'`), and a blob worker that runs but can
+fetch nothing. Pyodide loads its wasm, its stdlib and its wheels by fetch, so **no packaging of
+this application starts from a file:// page in a Chromium browser.** The offline half is
+achievable — a service worker precaching the ~41 MB of assets — and is deliberately not being
+built: it would put a cache between the visitor and every deployment, and this project publishes
+on every push. Gate W5 is therefore closed as *retired*, with both halves stated, rather than
+left open against work nobody intends to do.
+
 ## 3. Screens
 
 Following ZView's workflow, which is what the target users know:
@@ -565,6 +639,7 @@ Plots: linked Nyquist / Bode(|Z|, θ) / residuals, zoom-synced, log axes. Plotly
 | 4 | ~~Discovery job screen: progress, streaming, cancel, completeness~~ | **done** — §2.5; gates W2 and W4 measured |
 | 5 | ~~Report: equivalence classes, exports, DRT panel~~ | **done** — §2.6; gate W6 measured |
 | 6 | ~~Example datasets, loading states, dark/light, deploy to Pages~~ | **done** — §2.7; W1 re-measured from the public URL |
+| 7 | ~~The two gates step 6 left open: the cold start, and offline / `file://`~~ | **done** — §2.8; W3 passes at ~5.2 s, W5 retired |
 
 ## 6. Acceptance gates
 
@@ -583,19 +658,26 @@ Plots: linked Nyquist / Bode(|Z|, θ) / residuals, zoom-synced, log axes. Plotly
   fit. The gate was written before anyone had measured how long a browser refit takes; it is
   recorded here rather than quietly reinterpreted.
 - **W3** — cold load to an interactive first fit under 10 s on a mid-range laptop. **[measured]
-  Does not pass: ~13 s to a usable page, before any fit.** §2.3 has the breakdown and says which
-  stage is worth attacking. It was a step 6 item and **step 6 did not attack it**: the site was
-  deployed with this gate open rather than the gate being read down to meet the site. The one new
-  number, 9.3 s from the deployed URL, is a *warm-cache* load and answers a different question
-  (§2.7). The lever is unchanged — 5.8 s of import, against a wheel or a bytecode cache.
+  Passes**, §2.8: 5.2 s to a usable page and ~6.6 s to a finished first fit, cold, in Edge on
+  this machine — where the same build without step 7's bytecode took 12.75–25.36 s to the same
+  point. What closed it was not the wheel §2.3 guessed at but the compile: the stdlib, numpy,
+  scipy and this package are all shipped compiled now. Two cautions the measurement leaves
+  behind: this machine's speed drifts by about 2× within an hour (`docs/HANDOFF.md` §4), so a
+  single figure means little and the range above is the result; and a cold measurement needs a
+  *fresh origin* — a port this browser has not seen — because a reload is not a cold cache.
 - **W4** — cancel actually stops the work (not just the UI), and a cancelled run reports the
   coverage it reached rather than a wrong number. **[measured] Passes** (§2.5): the pool is
   terminated, since nothing else interrupts a running fit in a single-threaded interpreter, and
   the report distinguishes a complete screen from a shortlist that was only partly refitted.
-- **W5** — the site works offline after first load, and from `file://` as well as Pages. **Still
-  untested.** The Pages half is now demonstrated (§2.7); the offline and `file://` halves are not,
-  and the fact that every asset is same-origin and every URL relative is a reason to expect them to
-  work rather than a measurement that they do.
+- **W5** — the site works offline after first load, and from `file://` as well as Pages.
+  **Retired**, §2.8, with one half measured impossible and the other declined. The Pages half was
+  demonstrated in §2.7. The `file://` half **cannot be met by any packaging of this application**:
+  a page at a `file://` origin cannot load a module script, cannot `fetch` a sibling file and
+  cannot start a module worker, and Pyodide reaches for its wasm, its stdlib and its wheels by
+  fetch. The offline half is achievable with a service worker and is **deliberately not being
+  built**: it would interpose a cache between the visitor and a site that republishes on every
+  push. This gate was written from an expectation — "every asset is same-origin and every URL is
+  relative, so it should work" — and expectation is what it turned out to be.
 - **W6** — a file downloaded from the browser is the file the command line writes. Added with
   step 5, because an export is the one artefact of this program that outlives the session that
   produced it, and a browser-side renderer of the same format is a second implementation whose

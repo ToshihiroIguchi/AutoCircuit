@@ -23,7 +23,7 @@ import type {
   ValidationWire,
   VersionsWire,
 } from "../core/types";
-import type { LoadStage, WorkerRequest, WorkerResponse } from "./protocol";
+import type { LoadStage, LoadTimings, WorkerRequest, WorkerResponse } from "./protocol";
 
 /** A failure the Python side reported, as opposed to one the transport invented. */
 export class BridgeError extends Error {
@@ -121,14 +121,41 @@ function wireContext(context: CircuitContext): Record<string, unknown> {
 
 type Pending = { resolve: (value: WorkerResponse) => void; reject: (reason: Error) => void };
 
+/** How many clients this page has built, so a console line says which one it is about. */
+let clientsBuilt = 0;
+
+const seconds = (ms: number): string => `${(ms / 1000).toFixed(2)} s`;
+
+/**
+ * Put the load breakdown where anyone can read it.
+ *
+ * The cold start is a gate (W3) whose answer differs by machine and by browser, so a figure
+ * measured here is worth more than any number this project could hard-code: it is the visitor's
+ * own. One line per worker, at load only.
+ */
+function report(index: number, timings: LoadTimings & { total: number }): void {
+  const stages = [
+    `boot ${seconds(timings.boot)}`,
+    `packages ${seconds(timings.packages)}`,
+    `unpack ${seconds(timings.unpack)}`,
+    `import ${seconds(timings.importing)}`,
+  ].join(", ");
+  const whole = index === 0 ? ` — ${seconds(timings.total)} since navigation` : "";
+  console.info(`AutoCircuit worker ${index} ready: ${stages}${whole}`);
+}
+
 export class BridgeClient {
   private worker: Worker;
   private pending = new Map<number, Pending>();
   private nextId = 1;
   private readyPromise: Promise<VersionsWire> | null = null;
+  /** What the load cost, once it has finished; null while it is still going on. */
+  private loadTimings: (LoadTimings & { total: number }) | null = null;
   // The element catalogue is the one answer that cannot change while the page is open: it is
   // the registry the loaded core was built with.
   private cataloguePromise: Promise<CatalogueWire> | null = null;
+  /** 0 for the page's own client; 1.. for the pool members built on the first search. */
+  private readonly index = clientsBuilt++;
 
   constructor(private onStatus: (stage: LoadStage, detail: string) => void = () => {}) {
     this.worker = new Worker(new URL("./bridge.worker.ts", import.meta.url), { type: "module" });
@@ -153,9 +180,22 @@ export class BridgeClient {
         pyodideUrl: new URL("pyodide/pyodide.mjs", base).href,
         indexUrl: new URL("pyodide/", base).href,
         archiveUrl: new URL("autocircuit-src.zip", base).href,
-      }).then((message) => (message as { versions: VersionsWire }).versions);
+        bytecodeUrl: new URL("pyodide-bytecode.zip", base).href,
+      }).then((message) => {
+        const { versions, timings } = message as { versions: VersionsWire; timings: LoadTimings };
+        // `performance.now()` on this thread is measured from the navigation, so it is the whole
+        // cold start and not just the worker's share of it -- which is what gate W3 asks about.
+        this.loadTimings = { ...timings, total: performance.now() };
+        report(this.index, this.loadTimings);
+        return versions;
+      });
     }
     return this.readyPromise;
+  }
+
+  /** What this client's load cost, or null while it is still loading. */
+  timings(): (LoadTimings & { total: number }) | null {
+    return this.loadTimings;
   }
 
   /** Read one dropped file, returning every sweep it holds. */

@@ -9,7 +9,7 @@ again after each step of `docs/WEB_UI_PLAN.md` (all six now). Read this first, t
 
 The command-line backend is **complete and verified**: 693 tests pass
 (`python -m pytest tests -q`, ~6 min — and that is one full run, not a union of subsets).
-Phases 0–5 of `docs/IMPLEMENTATION_PLAN.md` are done. Phase 6 (web UI) has **all six steps built
+Phases 0–5 of `docs/IMPLEMENTATION_PLAN.md` are done. Phase 6 (web UI) has **all seven steps built
 and measured**: a lossless `FitResult` across a worker boundary, so the browser fans out both
 tiers of the search (§8); the Data screen — import, plots and the Lin-KK verdict — running the
 same core through Pyodide (§9); the Fit screen — schematic canvas, live preview and a manual fit
@@ -17,12 +17,15 @@ that needs no initial values (§10), which closed gate W1; the Discover screen �
 search as a job, with streamed progress, a partial Pareto front and a cancel that terminates the
 workers (§11), which closed gates W2 and W4; the Report screen — equivalence classes as
 classes, what a skeleton excluded, the downloads and the DRT probe (§12), which closed gate W6;
-and the finish — example data, dark/light, honest loading states and the deployment (§13).
+the finish — example data, dark/light, honest loading states and the deployment (§13); and
+step 7, which shipped the Python side compiled and closed the last two gates (§14).
 
 **The site is live at <https://toshihiroiguchi.github.io/AutoCircuit/>**, published by
-`.github/workflows/pages.yml` on every push to `main`. **Two gates remain open and step 6 did not
-touch either**: W3 (cold start, ~13 s against a 10 s target) and W5 (offline / `file://`,
-untested). They are the phase's remaining work, not oversights — see §13.
+`.github/workflows/pages.yml` on every push to `main`. Step 7 (§14) closed the two gates step 6
+left open, in opposite ways: **W3 passes** — the cold start went ~13 s → 5.2 s by shipping
+bytecode instead of source — and **W5 is retired**, because a `file://` page cannot load this
+application at all (measured) and the offline half was declined rather than built. Phase 6 is
+therefore complete.
 
 **Discovery v2 is fully implemented** (see §2) and all five gates pass: G1 30/30 across the
 three reference spectra, G2 exactly reproducing the measured counts table, G3 with the truth
@@ -284,9 +287,27 @@ recorded in the code as a comment and in `docs/IMPLEMENTATION_PLAN.md` marked **
   deploys <https://toshihiroiguchi.github.io/AutoCircuit/> on push. It gates on `tsc --noEmit` and
   `npm run smoke`, so a broken build fails rather than shipping — but a push is now an act of
   publication, not only of storage.
-- **`npm run assets` runs the CLI.** It generates `web/public/samples/` by invoking
-  `python -m autocircuit simulate`, so it needs numpy and scipy importable; it sets `PYTHONPATH`
-  to `src/` itself, so the package does not have to be installed.
+- **`npm run assets` runs the CLI, and now also runs Pyodide.** It generates `web/public/samples/`
+  by invoking `python -m autocircuit simulate`, so it needs numpy and scipy importable; it sets
+  `PYTHONPATH` to `src/` itself, so the package does not have to be installed. It then boots
+  Pyodide under Node to compile the bytecode the site ships (§14), which costs ~30 s and is
+  skipped when `web/public/.bytecode-stamp` still matches the Python source and the Pyodide
+  version — so an unchanged tree rebuilds assets in seconds.
+- **A cold browser measurement needs a fresh origin, and the page must time itself.** A reload is
+  not a cold cache; a preview server on a port this browser has not seen is (the HTTP cache is
+  keyed by origin). And do not time readiness by polling the DOM through browser automation: the
+  poll starts when the tool's round trip lands, so it reported 10.8 s where the worker's own
+  `console.info` line said 5.10 s. Every number in §14 is from the worker's clock.
+- **The browser automation refuses `file://` URLs.** To test one, launch Edge with
+  `--remote-debugging-port=9223 --user-data-dir=<temp> --headless=new` and drive it over the
+  DevTools protocol from Node — `WebSocket` and `fetch` are both global in Node 24, so no
+  dependency is needed. `/json/list` gives the page target, then `Log.enable`, `Runtime.enable`,
+  `Page.navigate`, and `Runtime.evaluate` with `awaitPromise` for anything async.
+- **`loadPackage` cannot be handed an absolute Windows path.** Pyodide derives a package name
+  from the string it is given, so `C:\...\numpy-2.4.3-...whl` becomes a "package" named after the
+  whole path and the wheel's metadata install fails (`UnsupportedWheel`, after the files have
+  already been extracted — so it looks like it worked). Pass names and set `packageCacheDir` to
+  the directory holding the vendored wheels.
 - **Long benchmarks must be launched detached.** A backgrounded shell command is killed after
   ten minutes, and the G1 gate takes about two hours. Use
   `Start-Process python -ArgumentList ... -RedirectStandardOutput <file> -PassThru` and watch
@@ -332,14 +353,16 @@ every decision about what the report may claim stayed on the expensive model.
    clears `complete_up_to` — "all topologies up to N" is not true when the smaller sizes were
    skipped. `exhaustive_min` stays available to anyone who wants that trade explicitly.
 1. ~~**Skeleton mode: gate P2, and §3.3.**~~ Both done; see §7.
-2. **Web UI (phase 6)** — all six steps of `docs/WEB_UI_PLAN.md` are built and the site is
-   deployed (§8–§13). What is left is two gates, both explicitly deferred rather than missed:
-   - **W3, the cold start.** ~13 s to a usable page against a 10 s target, and the lever is the
-     5.8 s import (`docs/WEB_UI_PLAN.md` §2.3): ship the package as a wheel, or a precompiled
-     bytecode cache. Measure before choosing. The 9.3 s figure taken from the deployed site is a
-     *warm-cache* load and does not answer this.
-   - **W5, offline and `file://`.** Untested. Every asset is same-origin and every URL relative,
-     which is a reason to expect it to work; nobody has run it.
+2. ~~**Web UI (phase 6)**~~ — **nothing is left.** All seven steps of `docs/WEB_UI_PLAN.md` are
+   built, the site is deployed (§8–§14), and both remaining gates were answered in step 7: W3
+   passes at 5.2 s cold (§14), and W5 is retired — `file://` is impossible for any packaging of
+   this application, and offline was declined rather than built. Two decisions worth not
+   reopening by accident:
+   - **Do not add a service worker without deciding about staleness first.** It is the only way
+     to make the site work offline, and it would put a cache between every visitor and a site
+     that republishes on every push.
+   - **Do not try `file://` again.** It is not a bundling problem: a `file://` page cannot
+     `fetch` a sibling file, and Pyodide fetches its wasm, its stdlib and its wheels.
 3. ngspice round-trip in CI. The test suite already proves the netlist is *electrically*
    right via its own nodal-analysis engine (`tests/test_spice.py`); a real simulator would
    also prove it is *dialect* right.
@@ -761,3 +784,54 @@ file. Gate W1 again, on a circuit outside the corpus it was measured on.
 from navigation to a usable page was measured on the deployed site, but with a warm HTTP cache and
 before any fit, so it does not answer W3 — reporting it as if it did would be the quiet
 reinterpretation §11's gate rewrite exists to refuse. The import is still the lever (§9).
+Step 7 (§14) did that work.
+
+## 14. Web UI step 7 — bytecode instead of source, and the end of W5
+
+`docs/WEB_UI_PLAN.md` §2.8 is the record. **No new bridge operation**: `BRIDGE_VERSION` stays 4.
+Nothing about what the program computes changed; what changed is *when Python was compiled*.
+
+- **`web/scripts/precompile.mjs` compiles at build time, inside Pyodide.** A `.pyc` is only valid
+  for the interpreter that wrote it, and this machine runs 3.13 while Pyodide 314 runs 3.14 — so
+  the build boots Pyodide under Node, imports what the page imports, and writes three artefacts:
+  `public/pyodide/python_stdlib.zip` rebuilt with a `.pyc` beside every `.py` (zipimport prefers
+  the bytecode, and the boot alone imports 559 stdlib modules), `public/pyodide-bytecode.zip` —
+  an overlay of 576 numpy and scipy `__pycache__` entries unpacked into site-packages after the
+  wheels are installed — and `public/autocircuit-src.zip` rewritten with its own bytecode inside.
+- **Sizes:** stdlib 2.5 → 7.1 MB, overlay 5.8 MB new, package 0.14 → 0.41 MB; `web/dist` 31 → 41 MB.
+  Bought with ~10 MB of transfer, and worth it on any connection where 10 MB costs less than 8 s.
+- **[measured] Node, one process, alternating**: all-source boot 1.36 s / import 3.20 s / total
+  5.89 s; bytecode stdlib 0.34 / 2.72 / 4.27; + overlay 0.20 / 0.99 / 2.50; + package 0.34 / 0.92
+  / 2.60. The stdlib is worth ~1 s, the overlay ~1.7 s, this package ~0.07 s.
+- **[measured] Browser, cold, Edge 151, fresh port per run: 5.10 / 5.70 / 4.86 s** to a usable
+  page, against **12.75 / 19.15 / 25.36 s** for the same build without the bytecode, measured in
+  the same session minutes apart. Plus 0.2 s to load the Randles example and 1.17–1.25 s to fit
+  `R1-p(C1,R2-W1)` — **~6.6 s to a finished first fit, so W3 passes.** The fit's standard errors
+  are the ones §13 recorded from the deployed site, digit for digit.
+- **The invalidation mode is per artefact and it matters.** Nothing is timestamp-invalidated: the
+  wheels are unpacked at run time with an mtime the browser invents, so a timestamp always reads
+  as stale. The stdlib zip gets PEP 552 *unchecked* hashes, since its sources and bytecode are
+  one file. The overlay and the package get *checked* hashes, because a browser can hold either
+  in its cache across a deployment and lay it over sources it was not compiled from — unchecked
+  bytecode would just run, which is a wrong answer nobody would ever see. Checked hashing costs
+  nothing measurable.
+- **The step's input and its output must not be one path.** `make_zip.py` now writes
+  `web/.build/autocircuit-source.zip` and precompile writes `public/autocircuit-src.zip`. When
+  both were the same file, the second `npm run assets` in a tree overwrote the compiled archive
+  with a source-only one and the stamp still said "up to date" — a silent loss of the bytecode.
+- **`npm run smoke` unpacks the overlay too**, so the deployment gate exercises the artefacts the
+  browser will actually load rather than a path only the build takes.
+
+[measured] **W5's `file://` half is impossible, and not because of how this is bundled.** Driving
+Edge over the DevTools protocol — the usual browser automation refuses `file://` URLs — the built
+`dist/index.html` opened as a file renders nothing: the module script and the stylesheet are both
+blocked by CORS from origin `null`. Probing the same page: `fetch('./autocircuit-src.zip')` is
+blocked, a module worker is blocked (`cannot be accessed from origin 'null'`), and a blob worker
+runs but can fetch nothing. Pyodide fetches its wasm, its stdlib and its wheels, so **no
+packaging of this application starts from a file:// page.**
+
+[decided, not measured] **Offline was declined.** With the preview server stopped, a reload is a
+network-error page: a static site with no service worker is only as offline-capable as the
+browser's HTTP cache, which does not cover the entry document. A service worker would fix it and
+would put a cache between every visitor and a site that republishes on every push. The gate is
+retired with both halves stated rather than left open against work nobody intends to do.

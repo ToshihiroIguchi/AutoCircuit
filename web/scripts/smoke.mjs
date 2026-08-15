@@ -39,6 +39,16 @@ function check(name, condition, detail = "") {
 const started = Date.now();
 const pyodide = await loadPyodide({ indexURL: join(PUBLIC, "pyodide"), stdout: () => {} });
 await pyodide.loadPackage(["numpy", "scipy"]);
+// The bytecode overlay, exactly as the worker applies it. A .pyc the interpreter rejects is a
+// slow page rather than a broken one, but a .pyc it accepts and should not have is the kind of
+// thing that only shows up as a wrong answer, so the whole run below happens on top of it.
+const site = pyodide.runPython(`
+import sys
+next(p for p in sys.path if p.endswith("site-packages"))
+`);
+pyodide.unpackArchive(new Uint8Array(readFileSync(join(PUBLIC, "pyodide-bytecode.zip"))), "zip", {
+  extractDir: site,
+});
 // Wrapped: unpackArchive rejects a Node Buffer with "Unknown typed array type 'Buffer'".
 pyodide.unpackArchive(new Uint8Array(readFileSync(join(PUBLIC, "autocircuit-src.zip"))), "zip", {
   extractDir: "/autocircuit-src",

@@ -5,7 +5,12 @@
 // the distribution loads its own Emscripten glue and its wasm relative to `indexURL`, which a
 // bundler cannot rewrite, so it is served from public/ as-is and imported at run time.
 
-import { BRIDGE_VERSION, type WorkerRequest, type WorkerResponse } from "./protocol";
+import {
+  BRIDGE_VERSION,
+  type LoadTimings,
+  type WorkerRequest,
+  type WorkerResponse,
+} from "./protocol";
 import type { VersionsWire } from "../core/types";
 
 declare const self: DedicatedWorkerGlobalScope;
@@ -26,26 +31,68 @@ function status(stage: "booting" | "packages" | "importing" | "ready", detail: s
   post({ kind: "status", stage, detail });
 }
 
-async function init(pyodideUrl: string, indexUrl: string, archiveUrl: string): Promise<VersionsWire> {
+/** Fetch a build artefact as bytes. `unpackArchive` wants a `Uint8Array`, not a `Buffer`. */
+async function download(url: string): Promise<Uint8Array> {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`${url} -> HTTP ${response.status}`);
+  return new Uint8Array(await response.arrayBuffer());
+}
+
+async function init(
+  pyodideUrl: string,
+  indexUrl: string,
+  archiveUrl: string,
+  bytecodeUrl: string,
+): Promise<{ versions: VersionsWire; timings: LoadTimings }> {
+  const timings: LoadTimings = { boot: 0, packages: 0, unpack: 0, importing: 0 };
+  let mark = performance.now();
+  const since = (): number => {
+    const now = performance.now();
+    const elapsed = now - mark;
+    mark = now;
+    return elapsed;
+  };
+
   status("booting", "Starting the Python runtime");
   const module = await import(/* @vite-ignore */ pyodideUrl);
+  // Both archives are wanted the moment the wheels are in, and neither depends on the
+  // interpreter existing, so they are asked for now and awaited later.
+  const archive = download(archiveUrl);
+  // The overlay below is an optimisation, so its absence is caught here rather than left to
+  // reject an init that would otherwise have succeeded.
+  const bytecode = download(bytecodeUrl).catch((error: unknown) => {
+    console.warn(`AutoCircuit: no bytecode overlay, importing from source (${String(error)})`);
+    return null;
+  });
   pyodide = await module.loadPyodide({ indexURL: indexUrl });
+  timings.boot = since();
 
   status("packages", "Loading numpy and scipy");
   await pyodide.loadPackage(["numpy", "scipy"]);
+  timings.packages = since();
 
   status("importing", "Loading AutoCircuit");
-  const archive = await fetch(archiveUrl);
-  if (!archive.ok) throw new Error(`${archiveUrl} -> HTTP ${archive.status}`);
-  pyodide.unpackArchive(new Uint8Array(await archive.arrayBuffer()), "zip", {
-    extractDir: "/autocircuit-src",
-  });
+  // The bytecode overlay goes on top of the installed wheels: `__pycache__` folders holding a
+  // .pyc for every numpy and scipy module this page imports, compiled by the build (see
+  // `web/scripts/precompile.mjs`). Without it every visitor compiles them again.
+  const overlay = await bytecode;
+  if (overlay !== null) {
+    const site: string = pyodide.runPython(`
+import sys
+next(p for p in sys.path if p.endswith("site-packages"))
+`);
+    pyodide.unpackArchive(overlay, "zip", { extractDir: site });
+  }
+  pyodide.unpackArchive(await archive, "zip", { extractDir: "/autocircuit-src" });
+  timings.unpack = since();
+
   pyodide.runPython(`
 import sys
 sys.path.insert(0, "/autocircuit-src")
 from autocircuit.web import handle
 `);
   handle = pyodide.globals.get("handle");
+  timings.importing = since();
 
   const answer = JSON.parse(call(JSON.stringify({ op: "version" })));
   if (!answer.ok) throw new Error(answer.error.message);
@@ -59,7 +106,7 @@ from autocircuit.web import handle
     );
   }
   status("ready", "Ready");
-  return versions;
+  return { versions, timings };
 }
 
 function call(request: string): string {
@@ -83,13 +130,16 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
   const message = event.data;
   try {
     switch (message.kind) {
-      case "init":
-        post({
-          kind: "init",
-          id: message.id,
-          versions: await init(message.pyodideUrl, message.indexUrl, message.archiveUrl),
-        });
+      case "init": {
+        const loaded = await init(
+          message.pyodideUrl,
+          message.indexUrl,
+          message.archiveUrl,
+          message.bytecodeUrl,
+        );
+        post({ kind: "init", id: message.id, versions: loaded.versions, timings: loaded.timings });
         break;
+      }
       case "upload":
         post({ kind: "upload", id: message.id, path: upload(message.name, message.bytes) });
         break;
