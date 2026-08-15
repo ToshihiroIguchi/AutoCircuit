@@ -2,21 +2,27 @@
 
 Written at the end of the session that built the backend, updated after discovery v2 steps
 1–5, again after the skeleton-constrained mode (all of `docs/PARTIAL_TOPOLOGY_PLAN.md`), and
-again after each step of `docs/WEB_UI_PLAN.md` (steps 1–5 so far). Read this first, then
+again after each step of `docs/WEB_UI_PLAN.md` (all six now). Read this first, then
 `CLAUDE.md`, then the plan for whichever part you are touching.
 
 ## 1. Where things stand
 
 The command-line backend is **complete and verified**: 693 tests pass
 (`python -m pytest tests -q`, ~6 min — and that is one full run, not a union of subsets).
-Phases 0–5 of `docs/IMPLEMENTATION_PLAN.md` are done. Phase 6 (web UI) has its **steps 1–5 built
+Phases 0–5 of `docs/IMPLEMENTATION_PLAN.md` are done. Phase 6 (web UI) has **all six steps built
 and measured**: a lossless `FitResult` across a worker boundary, so the browser fans out both
 tiers of the search (§8); the Data screen — import, plots and the Lin-KK verdict — running the
 same core through Pyodide (§9); the Fit screen — schematic canvas, live preview and a manual fit
 that needs no initial values (§10), which closed gate W1; the Discover screen — the topology
 search as a job, with streamed progress, a partial Pareto front and a cancel that terminates the
-workers (§11), which closed gates W2 and W4; and the Report screen — equivalence classes as
-classes, what a skeleton excluded, the downloads and the DRT probe (§12), which closed gate W6.
+workers (§11), which closed gates W2 and W4; the Report screen — equivalence classes as
+classes, what a skeleton excluded, the downloads and the DRT probe (§12), which closed gate W6;
+and the finish — example data, dark/light, honest loading states and the deployment (§13).
+
+**The site is live at <https://toshihiroiguchi.github.io/AutoCircuit/>**, published by
+`.github/workflows/pages.yml` on every push to `main`. **Two gates remain open and step 6 did not
+touch either**: W3 (cold start, ~13 s against a 10 s target) and W5 (offline / `file://`,
+untested). They are the phase's remaining work, not oversights — see §13.
 
 **Discovery v2 is fully implemented** (see §2) and all five gates pass: G1 30/30 across the
 three reference spectra, G2 exactly reproducing the measured counts table, G3 with the truth
@@ -274,6 +280,13 @@ recorded in the code as a comment and in `docs/IMPLEMENTATION_PLAN.md` marked **
   path separators, so `zipfile` extracts files literally named `autocircuit\__init__.py` and
   the failure only shows up as `ModuleNotFoundError`. Build such archives with Python
   (`benchmarks/pyodide/make_zip.py`).
+- **Every push to `main` republishes the public site.** `.github/workflows/pages.yml` builds and
+  deploys <https://toshihiroiguchi.github.io/AutoCircuit/> on push. It gates on `tsc --noEmit` and
+  `npm run smoke`, so a broken build fails rather than shipping — but a push is now an act of
+  publication, not only of storage.
+- **`npm run assets` runs the CLI.** It generates `web/public/samples/` by invoking
+  `python -m autocircuit simulate`, so it needs numpy and scipy importable; it sets `PYTHONPATH`
+  to `src/` itself, so the package does not have to be installed.
 - **Long benchmarks must be launched detached.** A backgrounded shell command is killed after
   ten minutes, and the G1 gate takes about two hours. Use
   `Start-Process python -ArgumentList ... -RedirectStandardOutput <file> -PassThru` and watch
@@ -319,15 +332,14 @@ every decision about what the report may claim stayed on the expensive model.
    clears `complete_up_to` — "all topologies up to N" is not true when the smaller sizes were
    skipped. `exhaustive_min` stays available to anyone who wants that trade explicitly.
 1. ~~**Skeleton mode: gate P2, and §3.3.**~~ Both done; see §7.
-2. **Web UI (phase 6)** — the biggest remaining piece, and now the only one.
-   `docs/WEB_UI_PLAN.md` steps 3–6 are a **draft awaiting approval**; steps 1 and 2 are built
-   (§8, §9). Nothing in the plan's architecture is open any more: orchestration stays in Python
-   behind `discover.screen_plan()` and `discover.refit_plan()`, both tiers fan out across
-   Pyodide workers, and the browser reproduces the CLI's discovery output to an AICc difference
-   of 0.0 in 123 s where it took 287 s. What is left is the circuit canvas (which is also the
-   skeleton editor, so mode 2 rides along for the cost of one button), the discovery job
-   screen, the report, and — with a measured number rather than an assumption behind it now —
-   the cold start, which is ~13 s and fails gate W3.
+2. **Web UI (phase 6)** — all six steps of `docs/WEB_UI_PLAN.md` are built and the site is
+   deployed (§8–§13). What is left is two gates, both explicitly deferred rather than missed:
+   - **W3, the cold start.** ~13 s to a usable page against a 10 s target, and the lever is the
+     5.8 s import (`docs/WEB_UI_PLAN.md` §2.3): ship the package as a wheel, or a precompiled
+     bytecode cache. Measure before choosing. The 9.3 s figure taken from the deployed site is a
+     *warm-cache* load and does not answer this.
+   - **W5, offline and `file://`.** Untested. Every asset is same-origin and every URL relative,
+     which is a reason to expect it to work; nobody has run it.
 3. ngspice round-trip in CI. The test suite already proves the netlist is *electrically*
    right via its own nodal-analysis engine (`tests/test_spice.py`); a real simulator would
    also prove it is *dialect* right.
@@ -697,3 +709,55 @@ JSON as `discover()` on the same data — every key equal after dropping the clo
 text, and a netlist of the same recommended candidate; the manual-fit export equals what
 `fit --json` and `--spice` write. That is `tests/test_web_job.py` §6 and `tests/test_web_bridge.py`
 §17.
+
+## 13. Web UI step 6 — example data, theme, loading states, and the deployment
+
+`docs/WEB_UI_PLAN.md` §2.7 is the record. **No new bridge operation**: `BRIDGE_VERSION` stays 4,
+because none of this is a new question for Python to answer. **The site is live at
+<https://toshihiroiguchi.github.io/AutoCircuit/>.**
+
+- **The example datasets are generated, not committed.** `web/scripts/samples.mjs` holds the three
+  references `benchmarks/discovery_v2.py` uses, and `build-assets.mjs` runs the project's own
+  `simulate` for each at build time into `web/public/samples/` (gitignored) with an `index.json`
+  carrying the recipe *and the literal command line*. Checking in three CSVs would have made the
+  site the one place in this project holding data no command produces.
+- **A sample takes the path a dropped file takes.** Fetched, wrapped in a `File`, handed to the
+  same loader — so `read_many`, the format sniffing and the multi-sweep readers are exercised
+  rather than bypassed.
+- **The true circuit is shown on every row, with the noise.** Loading a sample and recovering its
+  circuit is passing a test whose answer is printed beside it; that is fair to demonstrate and only
+  fair while it is labelled. Each sample also carries the skeleton a user of it would assert, so
+  mode 2 has a worked example on all three.
+- **The theme is `data-theme` on `<html>`** — stamped by `index.html` before the first paint and by
+  `web/src/core/theme.ts` afterwards — and every colour in `styles.css` is a custom property.
+  **The plots are the exception CSS cannot reach**: Plotly draws into a canvas, so `theme.ts` reads
+  those same properties back and hands them over as values. Do not write a second palette in
+  TypeScript.
+- **The attribute is stamped by whatever decides the theme, never by an effect.** The plots read
+  the computed style during the render that follows a change, and a child's effects run *before*
+  its parent's — so an effect would leave the plots one render stale and would make it hard to see
+  why.
+- **The dark palette is not an inversion.** Both series are lightened (a hue that reads as blue on
+  paper reads as black on a dark plot) and the text colour on an accent fill flips with them.
+- **The loading state is the honest half of a failing gate.** The status line runs a clock; the
+  three screens that are not the Data screen say why their controls are dead, because a greyed-out
+  Fit button looks the same whether Pyodide is importing numpy or has thrown. The clock is the only
+  thing advancing on a timer — same rule as §11.
+- **`.github/workflows/pages.yml` is this repository's first workflow.** It needs Python as well as
+  Node (`npm run assets` runs `make_zip.py` and then `simulate`), and two of its four steps are
+  gates: `npm run build` runs `tsc --noEmit` first, and `npm run smoke` then drives the whole
+  Python path under Pyodide headless, so a site that cannot read a file is not published. Pages was
+  enabled with `build_type=workflow`; there is no branch to publish from and no `gh-pages`.
+
+[measured] **The deployed site gets the command line's answer.** In Chrome, from the public URL:
+the Randles sample reads as `generic_csv` and its Lin-KK verdict matches
+`python -m autocircuit validate` digit for digit (16 Voigt, mu 0.836, max 3.4378%, RMS 1.0747%,
+runs *z* −0.48); fitting `R1-p(C1,R2-W1)` with no initial values converged in 1.25 s to `R1.R`
+20.0289 ± 0.0426, `C1.C` 9.99754e-06 ± 3.34e-08, `R2.R` 199.845 ± 0.429, `W1.A` 49.7134 ± 0.401,
+AICc −1310.89, RMS 1.3590% — every reported digit equal to `python -m autocircuit fit` on the same
+file. Gate W1 again, on a circuit outside the corpus it was measured on.
+
+[not measured] **W3 and W5 were not attacked, and the deployment did not wait for them.** 9.3 s
+from navigation to a usable page was measured on the deployed site, but with a warm HTTP cache and
+before any fit, so it does not answer W3 — reporting it as if it did would be the quiet
+reinterpretation §11's gate rewrite exists to refuse. The import is still the lever (§9).

@@ -73,19 +73,23 @@ static-site Web UI running the same core via WASM (Pyodide).
    search is allowed to claim — and §3.2 is where a guess was replaced by a measurement: a
    wrong skeleton is invisible in the residuals and in chi², and surfaces only as an asserted
    element the fit had to switch off.
-5. `docs/WEB_UI_PLAN.md` — phase 6, web UI. **Steps 1–5 done and measured** (a lossless
+5. `docs/WEB_UI_PLAN.md` — phase 6, web UI. **All six steps done and measured**, and the site is
+   live at <https://toshihiroiguchi.github.io/AutoCircuit/> (a lossless
    `FitResult` across a worker boundary, so the browser fans out both tiers, 287 s → 123 s; the
    Data screen, whose Lin-KK verdicts match the CLI's digit for digit; the Fit screen, whose
    fits match the CLI's to every reported digit — gate W1; the Discover screen, whose search
-   matches the CLI's front row for row — gates W2 and W4; and the Report screen, whose downloads
-   are the files the CLI writes — gate W6); **step 6 is a draft awaiting approval.** Its §2.3 is
-   where a browser contradicted a number taken from Node, §2.4 is
+   matches the CLI's front row for row — gates W2 and W4; the Report screen, whose downloads
+   are the files the CLI writes — gate W6; and the finish — example data, light/dark, honest
+   loading states, and a deployment workflow that gates on the type check and the Pyodide smoke
+   run). Its §2.3 is where a browser contradicted a number taken from Node, §2.4 is
    where a measurement retired an assumption the transport had been designed around (a fit is
    *not* bit-reproducible across interpreters, only its reported digits are), §2.5 is where
    a measurement showed one clause of a gate to be unachievable — tier-2 progress cannot stream
    once a second, because one refit takes several — and the gate was rewritten around what was
-   measured rather than quietly reinterpreted, and §2.6 is where a report that can be *stopped*
-   turned out to need a weaker sentence than the one it was written with.
+   measured rather than quietly reinterpreted, §2.6 is where a report that can be *stopped*
+   turned out to need a weaker sentence than the one it was written with, and §2.7 is where a
+   step shipped with two of its gates still open and said so instead of reading them down.
+   **Gates W3 (cold start, ~13 s against 10 s) and W5 (offline / `file://`) remain open.**
 
 Update these when decisions change.
 

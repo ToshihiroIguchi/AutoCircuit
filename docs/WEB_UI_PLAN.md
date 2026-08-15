@@ -1,6 +1,8 @@
 # Web UI — Phase 6 Plan
 
-Status: steps 1–5 built and measured (2026-08-14); step 6 is a draft awaiting approval.
+Status: **all six steps built and measured** (2026-08-15). The site is deployed and public:
+<https://toshihiroiguchi.github.io/AutoCircuit/>. Two gates are still open and neither was
+attacked in step 6 — W3 (cold start) and W5 (offline / `file://`); see §2.7 and §6.
 The one architectural question this plan carried is settled and prototyped — see §2.1 — and
 that prototype changed §2.2 and the work order, which is what prototypes are for. Step 2 did
 the same to §1: the cold-start figure there came from Node and is wrong for a browser by 3×, see
@@ -8,7 +10,9 @@ the same to §1: the cold-start figure there came from Node and is wrong for a b
 unmeasured — see §2.4. Step 4 closed W2 and W4 and found that **one clause of W2 was not
 achievable and never had been** — see §2.5, and §6, where the gate now carries what was measured
 instead of a softer promise. Step 5 added a gate rather than closing one: W6, that a downloaded
-file is the file the command line writes, see §2.6.
+file is the file the command line writes, see §2.6. Step 6 shipped it — and shipped it with two
+gates open, which is recorded in §2.7 rather than smoothed over: the work it did not do is the
+work W3 needs.
 Prerequisite reading: `docs/IMPLEMENTATION_PLAN.md` §9 (the original sketch, now partly
 superseded by measurement), `benchmarks/pyodide/README.md` (every performance number below),
 and `docs/HANDOFF.md` §3.
@@ -427,6 +431,76 @@ Three things a real browser found that nothing else would have, all of them abou
   many classes hold more than one member, so it says that in a line before the list — including
   when the number is none, which is a result rather than an absence of one.
 
+### 2.7 What step 6 built, and the two gates it deliberately left open
+
+Step 6 is the finish: something to open, a palette to read it in, a page that says what it is
+doing, and a deployment. No new bridge operation — `BRIDGE_VERSION` stays 4 — because none of it
+is a new question for Python to answer.
+
+**The example datasets are the benchmark's references, generated rather than committed.**
+`web/scripts/samples.mjs` takes the three spectra `benchmarks/discovery_v2.py` measures every
+discovery gate against, and `build-assets.mjs` produces each one by running the project's own
+`simulate` command at build time. Checking in three CSVs would have been simpler and would have
+made the site the one place in this project holding data no command produces. The manifest it
+writes carries the recipe — circuit, parameters, window, noise, seed — and the literal command
+line, which the panel will show on request. Three consequences worth stating:
+
+- **The true circuit is displayed, not hidden.** Someone who loads a sample, runs a search and
+  gets that circuit back has watched the program pass a test whose answer was printed beside it.
+  That is a fair thing to demonstrate and only fair while it is labelled, so each row says
+  *synthetic*, names the circuit, and gives the noise.
+- **A sample is loaded through the reader, not around it.** It is fetched, wrapped in a `File`
+  and handed to the same path a dropped file takes, so it exercises `autocircuit.io.read_many`
+  and the format sniffing rather than a shortcut that would work when the real path did not.
+- **Each sample also carries a skeleton** — the part of its circuit a user of that kind of sample
+  would already know. Mode 2 has a worked example to point at now, on every one of them.
+
+**The theme is one attribute, and the plots are the exception.** `data-theme` on `<html>`, stamped
+by `index.html` before the first paint and by `src/core/theme.ts` for every change after it; every
+colour in `styles.css` is a custom property, so dark is one override block. The dark palette is not
+an inversion: both series are lightened, because a hue that reads as blue on paper reads as black
+on a dark plot, and the text colour on an accent fill flips with them — white on a light blue fill
+is the contrast failure a naive inversion produces. Plotly draws into a canvas, which no stylesheet
+reaches, so `theme.ts` reads those same properties back out of the document and hands them over as
+values. Writing a second palette in TypeScript for the plots would have been the same mistake this
+plan avoids everywhere else, one level down. One ordering detail that had to be got right: the
+attribute is stamped by whatever *decides* the theme, not by an effect afterwards, because the
+plots read the computed style during the render that follows — and a child's effects run before its
+parent's, so an effect would only have made the staleness harder to find.
+
+**The loading state is the honest half of a gate this build fails.** W3 asks for under ten seconds
+and a cold start is about thirteen (§2.3), so: the status line now runs a clock, and the three
+screens that are not the Data screen say why everything on them is disabled. An empty element
+palette and a greyed-out Fit button look identical whether Pyodide is still importing numpy or has
+thrown. The clock is the only thing that advances on a timer — the stages move when a stage really
+finishes, for the reason §2.5 gives.
+
+**The deployment is a workflow, and two of its four steps are gates.** `.github/workflows/pages.yml`
+is the repository's first Actions workflow. It installs Python as well as Node, because
+`npm run assets` archives the package and then runs `simulate`; `npm run build` runs `tsc --noEmit`
+first, so a type error fails the deployment rather than shipping past it; and `npm run smoke` then
+drives the whole Python path under Pyodide headless, which is the only check in it that exercises
+what a browser will actually run. `base` stays relative, so the same build serves from a project
+sub-path and from a bare directory.
+
+**[measured] The deployed site gets the command line's answer.** On
+<https://toshihiroiguchi.github.io/AutoCircuit/>, in Chrome: the Randles sample loads as
+`generic_csv`, and its Lin-KK verdict matches `python -m autocircuit validate` on the same file
+digit for digit — 16 Voigt elements, mu 0.836, max residual 3.4378%, RMS 1.0747%, runs *z* −0.48.
+Fitting `R1-p(C1,R2-W1)` to it from the drawn circuit, with no initial values, converged in 1.25 s
+to `R1.R` 20.0289 ± 0.0426, `C1.C` 9.99754e-06 ± 3.34e-08, `R2.R` 199.845 ± 0.429, `W1.A` 49.7134
+± 0.401, AICc −1310.89, RMS 1.3590% — every reported digit equal to
+`python -m autocircuit fit web/public/samples/randles.csv -c "R1-p(C1,R2-W1)"`. That is gate W1
+again, on a circuit outside the corpus it was measured on, from a public URL.
+
+**[not measured] What step 6 did not do.** The cold start was not attacked: the import is still
+5.8 s of it (§2.3), a wheel or a bytecode cache is still the thing to try, and **W3 still does not
+pass**. One number was taken from the deployed site for the record — 9.3 s from navigation to a
+usable page with a warm HTTP cache, before any fit — but a warm-cache figure is not what W3 asks
+about, and reporting it as if it were would be exactly the kind of quiet reinterpretation §2.5
+exists to refuse. W5 (offline after first load, and `file://`) is untested; the assets are all
+same-origin and relative, which is a reason to expect it to work and not a measurement of it.
+
 ## 3. Screens
 
 Following ZView's workflow, which is what the target users know:
@@ -436,7 +510,8 @@ Following ZView's workflow, which is what the target users know:
    validator's runs-test explanation text is already written; reuse it verbatim.~~ **Built**
    (§2.3). Validation runs automatically on load and after every trim, so the verdict is not
    something the user has to go and ask for, and `KKResult.summary()` is rendered verbatim
-   rather than paraphrased.
+   rather than paraphrased. Step 6 added the example datasets here (§2.7), because the first
+   thing this screen asks for is a file and not everyone arriving at it has one.
 2. **Fit** — ~~circuit canvas (drag-drop series/parallel blocks reading like a schematic) with a
    live model preview overlaid on the data before fitting. This is the differentiator and it
    should feel like the point of the app: no initial values, press Fit, get parameters with
@@ -489,7 +564,7 @@ Plots: linked Nyquist / Bode(|Z|, θ) / residuals, zoom-synced, log axes. Plotly
 | 3 | ~~Circuit canvas + live preview + manual fit~~ | **done** — §2.4; gate W1 measured |
 | 4 | ~~Discovery job screen: progress, streaming, cancel, completeness~~ | **done** — §2.5; gates W2 and W4 measured |
 | 5 | ~~Report: equivalence classes, exports, DRT panel~~ | **done** — §2.6; gate W6 measured |
-| 6 | Example datasets, loading states, dark/light, deploy to Pages | S |
+| 6 | ~~Example datasets, loading states, dark/light, deploy to Pages~~ | **done** — §2.7; W1 re-measured from the public URL |
 
 ## 6. Acceptance gates
 
@@ -509,13 +584,18 @@ Plots: linked Nyquist / Bode(|Z|, θ) / residuals, zoom-synced, log axes. Plotly
   recorded here rather than quietly reinterpreted.
 - **W3** — cold load to an interactive first fit under 10 s on a mid-range laptop. **[measured]
   Does not pass: ~13 s to a usable page, before any fit.** §2.3 has the breakdown and says which
-  stage is worth attacking. Failing this gate does not block steps 3–5; it is a step 6 item that
-  now has a number instead of an assumption.
+  stage is worth attacking. It was a step 6 item and **step 6 did not attack it**: the site was
+  deployed with this gate open rather than the gate being read down to meet the site. The one new
+  number, 9.3 s from the deployed URL, is a *warm-cache* load and answers a different question
+  (§2.7). The lever is unchanged — 5.8 s of import, against a wheel or a bytecode cache.
 - **W4** — cancel actually stops the work (not just the UI), and a cancelled run reports the
   coverage it reached rather than a wrong number. **[measured] Passes** (§2.5): the pool is
   terminated, since nothing else interrupts a running fit in a single-threaded interpreter, and
   the report distinguishes a complete screen from a shortlist that was only partly refitted.
-- **W5** — the site works offline after first load, and from `file://` as well as Pages.
+- **W5** — the site works offline after first load, and from `file://` as well as Pages. **Still
+  untested.** The Pages half is now demonstrated (§2.7); the offline and `file://` halves are not,
+  and the fact that every asset is same-origin and every URL relative is a reason to expect them to
+  work rather than a measurement that they do.
 - **W6** — a file downloaded from the browser is the file the command line writes. Added with
   step 5, because an export is the one artefact of this program that outlives the session that
   produced it, and a browser-side renderer of the same format is a second implementation whose
