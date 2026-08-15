@@ -1,9 +1,10 @@
 # Web UI — Phase 6 Plan
 
 Status: **complete** (2026-08-15) — all seven steps built and measured, and every gate answered.
-The site is deployed and public: <https://toshihiroiguchi.github.io/AutoCircuit/>. W1, W2, W3,
-W4 and W6 pass; **W5 is retired**, because its `file://` half was measured to be impossible and
-its offline half was declined rather than quietly dropped — see §2.8 and §6.
+The site is deployed and public: <https://toshihiroiguchi.github.io/AutoCircuit/>. W1, W2, W4 and
+W6 pass; **W3 passes on a rested machine and not on a loaded one**, having gone from ~13 s to
+~5 s; **W5 is retired**, because its `file://` half was measured to be impossible and its offline
+half was declined rather than quietly dropped — see §2.8 and §6.
 The one architectural question this plan carried is settled and prototyped — see §2.1 — and
 that prototype changed §2.2 and the work order, which is what prototypes are for. Step 2 did
 the same to §1: the cold-start figure there came from Node and is wrong for a browser by 3×, see
@@ -544,15 +545,25 @@ recompiled when it does not match, and [measured] costs nothing visible (2.50 s 
 is within this machine's drift; a same-run comparison put the checked build at 3.10 s against an
 8.78 s all-source baseline).
 
-**[measured] Cold start in a browser: ~13 s → 5.2 s, and W3 passes.** Edge 151, this machine,
-production build, a fresh port per run so the HTTP cache is genuinely cold: 5.10 / 5.70 / 4.86 s
-from navigation to a usable page, against 12.75 / 19.15 / 25.36 s for the same build without the
-bytecode, measured in the same session minutes apart. Loading the Randles example adds 0.2 s and
-fitting `R1-p(C1,R2-W1)` to it takes 1.17–1.25 s, so **a first fit is complete about 6.6 s after
-navigation**, against the gate's 10 s. The stage breakdown is now boot 0.78 s, wheels 2.2 s,
-unpack 0.23 s, import 1.5–2.0 s: the wheel install is the largest remaining stage, and the
-interpreter-bound work that §2.3 identified is no longer where the time goes. Two things this
-measurement taught, both worth keeping:
+**[measured] The cold start halves, and W3 is now decided by the machine rather than the
+design.** Edge 151, this machine, production build, a fresh port per run so the HTTP cache is
+genuinely cold. The numbers have to be read in pairs, because this machine's speed drifts by
+about 2× within an hour (`docs/HANDOFF.md` §4) and both builds drift with it:
+
+| machine state | without bytecode | with bytecode |
+|---------------|-----------------:|--------------:|
+| fast (05:02) | 12.75 s | 5.10 / 5.70 / 4.86 s |
+| slow (05:17) | 19.55 / 25.36 s | 10.85 s |
+
+Loading the Randles example adds 0.2 s and fitting `R1-p(C1,R2-W1)` to it takes 1.17–1.25 s in
+the fast state and 2.4 s in the slow one. So **a first fit is finished about 6.6 s after
+navigation in the fast state and about 13 s in the slow one, against the gate's 10 s** — the gate
+is met in the state §2.3's failing 13 s was measured in, and missed when this machine is at its
+worst. That is the whole verdict, and reporting only the first row of it would be exactly what
+§2.5 exists to refuse. The stage breakdown in the fast state is boot 0.78 s, wheels 2.2 s, unpack
+0.23 s, import 1.5–2.0 s: the wheel install is the largest remaining stage, and the
+interpreter-bound compile §2.3 identified is no longer where the time goes. Three things this
+measurement taught, all worth keeping:
 
 - **The worker reports its own timings now** (`LoadTimings`, one `console.info` line per worker),
   because the numbers differ by machine and browser, and a figure a visitor can read off their
@@ -561,6 +572,10 @@ measurement taught, both worth keeping:
   automation tool measured 10.8 s where the worker's own line said 5.10 s — the poll only starts
   when the tool's round trip lands, and it reports the moment it first looks rather than the
   moment the page was ready. Every figure above is from the worker's clock.
+- **A figure from the deployed site is not a figure about the deployment.** The public URL gave
+  21.12 s cold — it is 41 MB over the network, and transfer is most of that — and 10.2–10.6 s
+  warm. The same build on `localhost` in the same minute gave 10.85 s, which is how it was
+  established that the warm figure was this machine's slow state and not something Pages does.
 
 **[measured] W5 is withdrawn: `file://` cannot work, and offline is not being built.** Driving
 Edge over the DevTools protocol (the usual automation refuses `file://` URLs), the built
@@ -658,13 +673,15 @@ Plots: linked Nyquist / Bode(|Z|, θ) / residuals, zoom-synced, log axes. Plotly
   fit. The gate was written before anyone had measured how long a browser refit takes; it is
   recorded here rather than quietly reinterpreted.
 - **W3** — cold load to an interactive first fit under 10 s on a mid-range laptop. **[measured]
-  Passes**, §2.8: 5.2 s to a usable page and ~6.6 s to a finished first fit, cold, in Edge on
-  this machine — where the same build without step 7's bytecode took 12.75–25.36 s to the same
-  point. What closed it was not the wheel §2.3 guessed at but the compile: the stdlib, numpy,
-  scipy and this package are all shipped compiled now. Two cautions the measurement leaves
-  behind: this machine's speed drifts by about 2× within an hour (`docs/HANDOFF.md` §4), so a
-  single figure means little and the range above is the result; and a cold measurement needs a
-  *fresh origin* — a port this browser has not seen — because a reload is not a cold cache.
+  Passes in this machine's fast state and not in its slow one**, §2.8: 4.86–5.70 s to a usable
+  page and ~6.6 s to a finished first fit when the machine is rested, 10.85 s and ~13 s when it
+  is not — against 12.75 s and 19.55–25.36 s for the same build without step 7's bytecode,
+  measured in the same two states. So the change is worth about 2× and the gate is now inside the
+  machine's own variance rather than outside it by 3 s. What moved it was not the wheel §2.3
+  guessed at but the compile: the stdlib, numpy, scipy and this package all ship compiled now.
+  Two cautions the measurement leaves behind: a single figure means nothing here, so pairs
+  measured minutes apart are the result; and a cold measurement needs a *fresh origin* — a port
+  this browser has not seen — because a reload is not a cold cache.
 - **W4** — cancel actually stops the work (not just the UI), and a cancelled run reports the
   coverage it reached rather than a wrong number. **[measured] Passes** (§2.5): the pool is
   terminated, since nothing else interrupts a running fit in a single-threaded interpreter, and

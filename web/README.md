@@ -36,8 +36,8 @@ origin; it is also most of why `public/` is ~40 MB.
 
 **Everything Python is shipped compiled.** A CPython import parses and compiles a `.py` and caches
 the result beside it — in a browser, on a filesystem that dies with the tab, so every visitor pays
-the compile. Doing it at build time took the cold start from ~13 s to 5.2 s
-(`docs/WEB_UI_PLAN.md` §2.8, gate W3). The bytecode is hash-invalidated, never timestamped, and
+the compile. Doing it at build time roughly halved the cold start, ~13 s to ~5 s on a rested
+machine (`docs/WEB_UI_PLAN.md` §2.8, gate W3). The bytecode is hash-invalidated, never timestamped, and
 the *kind* of hash differs by artefact: unchecked inside the stdlib zip, where source and bytecode
 cannot come apart, and checked for the overlay and the package, where a browser cache could
 otherwise lay bytecode over sources it was not compiled from.
@@ -135,8 +135,11 @@ equivalence classes, the skeleton's own findings, the exports and the DRT probe;
 example data, light/dark, honest loading states, and the deployment above; and the bytecode the
 build now compiles.
 
-Step 7 closed the last two gates. **W3 passes**: 5.2 s cold to a usable page and ~6.6 s to a
-finished first fit, from shipping bytecode instead of source (`docs/WEB_UI_PLAN.md` §2.8).
+Step 7 answered the last two gates. **W3 is met on a rested machine and missed on a loaded one**:
+4.9–5.7 s cold to a usable page and ~6.6 s to a finished first fit when this machine is rested,
+10.9 s and ~13 s when it is not — against 12.75 s and 19.6–25.4 s for the same build before
+bytecode was shipped instead of source (`docs/WEB_UI_PLAN.md` §2.8). About 2×, with the 10 s
+target now inside the machine's own drift.
 **W5 is retired**: a `file://` page cannot load this application — it cannot fetch a sibling file
 or start a module worker, and Pyodide fetches its wasm, stdlib and wheels — and the offline half
 was declined, because a service worker would put a cache between every visitor and a site that

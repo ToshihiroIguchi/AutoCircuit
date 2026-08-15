@@ -22,10 +22,11 @@ step 7, which shipped the Python side compiled and closed the last two gates (§
 
 **The site is live at <https://toshihiroiguchi.github.io/AutoCircuit/>**, published by
 `.github/workflows/pages.yml` on every push to `main`. Step 7 (§14) closed the two gates step 6
-left open, in opposite ways: **W3 passes** — the cold start went ~13 s → 5.2 s by shipping
-bytecode instead of source — and **W5 is retired**, because a `file://` page cannot load this
-application at all (measured) and the offline half was declined rather than built. Phase 6 is
-therefore complete.
+left open, in opposite ways: **W3 passes on a rested machine and not on a loaded one** — the cold
+start went ~13 s → ~5 s by shipping bytecode instead of source, which is about 2×, and the 10 s
+target now sits inside this machine's own 2× drift — and **W5 is retired**, because a `file://`
+page cannot load this application at all (measured) and the offline half was declined rather than
+built. Phase 6 is therefore complete.
 
 **Discovery v2 is fully implemented** (see §2) and all five gates pass: G1 30/30 across the
 three reference spectra, G2 exactly reproducing the measured counts table, G3 with the truth
@@ -354,10 +355,15 @@ every decision about what the report may claim stayed on the expensive model.
    skipped. `exhaustive_min` stays available to anyone who wants that trade explicitly.
 1. ~~**Skeleton mode: gate P2, and §3.3.**~~ Both done; see §7.
 2. ~~**Web UI (phase 6)**~~ — **nothing is left.** All seven steps of `docs/WEB_UI_PLAN.md` are
-   built, the site is deployed (§8–§14), and both remaining gates were answered in step 7: W3
-   passes at 5.2 s cold (§14), and W5 is retired — `file://` is impossible for any packaging of
+   built, the site is deployed (§8–§14), and both remaining gates were answered in step 7: W3 is
+   met at 4.9–5.7 s cold on a rested machine and missed at 10.9 s on a loaded one (§14), and W5
+   is retired — `file://` is impossible for any packaging of
    this application, and offline was declined rather than built. Two decisions worth not
    reopening by accident:
+   - **If the cold start is attacked again, the target is the wheel install** (2.2 s rested,
+     4.4 s loaded), which is now the largest stage; the import is 1.5–2.0 s. Anything that shaves
+     seconds off the *transfer* helps too — the site is 41 MB, of which ~10 MB is step 7's
+     bytecode.
    - **Do not add a service worker without deciding about staleness first.** It is the only way
      to make the site work offline, and it would put a cache between every visitor and a site
      that republishes on every push.
@@ -803,11 +809,19 @@ Nothing about what the program computes changed; what changed is *when Python wa
 - **[measured] Node, one process, alternating**: all-source boot 1.36 s / import 3.20 s / total
   5.89 s; bytecode stdlib 0.34 / 2.72 / 4.27; + overlay 0.20 / 0.99 / 2.50; + package 0.34 / 0.92
   / 2.60. The stdlib is worth ~1 s, the overlay ~1.7 s, this package ~0.07 s.
-- **[measured] Browser, cold, Edge 151, fresh port per run: 5.10 / 5.70 / 4.86 s** to a usable
-  page, against **12.75 / 19.15 / 25.36 s** for the same build without the bytecode, measured in
-  the same session minutes apart. Plus 0.2 s to load the Randles example and 1.17–1.25 s to fit
-  `R1-p(C1,R2-W1)` — **~6.6 s to a finished first fit, so W3 passes.** The fit's standard errors
-  are the ones §13 recorded from the deployed site, digit for digit.
+- **[measured] Browser, cold, Edge 151, fresh port per run — and read in pairs, because this
+  machine drifts 2× (§4).** Rested: **5.10 / 5.70 / 4.86 s** to a usable page against **12.75 s**
+  without the bytecode. Loaded, fifteen minutes later: **10.85 s** against **19.55 / 25.36 s**.
+  Loading the Randles example adds 0.2 s and fitting `R1-p(C1,R2-W1)` takes 1.17–1.25 s rested
+  and 2.4 s loaded, so a first fit is finished **~6.6 s after navigation rested and ~13 s
+  loaded**. **W3's 10 s is therefore met in the state its 13 s failure was measured in, and
+  missed at this machine's worst** — the change is worth ~2×, and the gate is now inside the
+  machine's variance instead of outside it. The fit's standard errors are the ones §13 recorded
+  from the deployed site, digit for digit.
+- **[measured] From the public URL after this shipped:** 21.12 s cold — 41 MB over the network,
+  so mostly transfer — and 10.2–10.6 s warm. `localhost` in the same minute gave 10.85 s, which
+  is how it was established that the warm figure was the machine and not the deployment. Do not
+  compare a number from Pages with a number from `localhost` taken at another time.
 - **The invalidation mode is per artefact and it matters.** Nothing is timestamp-invalidated: the
   wheels are unpacked at run time with an mtime the browser invents, so a timestamp always reads
   as stale. The stdlib zip gets PEP 552 *unchecked* hashes, since its sources and bytecode are

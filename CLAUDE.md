@@ -89,9 +89,11 @@ static-site Web UI running the same core via WASM (Pyodide).
    measured rather than quietly reinterpreted, §2.6 is where a report that can be *stopped*
    turned out to need a weaker sentence than the one it was written with, §2.7 is where a
    step shipped with two of its gates still open and said so instead of reading them down, and
-   §2.8 is where those two were answered in opposite ways. **W3 passes** — the cold start went
-   ~13 s → 5.2 s once the build began shipping bytecode instead of source, so a first fit is
-   finished ~6.6 s after navigation — and **W5 is retired**: its `file://` half was measured to be
+   §2.8 is where those two were answered in opposite ways. **W3 is met on a rested machine and
+   missed on a loaded one** — the cold start went ~13 s → ~5 s once the build began shipping
+   bytecode instead of source, so a first fit is finished ~6.6 s after navigation when this
+   machine is rested and ~13 s when it is not, which is reported as the pair it is rather than as
+   the flattering half — and **W5 is retired**: its `file://` half was measured to be
    impossible for any packaging of this application, and its offline half was declined rather than
    built, because a service worker would put a cache between every visitor and a site that
    republishes on every push. A gate written from an expectation is withdrawn with the measurement
