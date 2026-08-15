@@ -58,9 +58,13 @@ from scipy.signal import find_peaks
 from .enumerate import EndpointBehaviour
 from .fit import Weighting, weight_vectors
 from .spectrum import Spectrum
+from .wire import encode_array, encode_complex_array, encode_float
 
 Float = NDArray[np.float64]
 Complex = NDArray[np.complex128]
+
+#: Version of :meth:`DRTResult.to_wire`; see :data:`autocircuit.core.fit.WIRE_VERSION`.
+WIRE_VERSION = 1
 
 #: Grid density for the log-tau axis. Ten per decade resolves peaks a decade apart without
 #: making the null space any larger than the regulariser can control.
@@ -280,6 +284,49 @@ class DRTResult:
             f"  RMS residual  : {self.rms_residual:.4%}",
         ]
         return "\n".join([*header, *self.hints()])
+
+    def to_wire(self) -> dict[str, Any]:
+        """JSON-safe form of this probe, for a browser thread that has to draw it.
+
+        Not :meth:`to_dict` with a different name. That one is the CLI's ``--json`` file and it
+        writes bare floats, one of which is routinely infinite -- ``capacitance`` is ``inf``
+        whenever the blocking term was not included, and a payload carrying it cannot be
+        serialised with ``allow_nan=False`` and could not be parsed by JavaScript if it were
+        (``core/wire.py``). There is no ``from_wire``: the far side plots this and prints
+        :meth:`hints`, which travel with the numbers so that the browser shows the sentences the
+        command line shows rather than writing its own account of a distribution.
+        """
+        return {
+            "version": WIRE_VERSION,
+            "n_relaxations": self.n_relaxations,
+            "well_described": self.well_described,
+            "r_inf": encode_float(self.r_inf),
+            "r_polarisation": encode_float(self.r_polarisation),
+            "inductance": encode_float(self.inductance),
+            "capacitance": encode_float(self.capacitance),
+            "lam": encode_float(self.lam),
+            "lam_rule": self.lam_rule,
+            "max_residual": encode_float(self.max_residual),
+            "rms_residual": encode_float(self.rms_residual),
+            "tau": encode_array(self.tau),
+            "gamma": encode_array(self.gamma),
+            "peaks": [
+                {
+                    "tau": encode_float(peak.tau),
+                    "f_peak": encode_float(peak.f_peak),
+                    "weight": encode_float(peak.weight),
+                    "fwhm_decades": encode_float(peak.fwhm_decades),
+                    "ideal_fwhm_decades": encode_float(peak.ideal_fwhm_decades),
+                    "broadened": peak.broadened,
+                }
+                for peak in self.peaks
+            ],
+            "z_fit": encode_complex_array(self.z_fit),
+            "residual_real": encode_array(self.residual_real),
+            "residual_imag": encode_array(self.residual_imag),
+            "hints": self.hints(),
+            "summary": self.summary(),
+        }
 
     def to_dict(self) -> dict[str, Any]:
         return {

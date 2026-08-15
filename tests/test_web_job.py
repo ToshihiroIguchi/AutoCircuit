@@ -19,13 +19,22 @@ Exact equality throughout, following `tests/test_web_bridge.py`.
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import math
 from typing import Any
 
 import pytest
 
-from autocircuit.core.discover import RefitTask, ScreenTask, discover, run_refit, run_screen
+from autocircuit.core.discover import (
+    RefitTask,
+    ScreenTask,
+    discover,
+    excluded_equivalents,
+    run_refit,
+    run_screen,
+)
 from autocircuit.core.simulate import log_frequencies, simulate
 from autocircuit.core.spectrum import Spectrum
 from autocircuit.web import job as job_module
@@ -430,3 +439,322 @@ def test_every_discovery_operation_answers_without_a_job(op: str) -> None:
     job_module._CURRENT = None
     error = _error(op, job="job-does-not-exist")
     assert "no discovery job is running" in error["message"]
+
+
+# =============================================================================================
+# 5. What the skeleton excluded, driven the same way
+# =============================================================================================
+
+
+class ExcludedDriver:
+    """The JavaScript side of the excluded-equivalents pass, in Python.
+
+    Note which spectrum the screens go against: the ``target`` the orchestrator handed back,
+    which is the reported candidate's *fitted* response and not the measured data. A driver that
+    reached for the data instead would be answering a different question, which is why the
+    target is something it is given rather than something it picks.
+    """
+
+    def __init__(self, search: Driver, **options: Any) -> None:
+        self.start = _call("excluded_start", job=search.id, **options)
+        self.id = self.start["job"]
+        self.target = self.start["target"]
+        self.steps: list[dict[str, Any]] = []
+
+    def run(self, batches: int | None = None) -> None:
+        costs = None
+        while batches is None or len(self.steps) < batches:
+            step = _call("excluded_screen", job=self.id, costs=costs)
+            self.steps.append(step)
+            if step["tasks"] is None:
+                return
+            costs = [
+                _call(
+                    "screen_task", spectrum=self.target, circuit=text, abandon_above=abandon
+                )["cost"]
+                for text, abandon in step["tasks"]
+            ]
+
+    def cancel(self) -> dict[str, Any]:
+        return _call("excluded_cancel", job=self.id)
+
+    def report(self) -> dict[str, Any]:
+        return _call("excluded_report", job=self.id)
+
+
+def _skeleton_search() -> tuple[Spectrum, Driver]:
+    """A finished constrained search, which is the only thing this pass can be run on."""
+    spectrum = _semicircle()
+    driver = Driver(
+        spectrum, pool=list(POOL), skeleton="R1-p(R2,C1)", exhaustive_limit=3, screen_chunk=1
+    )
+    driver.screen()
+    driver.refit()
+    return spectrum, driver
+
+
+def test_the_driven_excluded_pass_reproduces_the_command_lines() -> None:
+    """Section 3.3 through the browser's transport: same counts, same equivalents.
+
+    The list is the point. `R1-p(R2,C1)` and `p(R1-C1,R2)` describe exactly the same
+    semicircles, so asserting the first excludes the second outright -- and the browser has to
+    name it for the same reason the command line does: the survivor is a choice the user made,
+    not something the data preferred.
+    """
+    spectrum, search = _skeleton_search()
+    driver = ExcludedDriver(search, chunk=1)
+    driver.run()
+    report = driver.report()
+
+    reference_search = discover(
+        spectrum, pool=POOL, skeleton="R1-p(R2,C1)", mode="exhaustive", exhaustive_limit=3,
+        seed=0,
+    )
+    assert reference_search.recommended is not None
+    assert reference_search.skeleton is not None
+    reference = excluded_equivalents(
+        reference_search.recommended, reference_search.skeleton, spectrum, pool=POOL, seed=0
+    )
+
+    assert report["equivalents"] == list(reference.equivalents)
+    assert report["excluded"] == reference.excluded
+    assert report["kept"] == reference.kept
+    assert report["screened"] == reference.screened == reference.excluded
+    assert report["partial"] is False
+    assert report["finished"] is True
+    assert report["summary"] == reference.summary()
+    assert "choosing between them is something you did" in report["summary"]
+
+
+def test_the_pass_screens_against_the_fitted_model_not_the_measured_data() -> None:
+    """The target crosses the wire because choosing it is a decision, not plumbing.
+
+    An exact reparameterisation reaches a noise-free target to machine precision; against the
+    sample's own noise it would look no better than a topology that merely fits well, and the
+    pass would answer a question nobody asked.
+    """
+    spectrum, search = _skeleton_search()
+    driver = ExcludedDriver(search, chunk=1)
+    candidate = job_module.current(search.id).candidate()
+
+    target = Spectrum.from_wire(driver.target)
+    assert list(target.z) == list(candidate.result.z_model)
+    assert list(target.f) == list(spectrum.f)
+    assert list(target.z) != list(spectrum.z)
+
+
+def test_the_pass_says_how_much_work_it_is_before_screening_any_of_it() -> None:
+    """The counts are known from the enumeration alone, and this pass costs about as much as
+    the search that preceded it -- so the number to decline is available before the waiting."""
+    _, search = _skeleton_search()
+    driver = ExcludedDriver(search, chunk=1)
+    assert driver.start["screened"] == 0
+    assert driver.start["excluded"] > 0
+    assert driver.start["kept"] > 0
+    assert driver.start["circuit"] == search.report()["recommended"]
+    assert driver.start["skeleton"] == "R1-p(R2,C1)"
+
+
+def test_a_stopped_pass_reports_what_it_checked_and_not_what_it_did_not() -> None:
+    _, search = _skeleton_search()
+    driver = ExcludedDriver(search, chunk=1)
+    driver.run(batches=2)
+    stopped = driver.cancel()
+    report = driver.report()
+
+    assert 0 < stopped["screened"] < stopped["total"]
+    assert report["partial"] is True
+    assert report["finished"] is False
+    assert report["stopped"] is True
+    assert report["screened"] == stopped["screened"]
+    assert f"Only {report['screened']} of them have been checked" in report["summary"]
+    assert "Nothing the data could not already distinguish was lost" not in report["summary"]
+    assert _call("excluded_screen", job=driver.id)["tasks"] is None
+
+
+def test_the_pass_is_refused_for_a_search_that_had_no_skeleton() -> None:
+    """Nothing was excluded from an unconstrained search, and answering "none" would be a
+    different claim -- one that reads as an assurance rather than as "you asserted nothing"."""
+    spectrum = _semicircle()
+    search = Driver(spectrum, pool=list(POOL), exhaustive_limit=2, screen_chunk=1)
+    search.screen()
+    search.refit()
+    error = _error("excluded_start", job=search.id)
+    assert "no skeleton" in error["message"]
+
+
+def test_the_pass_is_refused_for_a_topology_the_search_never_fitted() -> None:
+    _, search = _skeleton_search()
+    error = _error("excluded_start", job=search.id, circuit="R1-C1-L1")
+    assert "not one of the topologies this search fitted" in error["message"]
+
+
+def test_the_excluded_pass_is_a_slot_of_its_own_and_leaves_the_search_readable() -> None:
+    """The report screen asks the same worker for both, after the search has finished."""
+    _, search = _skeleton_search()
+    driver = ExcludedDriver(search, chunk=1)
+    driver.run()
+    assert search.report()["recommended"] is not None
+    assert driver.report()["search"] == search.id
+
+
+# =============================================================================================
+# 6. The report screen: classes as classes, and files that match the command line's
+# =============================================================================================
+
+
+def _without_clocks(payload: Any) -> Any:
+    """The same structure with every elapsed time removed.
+
+    Two runs of the same search agree on every number that is a *result*; how long each took is
+    not one. Everything else here is compared exactly.
+    """
+    if isinstance(payload, dict):
+        return {k: _without_clocks(v) for k, v in payload.items() if k != "elapsed_s"}
+    if isinstance(payload, list):
+        return [_without_clocks(item) for item in payload]
+    return payload
+
+
+def _finished_search() -> tuple[Spectrum, Driver]:
+    spectrum = _semicircle()
+    driver = Driver(spectrum, pool=list(POOL), exhaustive_limit=LIMIT, screen_chunk=1)
+    driver.screen()
+    driver.refit()
+    return spectrum, driver
+
+
+def test_the_report_carries_the_equivalence_classes_as_classes() -> None:
+    """The one thing this report is not allowed to be is a ranking with a winner.
+
+    Different topologies are routinely exact reparameterisations of each other, so the grouping
+    is the structure of the answer rather than an annotation on it -- and it travels as a
+    grouping instead of being reconstructed in JavaScript from rows that happen to score alike.
+    """
+    spectrum, driver = _finished_search()
+    report = driver.report()
+    reference = discover(spectrum, pool=POOL, mode="exhaustive", exhaustive_limit=LIMIT, seed=0)
+
+    assert report["equivalence_classes"] == [
+        [c.circuit.to_string() for c in group] for group in reference.equivalence_classes()
+    ]
+    # Every candidate appears in exactly one class, singletons included.
+    members = [text for group in report["equivalence_classes"] for text in group]
+    assert sorted(members) == sorted(row["circuit"] for row in report["candidates"])
+    assert len(set(members)) == len(members)
+    assert any(len(group) > 1 for group in report["equivalence_classes"])
+
+
+def test_an_unconstrained_report_says_null_rather_than_empty_for_the_skeleton_findings() -> None:
+    """Absent and empty mean different things: "nothing was asserted" is not "the assertion
+    was tested and held"."""
+    _, driver = _finished_search()
+    report = driver.report()
+    assert report["skeleton"] is None
+    assert report["unsupported_assertion"] is None
+    assert report["skeleton_placements"] is None
+
+
+def test_a_constrained_report_names_what_the_data_could_not_test() -> None:
+    """The measured signature of a wrong skeleton (docs/PARTIAL_TOPOLOGY_PLAN.md §3.2), and
+    where the skeleton sits ambiguously -- both structured, because the report screen has to
+    show them beside the candidate they belong to rather than only inside a paragraph."""
+    spectrum, search = _skeleton_search()
+    report = search.report()
+    reference = discover(
+        spectrum, pool=POOL, skeleton="R1-p(R2,C1)", mode="exhaustive", exhaustive_limit=3,
+        seed=0,
+    )
+    assert reference.recommended is not None
+
+    assert report["unsupported_assertion"] == list(
+        reference.unsupported_assertion(reference.recommended)
+    )
+    assert report["skeleton_placements"] == {
+        c.circuit.to_string(): reference.placements_of(c) for c in reference.pareto
+    }
+    assert set(report["skeleton_placements"]) == {row["circuit"] for row in report["pareto"]}
+
+
+def test_the_json_export_is_the_file_the_command_line_writes() -> None:
+    """A download outlives the session and gets read by someone who was never at the screen, so
+    it is the CLI's own ``--json`` payload rather than a browser rendering of the same idea."""
+    spectrum, driver = _finished_search()
+    artifact = _call("export", kind="json", job=driver.id)
+    reference = discover(spectrum, pool=POOL, mode="exhaustive", exhaustive_limit=LIMIT, seed=0)
+
+    assert artifact["filename"].endswith(".json")
+    assert artifact["mime"] == "application/json"
+    assert _without_clocks(json.loads(artifact["content"])) == _without_clocks(
+        reference.to_dict()
+    )
+    written = json.loads(artifact["content"])
+    assert written["coverage"] == reference.completeness()
+    assert written["equivalence_classes"] == [
+        [c.circuit.to_string() for c in group]
+        for group in reference.equivalence_classes()
+        if len(group) > 1
+    ]
+
+
+def test_the_json_export_of_a_stopped_search_carries_the_partial_claim() -> None:
+    """The coverage sentence is in the file, so a report read a year later still says that the
+    ranking in it was only part of the shortlist."""
+    spectrum = _semicircle()
+    driver = Driver(spectrum, pool=list(POOL), exhaustive_limit=LIMIT, refit_chunk=1)
+    driver.screen()
+    driver.refit(batches=2)
+    driver.cancel()
+
+    written = json.loads(_call("export", kind="json", job=driver.id)["content"])
+    done, total = written["refit_progress"]
+    assert 0 < done < total
+    assert f"only {done} of the {total} shortlisted" in written["coverage"]
+
+
+def test_the_csv_export_names_the_rows_that_cannot_be_told_apart() -> None:
+    """A flat table is the least honest of the three exports, so the ambiguity is a column:
+    someone sorting by AICc in a spreadsheet still meets it."""
+    spectrum, driver = _finished_search()
+    artifact = _call("export", kind="csv", job=driver.id)
+    reference = discover(spectrum, pool=POOL, mode="exhaustive", exhaustive_limit=LIMIT, seed=0)
+
+    assert artifact["mime"] == "text/csv"
+    assert artifact["content"] == reference.to_csv()
+    rows = list(csv.DictReader(io.StringIO(artifact["content"])))
+    assert [row["circuit"] for row in rows] == [
+        row["circuit"] for row in driver.report()["candidates"]
+    ]
+    assert any(row["equivalents"] for row in rows)
+    assert sum(int(row["recommended"]) for row in rows) == 1
+
+
+def test_the_netlist_export_is_of_the_recommended_candidate_by_default() -> None:
+    """The same candidate ``discover --spice`` writes, which is the parsimonious one and not
+    the lowest AICc."""
+    _, driver = _finished_search()
+    report = driver.report()
+    artifact = _call("export", kind="netlist", job=driver.id)
+
+    assert artifact["filename"] == "autocircuit-discovery.cir"
+    assert f"Circuit: {report['recommended']}" in artifact["content"]
+    assert "Topology discovered automatically by AutoCircuit" in artifact["content"]
+
+    named = _call("export", kind="netlist", job=driver.id, circuit=report["pareto"][0]["circuit"])
+    assert f"Circuit: {report['pareto'][0]['circuit']}" in named["content"]
+
+
+def test_the_json_export_includes_the_excluded_pass_only_when_one_was_run() -> None:
+    """An absent key and an empty result mean different things wherever a skeleton is
+    involved: "not asked" is not "asked, and nothing was lost"."""
+    _, search = _skeleton_search()
+    before = json.loads(_call("export", kind="json", job=search.id)["content"])
+    assert before["excluded_equivalents"] is None
+
+    driver = ExcludedDriver(search, chunk=1)
+    driver.run()
+    after = json.loads(
+        _call("export", kind="json", job=search.id, excluded=driver.id)["content"]
+    )
+    assert after["excluded_equivalents"]["summary"] == driver.report()["summary"]
+    assert after["excluded_equivalents"]["screened"] == driver.report()["screened"]

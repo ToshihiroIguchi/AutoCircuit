@@ -38,6 +38,14 @@ export interface FitScreenProps {
   /** Lifted into `App` so the Discover screen can offer this circuit as a search skeleton. */
   circuit: string;
   onCircuit: (value: string) => void;
+  /**
+   * The current fit, for the Report screen to export -- null whenever there is not one.
+   *
+   * It carries the spectrum it was fitted to, not a reference to whichever one is selected
+   * later, because an export is a claim about which data was fitted: a netlist header states the
+   * frequency window the model is valid over.
+   */
+  onFit: (fit: { fit: FitWire; spectrumId: string; spectrum: SpectrumWire } | null) => void;
 }
 
 function errorMessage(error: unknown): string {
@@ -62,7 +70,14 @@ function labelAtPath(node: CircuitNodeWire, path: number[]): string | null {
   return child === undefined ? null : labelAtPath(child, rest);
 }
 
-export function FitScreen({ client, ready, spectrum, circuit: circuitText, onCircuit: setCircuitText }: FitScreenProps) {
+export function FitScreen({
+  client,
+  ready,
+  spectrum,
+  circuit: circuitText,
+  onCircuit: setCircuitText,
+  onFit: reportFit,
+}: FitScreenProps) {
   const wire = spectrum?.current ?? null;
 
   const [catalogue, setCatalogue] = useState<CatalogueWire | null>(null);
@@ -145,6 +160,30 @@ export function FitScreen({ client, ready, spectrum, circuit: circuitText, onCir
 
   const signature = `${describe?.circuit ?? ""}|${JSON.stringify(effective)}`;
   const currentFit = fit !== null && fit.signature === signature ? fit.result : null;
+
+  // Publish the fit for the Report screen's exports. Editing the circuit or a value retires the
+  // fit here, so this un-publishes it too: there is nothing to export from a model that is no
+  // longer on screen.
+  //
+  // The guard is for a *remount*, not for the first fit. Switching tabs unmounts this screen and
+  // takes its state with it, so without it the act of walking over to the Report screen and back
+  // would retire a fit that nothing about the model had invalidated.
+  //
+  // `wire` is read here but is deliberately not a dependency: it is captured as it was when the
+  // fit landed, and a later trim of the same spectrum must not silently re-label that fit as
+  // having been made against the new window.
+  const spectrumId = spectrum?.id ?? null;
+  const published = useRef(false);
+  useEffect(() => {
+    if (currentFit === null && !published.current) return;
+    published.current = currentFit !== null;
+    reportFit(
+      currentFit === null || spectrumId === null || wire === null
+        ? null
+        : { fit: currentFit, spectrumId, spectrum: wire },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentFit, spectrumId, reportFit]);
 
   // The preview curve. It is recomputed for every change to the circuit or to a value, which is
   // cheap: one impedance evaluation, no fitting.

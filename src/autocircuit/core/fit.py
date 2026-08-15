@@ -331,6 +331,30 @@ class FitResult:
         return "\n".join(lines)
 
 
+def report_dict(
+    result: FitResult, spectrum: Spectrum, *, source: str | None = None
+) -> dict[str, Any]:
+    """A fit's machine-readable report: the result, and what data it was fitted to.
+
+    :meth:`FitResult.to_dict` describes the fit alone, which is what the transport and the
+    discovery report want. A file written for someone else to read later has to say what the
+    numbers are *of*, so the two front ends that write one -- ``autocircuit fit --json`` and the
+    browser's download -- share this rather than each appending their own idea of the data
+    block. ``source`` overrides the recorded path, which in the browser is a scratch file
+    nobody would recognise.
+    """
+    payload = result.to_dict()
+    payload["data"] = {
+        "source": (
+            str(spectrum.metadata.get("source_path", "")) if source is None else source
+        ),
+        "n_points": spectrum.n,
+        "f_min": float(spectrum.f[0]),
+        "f_max": float(spectrum.f[-1]),
+    }
+    return payload
+
+
 class _Problem:
     """Precomputed residual machinery for one (circuit, spectrum, weighting) combination."""
 

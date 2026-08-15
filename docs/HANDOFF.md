@@ -1,21 +1,22 @@
-# Handoff — state of AutoCircuit as of 2026-08-14
+# Handoff — state of AutoCircuit as of 2026-08-15
 
 Written at the end of the session that built the backend, updated after discovery v2 steps
 1–5, again after the skeleton-constrained mode (all of `docs/PARTIAL_TOPOLOGY_PLAN.md`), and
-again after each step of `docs/WEB_UI_PLAN.md` (steps 1–4 so far). Read this first, then
+again after each step of `docs/WEB_UI_PLAN.md` (steps 1–5 so far). Read this first, then
 `CLAUDE.md`, then the plan for whichever part you are touching.
 
 ## 1. Where things stand
 
-The command-line backend is **complete and verified**: 669 tests pass
-(`python -m pytest tests -q`, 6–7 min — and that is one full run, not a union of subsets).
-Phases 0–5 of `docs/IMPLEMENTATION_PLAN.md` are done. Phase 6 (web UI) has its **steps 1–4 built
+The command-line backend is **complete and verified**: 693 tests pass
+(`python -m pytest tests -q`, ~6 min — and that is one full run, not a union of subsets).
+Phases 0–5 of `docs/IMPLEMENTATION_PLAN.md` are done. Phase 6 (web UI) has its **steps 1–5 built
 and measured**: a lossless `FitResult` across a worker boundary, so the browser fans out both
 tiers of the search (§8); the Data screen — import, plots and the Lin-KK verdict — running the
 same core through Pyodide (§9); the Fit screen — schematic canvas, live preview and a manual fit
-that needs no initial values (§10), which closed gate W1; and the Discover screen — the topology
+that needs no initial values (§10), which closed gate W1; the Discover screen — the topology
 search as a job, with streamed progress, a partial Pareto front and a cancel that terminates the
-workers (§11), which closed gates W2 and W4.
+workers (§11), which closed gates W2 and W4; and the Report screen — equivalence classes as
+classes, what a skeleton excluded, the downloads and the DRT probe (§12), which closed gate W6.
 
 **Discovery v2 is fully implemented** (see §2) and all five gates pass: G1 30/30 across the
 three reference spectra, G2 exactly reproducing the measured counts table, G3 with the truth
@@ -230,6 +231,15 @@ recorded in the code as a comment and in `docs/IMPLEMENTATION_PLAN.md` marked **
     scalar-returning and does not model `vectorized=True`, which is the convention that whole
     code path depends on. It is a stub gap, not a defect here.
 - **`pytest-timeout` is not installed** — `--timeout=` is rejected by the argument parser.
+- **This machine's speed drifts, and one test is a wall-clock assertion.**
+  `test_discover.py::test_time_limit_stops_the_search` allows 60 s for a run whose time limit is
+  5 s (the limit governs the evolution loop; the final refit that follows is unbounded).
+  [measured, 2026-08-15] It took 49.7 s on a rested machine and **72.9 s an hour later**, and the
+  whole suite went 355 s → 653 s over the same period, with no code between the two runs — the
+  same test fails at HEAD with the session's work stashed, which is how that was established.
+  So: a failure *only* there, with a number in the 60–80 s range, is thermal, not a regression.
+  Check it in isolation and against a stash before believing it, and **do not widen the bound**;
+  it is the only test that would catch a time limit that stopped working.
 - **numpy and scipy are the only permitted runtime dependencies** — this is what keeps the
   Pyodide target viable. The CLI uses stdlib `argparse` for this reason.
 - **PowerShell mangles quotes** in `python -c @'...'@`; heredocs lose `"` characters. Write a
@@ -418,7 +428,10 @@ and name the ones that reproduce it exactly. [measured] Every equivalent it foun
 references, is a CPE standing in for an ideal element -- a capacitor at n = -1, an inductor at
 n = +1, a Warburg at n = -0.5. What a skeleton costs is a commitment to an ideal element where
 a distributed one fits identically. Opt-in because 1,132 screens is 137 s on one core (43 s on
-eight) against a search of about a minute, and five elements is ~20 min single-core.
+eight) against a search of about a minute, and five elements is ~20 min single-core. It is in the
+browser too as of step 5 (§12), which split it into `excluded_plan()` plus drivers so that it can
+be fanned across workers and stopped — and being stoppable is what made its *report* have to
+distinguish "checked and found nothing" from "did not check".
 
 **What is left in this mode:** nothing but the documentation sweep, which this file is part
 of.
@@ -621,3 +634,66 @@ Three things the browser found that nothing else did:
 - **The pool is not built at page load**, contrary to `docs/WEB_UI_PLAN.md` §2: four more
   Pyodide workers on top of a ~13 s cold start, for every visitor who never searches. It comes
   up on the first Discover press and is kept afterwards.
+
+## 12. Web UI step 5 — the Report screen
+
+`docs/WEB_UI_PLAN.md` §2.6 is the record. `BRIDGE_VERSION` is now **4**: `excluded_start`,
+`excluded_screen`, `excluded_report`, `excluded_cancel`, `drt` and `export`.
+
+- **`excluded_plan()` is the third generator of the `screen_plan`/`refit_plan` shape**, and
+  `excluded_equivalents()` is now a driver over it, as is `web/src/core/excluded.ts`. The pass
+  had to be split this way rather than called: 1,132 screens is ~137 s on one desktop core, and
+  in a single-threaded browser interpreter that is minutes of a frozen page with no progress and
+  no way out. Its batches carry `so_far` — the report as it stands — for the same reason
+  `RefitBatch` carries `done`.
+- **`ExcludedEquivalents.screened` is new, and it is the third instance of this project's
+  characteristic failure.** "None of them reproduces your model" is a claim about every excluded
+  topology; a pass stopped after 8 of 55 knows nothing about the other 47, and without this the
+  sentence it printed was the finished one. Found by asking what the finished wording would mean
+  after a cancel — the same question that produced `refit_progress` in step 4 and the coverage
+  sentence in mode 2.
+- **The pass screens against the candidate's fitted response, and that target crosses the wire.**
+  `excluded_start` answers with a whole `Spectrum`. Naming it instead ("use the model") would put
+  the choice in JavaScript, and against a noisy sample an exact reparameterisation looks no
+  better than a topology that merely fits well.
+- **The pool workers did not change.** An excluded screen is a `screen_task`; only the target
+  differs. A second kind of fanned-out, cancellable work with no second worker protocol is what
+  "JavaScript makes no decisions" is worth.
+- **`DiscoveryResult.to_dict()` / `.to_csv()` and `fit.report_dict()` are where the CLI's files
+  are now built**, so `export` hands the browser the same text. `discover --csv` was added for
+  the same reason: the table the Report screen offers has a command-line counterpart rather than
+  being the browser's own invention. Those files may contain bare `Infinity` — an exact fit has
+  `-inf` information criteria — which is fine, because by the time one reaches a response it is
+  a *string* inside strict JSON.
+- **`DRTResult.to_wire()` had to exist before the probe could be shown.** `to_dict()` writes a
+  bare `inf` for the series capacitance whenever the data does not block, which is the ordinary
+  case and is exactly what `allow_nan=False` refuses.
+- **`App.tsx` owns the worker pool now**, because two screens run work on it. It is still built
+  on first use, not at page load.
+
+[measured] **In Chrome**, skeleton `C1-R1`, component pool, `exhaustive_limit=3`: the search
+covers 3 elements in ~40 s; the excluded pass then checks 132 of the 146 three-element topologies
+in **~7 s across four workers** and finds one exact equivalent of the reported `C1-R1-SKINF1` —
+`R1-CPE1-SKINF1`, the same CPE-is-a-capacitor substitution §7 measured at four elements.
+Cancelled mid-pass: 64 of 132 checked, the equivalent kept, and "Another 68 were never checked,
+so this list is not the whole of what was lost."
+
+Three things the browser found, all of them about state rather than about numbers:
+
+- **A screen is unmounted on a tab switch and everything in it is lost.** Harmless while there
+  were three screens used in order; a fourth that you walk back to makes it a trap, and it cost a
+  wrong measurement here — a form *displaying* "3 elements, with a skeleton" ran an
+  unconstrained four-element search, because those were restored defaults. `App` now owns the
+  search settings, the excluded pass and the DRT result. Anything that costs minutes or states an
+  intent belongs there, not in a screen.
+- **Two different netlists downloaded under one file name**, because the name came from the SPICE
+  subcircuit name and both default to `AUTOCIRCUIT`. Named for what they are now
+  (`autocircuit-discovery.cir`, `autocircuit-fit.cir`).
+- **A column of "Class n — 1 topology" headings buries the finding.** The panel now says how many
+  classes hold more than one member before listing them, including when the answer is none.
+
+[measured] **Gate W6 passes.** A search driven through the bridge and exported gives the same
+JSON as `discover()` on the same data — every key equal after dropping the clocks — the same CSV
+text, and a netlist of the same recommended candidate; the manual-fit export equals what
+`fit --json` and `--spice` write. That is `tests/test_web_job.py` §6 and `tests/test_web_bridge.py`
+§17.

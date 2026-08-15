@@ -39,12 +39,15 @@ from autocircuit.core.circuit import (
     subtree_at,
     subtree_paths,
 )
+from autocircuit.core.drt import WIRE_VERSION as DRT_WIRE_VERSION
+from autocircuit.core.drt import drt as core_drt
 from autocircuit.core.elements import POOLS, REGISTRY
+from autocircuit.core.fit import FitResult, relative_error, report_dict, search_space
 from autocircuit.core.fit import fit as core_fit
-from autocircuit.core.fit import relative_error, search_space
 from autocircuit.core.simulate import log_frequencies, simulate
 from autocircuit.core.spectrum import WIRE_VERSION as SPECTRUM_WIRE_VERSION
 from autocircuit.core.spectrum import Spectrum
+from autocircuit.core.spice import to_netlist
 from autocircuit.core.validate import WIRE_VERSION as VALIDATE_WIRE_VERSION
 from autocircuit.core.validate import lin_kk
 from autocircuit.core.wire import decode_array, decode_complex_array, decode_float
@@ -773,7 +776,153 @@ def test_preview_with_a_value_for_an_unknown_parameter_returns_an_error_response
 
 
 # =================================================================================================
-# 16. Every response satisfies the real wire contract
+# 16. `drt` agrees with calling `drt` directly, and survives the wire it could not before
+# =================================================================================================
+
+
+def _blocking_spectrum() -> Spectrum:
+    """A capacitor with a relaxation on it: the DRT's series capacitance term is *infinite*
+    unless the data blocks, which is the value that makes ``to_wire`` more than a rename."""
+    return simulate(
+        "R1-p(R2,C1)",
+        log_frequencies(1e0, 1e5, 8),
+        {"R1.R": 20.0, "R2.R": 1e3, "C1.C": 1e-7},
+        noise=0.002,
+        seed=1,
+    )
+
+
+def test_drt_matches_calling_drt_directly() -> None:
+    spectrum = _blocking_spectrum()
+    expected = core_drt(spectrum)
+
+    response = _call("drt", spectrum=spectrum.to_wire())
+    assert response["ok"] is True
+    payload = response["result"]["drt"]
+
+    assert payload["version"] == DRT_WIRE_VERSION
+    assert payload["n_relaxations"] == expected.n_relaxations
+    assert payload["well_described"] == expected.well_described
+    assert payload["lam_rule"] == expected.lam_rule
+    assert payload["hints"] == expected.hints()
+    assert payload["summary"] == expected.summary()
+    assert decode_float(payload["r_inf"]) == expected.r_inf
+    assert decode_float(payload["r_polarisation"]) == expected.r_polarisation
+    assert decode_float(payload["max_residual"]) == expected.max_residual
+    np.testing.assert_array_equal(decode_array(payload["tau"]), expected.tau)
+    np.testing.assert_array_equal(decode_array(payload["gamma"]), expected.gamma)
+    np.testing.assert_array_equal(decode_complex_array(payload["z_fit"]), expected.z_fit)
+    assert [decode_float(peak["tau"]) for peak in payload["peaks"]] == [
+        peak.tau for peak in expected.peaks
+    ]
+
+
+def test_an_absent_series_capacitance_travels_as_infinity_rather_than_breaking_the_wire() -> None:
+    """Why the DRT needed a wire form at all. ``to_dict`` writes ``inf`` for a term that was
+    not included, and that payload cannot be serialised with ``allow_nan=False`` -- so the
+    browser would have received nothing at all for the ordinary case of non-blocking data.
+    """
+    spectrum = _blocking_spectrum()
+    expected = core_drt(spectrum, series_capacitance=False)
+    assert math.isinf(expected.capacitance)
+    with pytest.raises(ValueError, match="Out of range float"):
+        json.dumps(expected.to_dict(), allow_nan=False)
+
+    response = _call("drt", spectrum=spectrum.to_wire(), series_capacitance=False)
+    assert response["ok"] is True
+    assert response["result"]["drt"]["capacitance"] == "inf"
+    assert decode_float(response["result"]["drt"]["capacitance"]) == expected.capacitance
+
+
+def test_drt_on_data_it_cannot_represent_says_so_rather_than_answering() -> None:
+    """The inversion always returns a distribution; ``hints`` is what says it means nothing.
+    The browser shows those sentences verbatim for exactly this case."""
+    spectrum = simulate(
+        "C1-R1-L1-SKINF1",
+        log_frequencies(1e2, 1e9, 8),
+        {"C1.C": 1e-6, "R1.R": 1e-2, "L1.L": 5e-10, "SKINF1.A": 2e-5, "SKINF1.n": 0.5},
+        noise=0.005,
+        seed=0,
+    )
+    response = _call("drt", spectrum=spectrum.to_wire())
+    assert response["ok"] is True
+    payload = response["result"]["drt"]
+    if not payload["well_described"]:
+        assert "cannot represent this spectrum" in payload["hints"][0]
+
+
+# =================================================================================================
+# 17. `export` writes the file the command line writes
+# =================================================================================================
+
+
+def test_export_of_a_manual_fit_is_the_json_the_cli_writes() -> None:
+    """A download outlives the session, so it is not rendered in JavaScript: the browser gets
+    the same text ``autocircuit fit --json`` writes, byte for byte.
+    """
+    spectrum = simulate(
+        "R1-C1", log_frequencies(1e1, 1e5, 6), {"R1.R": 40.0, "C1.C": 2e-7}, noise=0.005, seed=2
+    )
+    result = core_fit(Circuit.parse("R1-C1"), spectrum, restarts=2, seed=0)
+
+    response = _call(
+        "export", kind="json", fit=result.to_wire(), spectrum=spectrum.to_wire(), source="demo.csv"
+    )
+    assert response["ok"] is True
+    artifact = response["result"]
+    assert artifact["filename"].endswith(".json")
+    assert artifact["mime"] == "application/json"
+    assert artifact["content"] == json.dumps(
+        report_dict(FitResult.from_wire(result.to_wire()), spectrum, source="demo.csv"), indent=2
+    )
+    written = json.loads(artifact["content"])
+    assert written["circuit"] == "R1-C1"
+    assert written["data"]["source"] == "demo.csv"
+    assert written["data"]["n_points"] == spectrum.n
+
+
+def test_export_of_a_manual_fit_is_the_netlist_the_cli_writes() -> None:
+    spectrum = simulate(
+        "R1-C1", log_frequencies(1e1, 1e5, 6), {"R1.R": 40.0, "C1.C": 2e-7}, noise=0.005, seed=2
+    )
+    result = core_fit(Circuit.parse("R1-C1"), spectrum, restarts=2, seed=0)
+
+    response = _call(
+        "export",
+        kind="netlist",
+        fit=result.to_wire(),
+        spectrum=spectrum.to_wire(),
+        source="demo.csv",
+        name="DEMO",
+    )
+    assert response["ok"] is True
+    artifact = response["result"]
+    # Named for what it is, not for the subcircuit inside it: the discovery netlist and this one
+    # would otherwise share a file name, since both default to the same subcircuit.
+    assert artifact["filename"] == "autocircuit-fit.cir"
+    assert artifact["content"] == to_netlist(
+        result.circuit,
+        FitResult.from_wire(result.to_wire()).values,
+        f_min=float(spectrum.f[0]),
+        f_max=float(spectrum.f[-1]),
+        name="DEMO",
+        header="Fitted to demo.csv",
+    )
+    assert ".subckt DEMO" in artifact["content"]
+
+
+def test_an_unknown_export_kind_is_an_error_response() -> None:
+    spectrum = simulate("R1-C1", log_frequencies(1e1, 1e5, 4), {"R1.R": 40.0, "C1.C": 2e-7})
+    result = core_fit(Circuit.parse("R1-C1"), spectrum, restarts=1, seed=0)
+    response = _call(
+        "export", kind="postscript", fit=result.to_wire(), spectrum=spectrum.to_wire()
+    )
+    assert response["ok"] is False
+    assert "unknown export kind" in response["error"]["message"]
+
+
+# =================================================================================================
+# 18. Every response satisfies the real wire contract
 # =================================================================================================
 
 
@@ -794,7 +943,7 @@ def test_bridge_version_is_bumped_for_the_new_operations() -> None:
     """Pins the value rather than just its presence: a worker checks this at start-up and a
     stale cached bundle must fail loudly instead of answering with the old protocol.
     """
-    assert BRIDGE_VERSION == 3
+    assert BRIDGE_VERSION == 4
 
 
 def test_every_response_above_parses_as_json_and_re_dumps_without_allow_nan() -> None:

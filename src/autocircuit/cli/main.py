@@ -25,7 +25,7 @@ from autocircuit.core.discover import (
 )
 from autocircuit.core.drt import DRTResult, drt
 from autocircuit.core.elements import POOLS, REGISTRY
-from autocircuit.core.fit import FitResult, fit
+from autocircuit.core.fit import FitResult, fit, report_dict
 from autocircuit.core.simulate import log_frequencies, simulate
 from autocircuit.core.spectrum import Spectrum
 from autocircuit.core.spice import to_netlist
@@ -112,13 +112,7 @@ def _write_outputs(
     args: argparse.Namespace, spectrum: Spectrum, circuit: Circuit, result: FitResult
 ) -> None:
     if getattr(args, "json", None):
-        payload = result.to_dict()
-        payload["data"] = {
-            "source": str(spectrum.metadata.get("source_path", "")),
-            "n_points": spectrum.n,
-            "f_min": float(spectrum.f[0]),
-            "f_max": float(spectrum.f[-1]),
-        }
+        payload = report_dict(result, spectrum)
         Path(args.json).write_text(json.dumps(payload, indent=2), encoding="utf-8")
         print(f"\nWrote fit report to {args.json}")
     if getattr(args, "spice", None):
@@ -283,53 +277,13 @@ def cmd_discover(args: argparse.Namespace) -> int:
             print(f"  {line}")
 
     if args.json:
-        payload = {
-            "pool": list(result.pool),
-            "mode": result.mode,
-            "skeleton": result.skeleton,
-            "complete_up_to": result.complete_up_to,
-            "coverage": result.completeness(),
-            # Both of these are findings a reader of the numbers alone would miss: that no
-            # candidate is identifiable, and that the asserted skeleton fits into a reported
-            # topology in more than one place.
-            "unresolved_everywhere": result.unresolved_everywhere,
-            "excluded_equivalents": (
-                None
-                if excluded is None
-                else {
-                    "size": excluded.size,
-                    "kept": excluded.kept,
-                    "excluded": excluded.excluded,
-                    "equivalents": list(excluded.equivalents),
-                    "summary": excluded.summary(),
-                }
-            ),
-            "unsupported_assertion": (
-                None
-                if result.skeleton is None or result.recommended is None
-                else list(result.unsupported_assertion(result.recommended))
-            ),
-            "skeleton_placements": (
-                None
-                if result.skeleton is None
-                else {c.circuit.to_string(): result.placements_of(c) for c in result.pareto}
-            ),
-            "n_evaluated": result.n_evaluated,
-            "generations": result.generations,
-            "elapsed_s": result.elapsed_s,
-            "recommended": (
-                result.recommended.to_dict() if result.recommended is not None else None
-            ),
-            "pareto": [c.to_dict() for c in result.pareto],
-            "candidates": [c.to_dict() for c in result.candidates[: args.top]],
-            "equivalence_classes": [
-                [c.circuit.to_string() for c in group]
-                for group in result.equivalence_classes()
-                if len(group) > 1
-            ],
-        }
+        payload = result.to_dict(top=args.top, excluded=excluded)
         Path(args.json).write_text(json.dumps(payload, indent=2), encoding="utf-8")
         print(f"\nWrote discovery report to {args.json}")
+
+    if args.csv:
+        Path(args.csv).write_text(result.to_csv(top=args.top), encoding="utf-8")
+        print(f"Wrote the candidate table to {args.csv}")
 
     best = result.recommended
     if best is not None and args.spice:
@@ -585,6 +539,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_disc.add_argument("--population", type=int, default=40)
     p_disc.add_argument("--max-elements", type=int, default=7)
     p_disc.add_argument("--top", type=int, default=10, help="how many candidates to report")
+    p_disc.add_argument(
+        "--csv", metavar="PATH",
+        help="write the candidate table here as CSV; --top applies to it as well. A flat table "
+        "cannot carry the coverage sentence, so read it beside the report rather than instead "
+        "of it",
+    )
     p_disc.add_argument(
         "-w", "--weighting", default="modulus", choices=["modulus", "unit", "proportional"]
     )

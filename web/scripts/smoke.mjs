@@ -56,7 +56,7 @@ const ask = (request) => JSON.parse(handle(JSON.stringify(request)));
 console.log("version");
 const version = ask({ op: "version" });
 check("version answers", version.ok === true, JSON.stringify(version));
-check("bridge version is 3", version.result?.bridge === 3);
+check("bridge version is 4", version.result?.bridge === 4);
 check(
   "all four readers are present",
   JSON.stringify(version.result?.formats) ===
@@ -269,6 +269,130 @@ check(
 check(
   "a job that has been replaced is refused rather than confused with the current one",
   ask({ op: "discover_screen", job: search.result.job }).ok === false,
+);
+
+console.log("what the skeleton excluded");
+// The Report screen's own job: a pass over the topologies the assertion removed, driven exactly
+// as the search is -- batches out, costs back -- and screened against the reported model's own
+// fitted response rather than against the data.
+const constrained = ask({
+  op: "discover_start",
+  spectrum: simulated,
+  pool: ["R", "C", "L"],
+  skeleton: "C1-R1",
+  exhaustive_limit: 3,
+  restarts: 1,
+});
+check("a constrained search starts", constrained.ok === true, JSON.stringify(constrained.error));
+check("it runs to the end", drive(constrained.result.job) === "done");
+const constrainedReport = ask({ op: "discover_report", job: constrained.result.job }).result;
+check(
+  "its coverage names the skeleton, not just the element count",
+  constrainedReport?.completeness.includes("contains C1-R1"),
+  constrainedReport?.completeness,
+);
+check(
+  "the classes arrive grouped, singletons included",
+  Array.isArray(constrainedReport?.equivalence_classes) &&
+    constrainedReport.equivalence_classes.flat().length === constrainedReport.candidates.length,
+  JSON.stringify(constrainedReport?.equivalence_classes),
+);
+check(
+  "where the skeleton sits is reported per front row",
+  constrainedReport?.skeleton_placements !== null &&
+    Object.keys(constrainedReport?.skeleton_placements ?? {}).length ===
+      constrainedReport?.pareto.length,
+);
+check(
+  "and what the data could not test is a list rather than a paragraph",
+  Array.isArray(constrainedReport?.unsupported_assertion),
+  JSON.stringify(constrainedReport?.unsupported_assertion),
+);
+
+const pass = ask({ op: "excluded_start", job: constrained.result.job });
+check("excluded_start answers", pass.ok === true, JSON.stringify(pass.error));
+check("nothing has been screened yet", pass.result?.screened === 0);
+check("but the size of the pass is already known", (pass.result?.excluded ?? 0) > 0);
+check(
+  "the screens run against the model, not the measurement",
+  JSON.stringify(pass.result?.target?.z) !== JSON.stringify(simulated.z),
+);
+
+let excludedCosts = null;
+for (;;) {
+  const step = ask({ op: "excluded_screen", job: pass.result.job, costs: excludedCosts });
+  if (step.ok !== true) throw new Error(JSON.stringify(step.error));
+  if (step.result.tasks === null) break;
+  excludedCosts = step.result.tasks.map(
+    ([circuit, abandon]) =>
+      ask({
+        op: "screen_task",
+        spectrum: pass.result.target,
+        circuit,
+        abandon_above: abandon,
+      }).result.cost,
+  );
+}
+const excluded = ask({ op: "excluded_report", job: pass.result.job }).result;
+check("the pass finishes", excluded?.finished === true && excluded?.partial === false);
+check("it checked everything it enumerated", excluded?.screened === excluded?.excluded);
+check(
+  "and its sentence is the whole claim",
+  typeof excluded?.summary === "string" && excluded.summary.includes("excluded"),
+  excluded?.summary,
+);
+
+console.log("structure probe");
+const probe = ask({ op: "drt", spectrum: simulated });
+check("drt answers", probe.ok === true, JSON.stringify(probe.error));
+check("its advice travelled verbatim", Array.isArray(probe.result?.drt?.hints) && probe.result.drt.hints.length > 0);
+check(
+  "an absent series capacitance travels as a sentinel rather than breaking the wire",
+  ask({ op: "drt", spectrum: simulated, series_capacitance: false }).result?.drt?.capacitance ===
+    "inf",
+);
+
+console.log("downloads");
+const jsonFile = ask({
+  op: "export",
+  kind: "json",
+  job: constrained.result.job,
+  excluded: pass.result.job,
+});
+check("a JSON report is written", jsonFile.ok === true, JSON.stringify(jsonFile.error));
+const written = JSON.parse(jsonFile.result.content);
+check(
+  "it carries the coverage sentence, so the file says what the search may claim",
+  written.coverage === constrainedReport.completeness,
+);
+check(
+  "and the excluded pass, because one was run",
+  written.excluded_equivalents?.summary === excluded.summary,
+);
+const csvFile = ask({ op: "export", kind: "csv", job: constrained.result.job });
+check("a CSV table is written", csvFile.ok === true, JSON.stringify(csvFile.error));
+check(
+  "with a column naming the rows it cannot be told apart from",
+  csvFile.result?.content.split("\n")[0].includes("equivalents"),
+  csvFile.result?.content.split("\n")[0],
+);
+const netlist = ask({ op: "export", kind: "netlist", job: constrained.result.job });
+check("a netlist is written", netlist.ok === true, JSON.stringify(netlist.error));
+check(
+  "of the recommended candidate",
+  netlist.result?.content.includes(`Circuit: ${constrainedReport.recommended}`),
+);
+const fitFile = ask({
+  op: "export",
+  kind: "json",
+  fit: fitted.result.fit,
+  spectrum: simulated,
+  source: "example.csv",
+});
+check("a manual fit exports too", fitFile.ok === true, JSON.stringify(fitFile.error));
+check(
+  "naming the data as the user knows it",
+  JSON.parse(fitFile.result.content).data?.source === "example.csv",
 );
 
 console.log("errors");

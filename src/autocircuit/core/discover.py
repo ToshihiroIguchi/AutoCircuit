@@ -23,13 +23,15 @@ et al., J. Electrochem. Soc. 170, 086502, 2023).
 from __future__ import annotations
 
 import contextlib
+import csv
+import io
 import math
 import multiprocessing
 import multiprocessing.pool
 import time
 from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal, NamedTuple
+from typing import Any, Literal, NamedTuple, cast
 
 import numpy as np
 
@@ -552,6 +554,115 @@ class DiscoveryResult:
         ]
         return "\n".join(lines)
 
+    def to_dict(
+        self, *, top: int | None = None, excluded: ExcludedEquivalents | None = None
+    ) -> dict[str, Any]:
+        """The machine-readable report: the CLI's ``--json`` file, and the browser's download.
+
+        One implementation, because a report is a set of claims and the two front ends must not
+        make different ones. The three keys a reader of the numbers alone would miss are here
+        rather than in the prose: that no candidate is identifiable, that the asserted skeleton
+        fits into a reported topology in more than one place, and which of the reported
+        candidate's exact equivalents the skeleton removed from consideration.
+
+        ``top`` limits the ``candidates`` list only -- the Pareto front and the coverage claim
+        are never truncated, since they are what the report is *for*.
+        """
+        return {
+            "pool": list(self.pool),
+            "mode": self.mode,
+            "skeleton": self.skeleton,
+            "complete_up_to": self.complete_up_to,
+            "coverage": self.completeness(),
+            "unresolved_everywhere": self.unresolved_everywhere,
+            "excluded_equivalents": (
+                None
+                if excluded is None
+                else {
+                    "size": excluded.size,
+                    "kept": excluded.kept,
+                    "excluded": excluded.excluded,
+                    "screened": excluded.screened,
+                    "equivalents": list(excluded.equivalents),
+                    "summary": excluded.summary(),
+                }
+            ),
+            "unsupported_assertion": (
+                None
+                if self.skeleton is None or self.recommended is None
+                else list(self.unsupported_assertion(self.recommended))
+            ),
+            "skeleton_placements": (
+                None
+                if self.skeleton is None
+                else {c.circuit.to_string(): self.placements_of(c) for c in self.pareto}
+            ),
+            "n_evaluated": self.n_evaluated,
+            "generations": self.generations,
+            "elapsed_s": self.elapsed_s,
+            "refit_progress": (
+                None if self.refit_progress is None else list(self.refit_progress)
+            ),
+            "recommended": (
+                self.recommended.to_dict() if self.recommended is not None else None
+            ),
+            "pareto": [c.to_dict() for c in self.pareto],
+            "candidates": [
+                c.to_dict() for c in (self.candidates if top is None else self.candidates[:top])
+            ],
+            "equivalence_classes": [
+                [c.circuit.to_string() for c in group]
+                for group in self.equivalence_classes()
+                if len(group) > 1
+            ],
+        }
+
+    def to_csv(self, *, top: int | None = None) -> str:
+        """Every evaluated topology as a spreadsheet, one row each, best AICc first.
+
+        A flat table cannot carry the coverage sentence or an equivalence class, so this is the
+        least honest of the three exports and the columns are chosen accordingly: ``equivalents``
+        names the other rows that fit identically, so a reader sorting by AICc in a spreadsheet
+        still meets the ambiguity rather than reading the top row as the answer.
+        """
+        rows = self.candidates if top is None else self.candidates[:top]
+        front = {id(c) for c in self.pareto}
+        recommended = self.recommended
+        buffer = io.StringIO()
+        writer = csv.writer(buffer, lineterminator="\n")
+        writer.writerow(
+            [
+                "circuit", "canonical", "n_elements", "n_params", "complexity", "aicc",
+                "chi2_reduced", "n_unresolved", "unresolved", "on_pareto", "recommended",
+                "equivalents",
+            ]
+        )
+        for candidate in rows:
+            unresolved = [
+                name
+                for name, bad in zip(
+                    candidate.circuit.param_names, candidate.unresolved, strict=True
+                )
+                if bad
+            ]
+            writer.writerow(
+                [
+                    candidate.circuit.to_string(),
+                    candidate.circuit.canonical_form(),
+                    len(candidate.circuit.leaves),
+                    candidate.circuit.n_params,
+                    f"{candidate.complexity:.6g}",
+                    f"{candidate.aicc:.10g}",
+                    f"{candidate.result.chi2_reduced:.10g}",
+                    candidate.n_unresolved,
+                    ";".join(unresolved),
+                    int(id(candidate) in front),
+                    int(candidate is recommended),
+                    ";".join(e.circuit.to_string() for e in self.equivalents_of(candidate)),
+                ]
+            )
+        return buffer.getvalue()
+
 
 # -- Tree utilities ------------------------------------------------------------------------
 
@@ -959,26 +1070,148 @@ class ExcludedEquivalents:
     """Topologies of that size that contain the skeleton -- the ones the search evaluated."""
     excluded: int
     """Topologies of that size that do not, and were therefore never fitted."""
+    screened: int
+    """How many of ``excluded`` were actually checked; below it when the pass was stopped.
+
+    The pass takes about as long as the search it follows, so it is the second thing in this
+    project a user is likely to cancel -- and a half-finished one reads exactly like a finished
+    one, which is the failure this codebase keeps meeting (docs/HANDOFF.md section 3). "None of
+    them reproduces the reported circuit" is a claim about every excluded topology; what a
+    stopped pass knows is a claim about the ones it reached. :meth:`summary` says which it has.
+    """
     equivalents: tuple[str, ...]
     """Excluded topologies found to reproduce ``circuit``'s fitted response exactly."""
     elapsed_s: float
+    """Screening time accounted for, i.e. up to the last batch whose costs came back."""
+
+    @property
+    def partial(self) -> bool:
+        """True when the pass was stopped before every excluded topology was checked."""
+        return self.screened < self.excluded
 
     def summary(self) -> str:
+        removed = (
+            f"Your skeleton {self.skeleton} excluded {self.excluded} of the "
+            f"{self.kept + self.excluded} topologies with {self.size} elements"
+        )
+        if not self.partial:
+            if not self.equivalents:
+                return (
+                    f"{removed}, and none of them reproduces {self.circuit} exactly on this "
+                    "frequency window. Nothing the data could not already distinguish was lost."
+                )
+            names = ", ".join(self.equivalents)
+            return (
+                f"{removed}, and {len(self.equivalents)} of them fit {self.circuit} exactly on "
+                f"this frequency window: {names}. The data cannot tell these apart from the "
+                "reported one -- choosing between them is something you did, not something the "
+                "fit found."
+            )
+        # Deliberately not "the check was stopped": this same sentence describes a pass still
+        # running, and what is true of both is how many topologies have been looked at.
+        unchecked = self.excluded - self.screened
         if not self.equivalents:
             return (
-                f"Your skeleton {self.skeleton} excluded {self.excluded} of the "
-                f"{self.kept + self.excluded} topologies with {self.size} elements, and none "
-                f"of them reproduces {self.circuit} exactly on this frequency window. Nothing "
-                "the data could not already distinguish was lost."
+                f"{removed}. Only {self.screened} of them have been checked, and none of those "
+                f"reproduces {self.circuit} exactly on this frequency window -- which is not "
+                f"the same as nothing having been lost, because {unchecked} were never checked."
             )
         names = ", ".join(self.equivalents)
         return (
-            f"Your skeleton {self.skeleton} excluded {self.excluded} of the "
-            f"{self.kept + self.excluded} topologies with {self.size} elements, and "
-            f"{len(self.equivalents)} of them fit {self.circuit} exactly on this frequency "
+            f"{removed}. Only {self.screened} of them have been checked, and "
+            f"{len(self.equivalents)} of those fit {self.circuit} exactly on this frequency "
             f"window: {names}. The data cannot tell these apart from the reported one -- "
-            "choosing between them is something you did, not something the fit found."
+            "choosing between them is something you did, not something the fit found. Another "
+            f"{unchecked} were never checked, so this list is not the whole of what was lost."
         )
+
+
+class ExcludedBatch(NamedTuple):
+    """One batch of excluded topologies to screen, and the report as it stands before them.
+
+    ``so_far`` is here for the same reason :attr:`RefitBatch.done` is: it is what a stopped
+    pass reports from. A driver that assembled its own partial report would be writing a second
+    copy of the rule that separates "checked and found nothing" from "did not check".
+    """
+
+    tasks: list[ScreenTask]
+    so_far: ExcludedEquivalents
+
+
+def excluded_target(candidate: Candidate, spectrum: Spectrum) -> Spectrum:
+    """The response an excluded topology has to reproduce to count as an equivalent.
+
+    The candidate's *fitted* response at the data's frequencies, not the data. An exact
+    reparameterisation reaches a noise-free target to machine precision, which the sample's
+    noise would otherwise mask, and it turns the question from "does this fit the sample?" into
+    the algebraic one actually being asked (docs/PARTIAL_TOPOLOGY_PLAN.md section 3.3).
+    """
+    return Spectrum(spectrum.f, candidate.result.z_model)
+
+
+def excluded_plan(
+    candidate: Candidate,
+    skeleton: str,
+    spectrum: Spectrum,
+    *,
+    pool: Sequence[str] = DEFAULT_POOL,
+    chunk: int | None = None,
+) -> Generator[ExcludedBatch, Sequence[float], ExcludedEquivalents]:
+    """The excluded-equivalents pass with the *running* of it left to the caller.
+
+    The third generator of this shape, after :func:`screen_plan` and :func:`refit_plan`, and
+    for the same reason: which topologies the skeleton excluded, what response they are judged
+    against, how exact "exact" is, and what a stopped pass may then claim are decisions, and
+    they get one implementation. A driver fans the screens out and nothing else --
+    :func:`excluded_equivalents` in-process or across a process pool, JavaScript across Pyodide
+    workers (``docs/WEB_UI_PLAN.md`` section 2.6).
+
+    Yields an :class:`ExcludedBatch`, expects one cost per task back through ``send``, and
+    returns the finished :class:`ExcludedEquivalents`. ``chunk`` is the driver's scheduling
+    knob only: no decision here depends on an earlier batch, since every screen runs against
+    the same target with no early abandon, so batching buys a progress count and a cancel point
+    and costs nothing. ``None`` means one batch.
+    """
+    started = time.perf_counter()
+    frame = Circuit.parse(skeleton).root
+    size = len(candidate.circuit.leaves)
+
+    outside: list[str] = []
+    kept = 0
+    for node in enumerate_topologies(pool, size):
+        if contains_skeleton(node, frame):
+            kept += 1
+        else:
+            outside.append(Circuit(node).to_string())
+
+    found: list[tuple[float, str]] = []
+    screened = 0
+
+    def report() -> ExcludedEquivalents:
+        return ExcludedEquivalents(
+            circuit=candidate.circuit.to_string(),
+            skeleton=skeleton,
+            size=size,
+            kept=kept,
+            excluded=len(outside),
+            screened=screened,
+            equivalents=tuple(text for _, text in sorted(found)),
+            elapsed_s=time.perf_counter() - started,
+        )
+
+    step = max(len(outside) if chunk is None else chunk, 1)
+    for start in range(0, len(outside), step):
+        window = outside[start : start + step]
+        # Never abandoned: the abandon threshold exists to skip a polish on a topology already
+        # far off the pace of a *rival*, and here every screen is judged against the same
+        # target on its own. An abandoned screen would return infinity and read as "not an
+        # equivalent", which is the one answer this pass must not invent.
+        costs = yield ExcludedBatch([ScreenTask(text, math.inf) for text in window], report())
+        for cost, text in zip(costs, window, strict=True):
+            screened += 1
+            if float(cost) <= PERFECT_COST:
+                found.append((float(cost), text))
+    return report()
 
 
 def excluded_equivalents(
@@ -1016,51 +1249,36 @@ def excluded_equivalents(
     and the search it accompanies takes one. And the list is what the screen *found*: a tier-1
     budget can miss an exact equivalent, so the count is a floor, never a proof that nothing
     else was lost.
+
+    This is the in-process driver of :func:`excluded_plan`, which holds every decision it makes.
     """
-    started = time.perf_counter()
-    frame = Circuit.parse(skeleton).root
-    size = len(candidate.circuit.leaves)
-    # Noise-free: the question is whether the algebra can reach this response, not whether the
-    # topology also happens to absorb this sample's noise.
-    target = Spectrum(spectrum.f, candidate.result.z_model)
-
-    outside: list[str] = []
-    kept = 0
-    for node in enumerate_topologies(pool, size):
-        if contains_skeleton(node, frame):
-            kept += 1
-        else:
-            outside.append(Circuit(node).to_string())
-
+    target = excluded_target(candidate, spectrum)
+    plan = excluded_plan(candidate, skeleton, spectrum, pool=pool)
     with _worker_pool(workers, target, weighting) as executor:
-        if executor is not None and len(outside) > 1:
-            costs = list(
-                executor.map(
-                    _screen_worker,
-                    [(text, seed, math.inf, budget.popsize, budget.maxiter) for text in outside],
-                )
-            )
-        else:
-            costs = [
-                _screen_one(
-                    ScreenTask(text, math.inf), target, weighting=weighting, seed=seed,
-                    budget=budget,
-                )
-                for text in outside
-            ]
-
-    found = sorted(
-        (cost, text) for cost, text in zip(costs, outside, strict=True) if cost <= PERFECT_COST
-    )
-    return ExcludedEquivalents(
-        circuit=candidate.circuit.to_string(),
-        skeleton=skeleton,
-        size=size,
-        kept=kept,
-        excluded=len(outside),
-        equivalents=tuple(text for _, text in found),
-        elapsed_s=time.perf_counter() - started,
-    )
+        try:
+            batch = next(plan)
+            while True:
+                if executor is not None and len(batch.tasks) > 1:
+                    costs = list(
+                        executor.map(
+                            _screen_worker,
+                            [
+                                (task.text, seed, task.abandon_above, budget.popsize,
+                                 budget.maxiter)
+                                for task in batch.tasks
+                            ],
+                        )
+                    )
+                else:
+                    costs = [
+                        _screen_one(
+                            task, target, weighting=weighting, seed=seed, budget=budget
+                        )
+                        for task in batch.tasks
+                    ]
+                batch = plan.send(costs)
+        except StopIteration as done:
+            return cast(ExcludedEquivalents, done.value)
 
 
 def exhaustive_limit_for(skeleton_size: int | None, requested: int | None) -> int:

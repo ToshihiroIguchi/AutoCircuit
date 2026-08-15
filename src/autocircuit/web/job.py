@@ -40,10 +40,14 @@ from autocircuit.core.discover import (
     Candidate,
     DiscoveryResult,
     Enumeration,
+    ExcludedBatch,
+    ExcludedEquivalents,
     RefitBatch,
     RefitOutcome,
     ScreenTask,
     enumerate_candidates,
+    excluded_plan,
+    excluded_target,
     exhaustive_limit_for,
     pareto_front,
     refit_plan,
@@ -62,6 +66,11 @@ from autocircuit.core.wire import encode_float
 #: workers task by task, so it counts finished tasks without asking Python anything.
 SCREEN_CHUNK = WORKER_CHUNK
 
+#: Excluded-equivalent screens handed out per round trip. Same reasoning as the refit chunk --
+#: nothing here depends on an earlier batch either -- except that the pass is thousands of cheap
+#: screens rather than dozens of expensive fits, so the batch is the screen's size.
+EXCLUDED_CHUNK = WORKER_CHUNK
+
 #: Refits handed out per round trip. Nothing here depends on an earlier batch, so this only
 #: trades scheduling granularity against round trips -- and it is how often the partial Pareto
 #: front can be redrawn. One batch would also leave workers idle at the tail, since refit times
@@ -74,6 +83,7 @@ _COUNTER = itertools.count(1)
 #: material at the end.
 type ScreenGenerator = Generator[list[ScreenTask], Sequence[float], list[tuple[float, str]]]
 type RefitGenerator = Generator[RefitBatch, Sequence[RefitOutcome], list[Candidate]]
+type ExcludedGenerator = Generator[ExcludedBatch, Sequence[float], ExcludedEquivalents]
 
 
 class DiscoveryJob:
@@ -308,6 +318,25 @@ class DiscoveryJob:
         """
         return self._screen_done and self._refit_done
 
+    def candidate(self, text: str | None = None) -> Candidate:
+        """One of this search's refitted topologies, by circuit text; the recommended one by
+        default.
+
+        The candidate rather than its wire form, because what the report screen asks of it --
+        an export of its fitted values, or which excluded topologies reproduce its response --
+        needs the fit itself. It stays in this worker for that reason.
+        """
+        result = self.report()
+        if text is None:
+            chosen = result.recommended
+            if chosen is None:
+                raise ValueError("this search fitted nothing, so it has no candidate to report")
+            return chosen
+        for found in result.candidates:
+            if found.circuit.to_string() == text:
+                return found
+        raise ValueError(f"{text} is not one of the topologies this search fitted")
+
     def report(self) -> DiscoveryResult:
         """What the run is entitled to claim, whether it finished or was stopped.
 
@@ -336,7 +365,163 @@ class DiscoveryJob:
         )
 
 
+class ExcludedJob:
+    """The opt-in pass that says what the user's skeleton removed from consideration.
+
+    Same arrangement as :class:`DiscoveryJob` and for the same reason: it is a generator that
+    holds an enumeration and runs for minutes, so it lives in the orchestrator while the pool
+    workers screen one topology at a time and hold nothing. Every decision is
+    :func:`~autocircuit.core.discover.excluded_plan`'s.
+
+    Two properties are what this class is for. The counts are known *before* any screening --
+    the enumeration happens when the plan opens -- so the user can see that they are about to
+    ask for 1,132 fits and decline. And a pass that is stopped part-way reports as one: the
+    plan's own partial :class:`~autocircuit.core.discover.ExcludedEquivalents` is what
+    :meth:`report` returns, so "none of them reproduces this model" is never claimed for
+    topologies nobody looked at.
+    """
+
+    def __init__(
+        self,
+        search: DiscoveryJob,
+        candidate: Candidate,
+        *,
+        chunk: int = EXCLUDED_CHUNK,
+    ) -> None:
+        if search.frame is None:
+            raise ValueError(
+                "this search had no skeleton, so nothing was excluded from it: an "
+                "unconstrained exhaustive run already considered the topologies this pass "
+                "would look for"
+            )
+        self.id = f"excluded-{next(_COUNTER)}"
+        self.search = search.id
+        self.spectrum = search.spectrum
+        self.skeleton = search.frame.to_string()
+        self.circuit = candidate.circuit.to_string()
+        # The workers screen against the candidate's fitted response, not the measured data,
+        # and that choice is the plan's (see excluded_target). This is the same object the
+        # in-process driver passes its workers.
+        self.target = excluded_target(candidate, search.spectrum)
+        self.chunk = max(1, chunk)
+        self.started = time.perf_counter()
+        self.stopped = False
+        self._plan: ExcludedGenerator = excluded_plan(
+            candidate, self.skeleton, search.spectrum, pool=search.pool, chunk=self.chunk
+        )
+        self._batch: ExcludedBatch | None = None
+        self._issued = 0
+        self._costs: list[float] | None = None
+        self._open = True
+        self._final: ExcludedEquivalents | None = None
+        self._so_far: ExcludedEquivalents | None = None
+        self._advance()
+
+    def _advance(self) -> None:
+        """Pull the next batch out of the plan, or close it when there is none."""
+        try:
+            self._batch = (
+                next(self._plan) if self._costs is None else self._plan.send(self._costs)
+            )
+        except StopIteration as done:
+            self._batch = None
+            self._open = False
+            # A generator that was *closed* also stops here, with no value: that is a cancelled
+            # pass, and it must keep the partial report rather than overwrite it with nothing.
+            if done.value is not None:
+                self._final = cast(ExcludedEquivalents, done.value)
+                self._so_far = self._final
+            return
+        self._costs = None
+        self._so_far = self._batch.so_far
+
+    def next_batch(self) -> list[tuple[str, float]] | None:
+        """The next batch of ``(circuit, abandon above)``, or None when the pass is done.
+
+        The threshold is in the pair even though this pass never abandons, because the shape is
+        the screen's shape: a driver hands these to the same worker operation the search does,
+        and a driver that knew this pass was special would be a driver making a decision.
+        """
+        if self.stopped or not self._open or self._batch is None:
+            return None
+        if self._costs is not None:
+            self._advance()
+            if self._batch is None:
+                return None
+        self._issued = len(self._batch.tasks)
+        return [(task.text, task.abandon_above) for task in self._batch.tasks]
+
+    def submit(self, costs: list[float]) -> None:
+        """Hand back one cost per task in the batch just issued."""
+        if self._issued == 0:
+            raise ValueError("no screening batch is outstanding")
+        if len(costs) != self._issued:
+            raise ValueError(f"{len(costs)} costs for {self._issued} screening tasks")
+        self._costs = [float(cost) for cost in costs]
+        self._issued = 0
+
+    @property
+    def screened(self) -> int:
+        return 0 if self._so_far is None else self._so_far.screened
+
+    @property
+    def total(self) -> int:
+        return 0 if self._so_far is None else self._so_far.excluded
+
+    @property
+    def finished(self) -> bool:
+        """True once the plan ran out of work of its own accord -- not merely stopped."""
+        return self._final is not None
+
+    def cancel(self) -> None:
+        self.stopped = True
+        if self._open:
+            self._plan.close()
+            self._open = False
+
+    def report(self) -> ExcludedEquivalents:
+        """What the pass may claim: the finished answer, or the plan's own partial one.
+
+        A stopped pass has absorbed the costs of every batch it submitted, so the partial
+        report includes them -- what it excludes is the batch that was in flight when the pool
+        was terminated, exactly as a cancelled search discards its in-flight refits.
+        """
+        if self._final is not None:
+            return self._final
+        if self._open and self._costs is not None:
+            # Costs came back after the last batch was issued; folding them in is what makes
+            # the report describe everything actually screened rather than everything the plan
+            # has been asked about.
+            self._advance()
+        if self._so_far is None:  # pragma: no cover - the plan always yields or returns
+            raise ValueError("the pass has not started")
+        return self._so_far
+
+
 _CURRENT: DiscoveryJob | None = None
+_EXCLUDED: ExcludedJob | None = None
+
+
+def install_excluded(job: ExcludedJob) -> ExcludedJob:
+    """Make ``job`` the worker's excluded-equivalents pass, stopping any earlier one.
+
+    A slot of its own rather than replacing the search: this pass is *about* a search that has
+    already finished, and the report screen still needs that search alive to export from.
+    """
+    global _EXCLUDED
+    if _EXCLUDED is not None and _EXCLUDED is not job:
+        _EXCLUDED.cancel()
+    _EXCLUDED = job
+    return job
+
+
+def current_excluded(job_id: str) -> ExcludedJob:
+    """The running pass, if it is the one the caller thinks it is."""
+    if _EXCLUDED is None:
+        raise ValueError("no excluded-equivalents pass is running")
+    if _EXCLUDED.id != job_id:
+        raise ValueError(f"pass {job_id} is no longer running; {_EXCLUDED.id} is")
+    return _EXCLUDED
 
 
 def install(job: DiscoveryJob) -> DiscoveryJob:
@@ -424,9 +609,36 @@ def report_payload(job: DiscoveryJob) -> dict[str, Any]:
     ``completeness`` and ``summary`` are rendered verbatim by the browser rather than
     paraphrased, for the same reason the Lin-KK verdict is: the sentence that says what the
     search is allowed to claim is the part a second implementation would get subtly wrong.
+
+    Three of these keys exist so that the report screen can show a class as a class rather than
+    a ranking with a winner, and so that a constrained search says what its constraint cost.
+    ``equivalence_classes`` carries **every** class, singletons included, because the grouping
+    is the report's structure and not an annotation on it; the CLI's ``--json`` file keeps its
+    own convention of listing only the ambiguous ones (:meth:`DiscoveryResult.to_dict`).
     """
     result = job.report()
+    recommended = result.recommended
     return {
+        # The report screen outlives the run that produced it and asks this worker for more
+        # afterwards -- an export, or what the skeleton excluded -- so the report says which
+        # search it is the report of.
+        "job": job.id,
+        "equivalence_classes": [
+            [c.circuit.to_string() for c in group] for group in result.equivalence_classes()
+        ],
+        # What the user asserted and the data did not test, and where a skeleton sits in more
+        # than one place. Both are null without a skeleton, which is not the same as empty:
+        # empty means "asked, and nothing to report".
+        "unsupported_assertion": (
+            None
+            if result.skeleton is None or recommended is None
+            else list(result.unsupported_assertion(recommended))
+        ),
+        "skeleton_placements": (
+            None
+            if result.skeleton is None
+            else {c.circuit.to_string(): result.placements_of(c) for c in result.pareto}
+        ),
         "n_evaluated": result.n_evaluated,
         "complete_up_to": result.complete_up_to,
         "elapsed_s": encode_float(result.elapsed_s),
@@ -445,6 +657,33 @@ def report_payload(job: DiscoveryJob) -> dict[str, Any]:
             None if result.recommended is None else result.recommended.circuit.to_string()
         ),
         "unresolved_everywhere": result.unresolved_everywhere,
+    }
+
+
+def excluded_payload(job: ExcludedJob) -> dict[str, Any]:
+    """The excluded-equivalents pass as JSON, finished or stopped.
+
+    ``summary`` is the sentence the CLI prints, verbatim, and it is the whole point of the
+    pass: which forms the data cannot distinguish were removed by a choice the *user* made.
+    Whether it was stopped part-way is inside that sentence rather than beside it, so a reader
+    cannot take the claim without the qualification.
+    """
+    report = job.report()
+    return {
+        "job": job.id,
+        "search": job.search,
+        "circuit": report.circuit,
+        "skeleton": report.skeleton,
+        "size": report.size,
+        "kept": report.kept,
+        "excluded": report.excluded,
+        "screened": report.screened,
+        "partial": report.partial,
+        "equivalents": list(report.equivalents),
+        "elapsed_s": encode_float(report.elapsed_s),
+        "finished": job.finished,
+        "stopped": job.stopped,
+        "summary": report.summary(),
     }
 
 

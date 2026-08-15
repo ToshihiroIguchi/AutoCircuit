@@ -20,7 +20,10 @@ from autocircuit.core.discover import (
     DiscoveryResult,
     discover,
     excluded_equivalents,
+    excluded_plan,
+    excluded_target,
     exhaustive_limit_for,
+    run_screen,
 )
 from autocircuit.core.enumerate import (
     contains_skeleton,
@@ -465,6 +468,89 @@ def test_excluded_equivalents_reports_plainly_when_nothing_was_lost() -> None:
     assert report.excluded > 0
     assert report.equivalents == ()
     assert "Nothing the data could not already distinguish was lost" in report.summary()
+
+
+def test_a_driven_excluded_pass_is_the_same_pass(
+) -> None:
+    """The pass has two drivers now -- in-process, and a browser fanning it across workers --
+    and they must be running the same one. Everything the answer is made of comes from
+    :func:`excluded_plan`; a driver that decided which topologies to check, or how exact
+    "exact" is, would be a second implementation of the claim this pass exists to make.
+    """
+    pool = ("R", "C")
+    data = simulate(
+        "R1-p(R2,C1)",
+        log_frequencies(1e1, 1e5, 2),
+        {"R1.R": 20.0, "R2.R": 1000.0, "C1.C": 1e-8},
+        noise=0.0,
+        seed=0,
+    )
+    result = discover(
+        data, pool=pool, skeleton="R1-p(R2,C1)", mode="exhaustive", exhaustive_limit=3, seed=0
+    )
+    assert result.recommended is not None
+    assert result.skeleton is not None
+
+    target = excluded_target(result.recommended, data)
+    plan = excluded_plan(result.recommended, result.skeleton, data, pool=pool, chunk=1)
+    batches = 0
+    driven = None
+    batch = next(plan)
+    while driven is None:
+        batches += 1
+        costs = [run_screen(task, target, weighting="modulus", seed=0) for task in batch.tasks]
+        try:
+            batch = plan.send(costs)
+        except StopIteration as done:
+            driven = done.value
+
+    reference = excluded_equivalents(result.recommended, result.skeleton, data, pool=pool, seed=0)
+    assert batches > 1  # actually batched, so the comparison means something
+    assert driven.equivalents == reference.equivalents
+    assert (driven.kept, driven.excluded, driven.screened) == (
+        reference.kept, reference.excluded, reference.screened
+    )
+    assert driven.screened == driven.excluded
+    assert not driven.partial
+
+
+def test_a_stopped_excluded_pass_does_not_claim_the_topologies_it_never_checked() -> None:
+    """The characteristic failure of this project, in its third place (docs/HANDOFF.md §3).
+
+    "None of them reproduces your model" is a claim about every topology the skeleton excluded.
+    A pass that was stopped after 8 of 55 knows nothing about the other 47, and the sentence it
+    prints has to be the weaker one -- because the pass takes as long as the search it follows,
+    so being stopped is the normal case rather than the exceptional one.
+    """
+    pool = ("R", "C", "L")
+    data = simulate(
+        "C1-R1-L1",
+        log_frequencies(1e2, 1e9, 4),
+        {"C1.C": 1e-6, "R1.R": 1e-2, "L1.L": 5e-10},
+        noise=0.0,
+        seed=0,
+    )
+    result = discover(
+        data, pool=pool, skeleton="C1-R1-L1", mode="exhaustive", exhaustive_limit=3, seed=0
+    )
+    assert result.recommended is not None
+    assert result.skeleton is not None
+
+    target = excluded_target(result.recommended, data)
+    plan = excluded_plan(result.recommended, result.skeleton, data, pool=pool, chunk=8)
+    first = next(plan)
+    costs = [run_screen(task, target, weighting="modulus", seed=0) for task in first.tasks]
+    partial = plan.send(costs).so_far
+    plan.close()
+
+    assert partial.partial
+    assert partial.screened == 8 < partial.excluded
+    text = partial.summary()
+    assert f"Only {partial.screened} of them have been checked" in text
+    assert f"{partial.excluded - partial.screened} were never checked" in text
+    # The finished pass on this same case says exactly this, and it is the claim a partial one
+    # is not entitled to make.
+    assert "Nothing the data could not already distinguish was lost" not in text
 
 
 # =============================================================================================

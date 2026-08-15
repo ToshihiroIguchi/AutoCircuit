@@ -39,14 +39,20 @@ machine off the network; it is also why `public/` is ~29 MB.
   └─────────────────────────┘     └────────────────────────────────┘
 ```
 
-Three screens so far, under `src/screens/`. `App.tsx` owns the Pyodide client, the loaded
-spectra and the circuit drawn on the Fit screen; a screen is a view over them.
+Four screens, under `src/screens/`. `App.tsx` owns the Pyodide client, the worker pool, the
+loaded spectra, the circuit drawn on the Fit screen, that screen's fit, the finished search and
+its settings, and the two long-running jobs the Report screen starts; a screen is a view over
+them. The rule is simple and was learned the hard way: **a screen is unmounted the moment the
+user changes tab**, so anything held in one is something the user loses by looking away — and a
+form that quietly returns to its defaults is worse than one that forgets visibly, because it
+still *displays* what you asked for.
 
 | screen | what it does |
 |--------|--------------|
 | Data | drop a file, see it plotted, trim its frequency window, read the Lin-KK verdict |
 | Fit | draw a circuit, watch it against the data, fit it — with no initial values |
 | Discover | search the topology space against the data: pool, element limit, optional skeleton, streamed progress, cancel, Pareto front |
+| Report | read the answer: equivalence classes as classes, what a skeleton excluded, the downloads, the DRT probe |
 
 The Discover screen is a job, not a request — a real search takes minutes even in the browser
 (`docs/WEB_UI_PLAN.md` §1) — and its worker arrangement has two roles rather than one. One
@@ -60,6 +66,15 @@ every decision it appears to make (which topologies exist, which earn a refit, w
 claim afterwards) was actually made in Python. The pool is not built until the first Discover
 press, because four more Pyodide workers at page load — each ~1.5 s and its own copy of numpy
 and scipy — would tax every visitor who never searches.
+
+The Report screen is a *second* user of that arrangement. Its excluded-equivalents pass — which
+names the topologies the user's skeleton removed that would have fitted identically — is the same
+shape as the search: `autocircuit.web.job.ExcludedJob` in the orchestrator, `src/core/excluded.ts`
+driving it, and the same pool answering `screen_task`. Nothing about a pool worker changed to
+support it; what makes it a different question is the *target* it is handed, which is the reported
+model's own fitted response rather than the measured data. That is why the pool is owned by
+`App.tsx` rather than by the Discover screen: two screens run work on it, and two pools would be
+eight Pyodide workers on a machine where the speed-up saturates at four.
 
 Two rules hold this together, both from `docs/WEB_UI_PLAN.md` §4:
 
@@ -79,13 +94,23 @@ A file the user drops is written into the Pyodide filesystem and read from there
 `autocircuit.io.read_many`, so format sniffing, the extension hints and the multi-sweep readers
 behave exactly as they do on the command line.
 
+## What leaves the browser
+
+Every download is rendered in Python, by the functions the command line writes its files with:
+`discover --json`, the `--csv` candidate table, `fit --json`, and `--spice`. The `export`
+operation answers with the file's whole text and this side only wraps it in a `Blob`. A file
+outlives the session that produced it, so a browser-side renderer of the same format would be a
+second implementation whose disagreement with the CLI nobody would ever see — which is gate W6.
+
 ## State
 
-Steps 1–4 of `docs/WEB_UI_PLAN.md` §5: data import, plots and the Lin-KK panel; the schematic
-canvas, the live preview and the manual fit; and the discovery job screen. The equivalence-class
-report and the export/DRT panel are step 5.
+Steps 1–5 of `docs/WEB_UI_PLAN.md` §5: data import, plots and the Lin-KK panel; the schematic
+canvas, the live preview and the manual fit; the discovery job screen; and the report screen —
+equivalence classes, the skeleton's own findings, the exports and the DRT probe. Step 6 (example
+data, cold-start work, deployment) is next.
 
-`npm run smoke` covers the Python path end to end without a browser. Two things it cannot cover,
-which cost a real browser to find: how a panel is *sized* (see `docs/HANDOFF.md` §9 on Plotly
-heights), and how long a fit feels — 5 s for three parameters, which is why the Fit button has a
-busy state.
+`npm run smoke` covers the Python path end to end without a browser. Three things it cannot
+cover, each of which cost a real browser to find: how a panel is *sized* (see `docs/HANDOFF.md`
+§9 on Plotly heights), how long a fit feels — 5 s for three parameters, which is why the Fit
+button has a busy state — and what survives a tab switch, which is the whole reason `App.tsx`
+holds what it holds.

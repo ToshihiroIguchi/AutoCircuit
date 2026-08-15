@@ -5,7 +5,12 @@
 import type {
   CatalogueWire,
   CircuitWire,
+  DrtWire,
   EditAction,
+  ExcludedReportWire,
+  ExcludedStartWire,
+  ExcludedStepWire,
+  ExportArtifactWire,
   FitResultWire,
   FitWire,
   PreviewWire,
@@ -69,6 +74,32 @@ export interface SearchOptions {
   weighting?: string;
   seed?: number;
   restarts?: number;
+}
+
+/** The knobs the DRT exposes. `undefined` for a series term means "decide from the data". */
+export interface DrtOptions {
+  pointsPerDecade?: number;
+  seriesInductance?: boolean;
+  seriesCapacitance?: boolean;
+  regularisation?: number;
+}
+
+/** Which file to write. The same three the command line writes. */
+export type ExportKind = "json" | "csv" | "netlist";
+
+/** What goes into one. Every field has a command-line counterpart. */
+export interface ExportOptions {
+  /** Which candidate a discovery netlist is of; the recommended one by default. */
+  circuit?: string;
+  /** An excluded-equivalents pass to fold into the JSON report, when one has been run. */
+  excluded?: string;
+  top?: number;
+  /** SPICE subcircuit name (`--subckt`). */
+  name?: string;
+  /** Ladder-synthesis accuracy target for fractional elements (`--spice-error`). */
+  errorTarget?: number;
+  /** What the data is called *to the user*; the worker's own path would mean nothing to them. */
+  source?: string;
 }
 
 /** The knobs `fit` exposes. Every one of them is an argument the CLI has too. */
@@ -285,6 +316,88 @@ export class BridgeClient {
   /** Stop handing out work. The report stays readable afterwards, and says it was stopped. */
   async discoverCancel(job: string): Promise<{ job: string; screened: number; refitted: number }> {
     return this.call({ op: "discover_cancel", job });
+  }
+
+  // -- What the skeleton excluded -------------------------------------------------------------
+  //
+  // The same two roles again. The pool workers answer `screenTask`, unchanged and unaware that
+  // this is a different question -- what makes it a different question is the *target* the
+  // orchestrator hands back here, which is the reported model's own fitted response.
+
+  /** Enumerate what the skeleton excluded. Nothing is screened yet; the counts come first. */
+  async excludedStart(job: string, circuit?: string | null): Promise<ExcludedStartWire> {
+    return this.call<ExcludedStartWire>({ op: "excluded_start", job, circuit: circuit ?? null });
+  }
+
+  /** Hand back the last batch's costs, take the next batch. */
+  async excludedScreen(job: string, costs: Array<number | null> | null): Promise<ExcludedStepWire> {
+    return this.call<ExcludedStepWire>({ op: "excluded_screen", job, costs });
+  }
+
+  /** What the pass may claim, whether it finished or was stopped. */
+  async excludedReport(job: string): Promise<ExcludedReportWire> {
+    return this.call<ExcludedReportWire>({ op: "excluded_report", job });
+  }
+
+  /** Stop handing out work; the partial report stays readable and says it is partial. */
+  async excludedCancel(job: string): Promise<{ job: string; screened: number; total: number }> {
+    return this.call({ op: "excluded_cancel", job });
+  }
+
+  // -- Beside the search, and out of the browser -----------------------------------------------
+
+  /** The distribution of relaxation times: advice printed beside a search, never fed into one. */
+  async drt(spectrum: SpectrumWire, options: DrtOptions = {}): Promise<DrtWire> {
+    const result = await this.call<{ drt: DrtWire }>({
+      op: "drt",
+      spectrum,
+      points_per_decade: options.pointsPerDecade,
+      series_inductance: options.seriesInductance,
+      series_capacitance: options.seriesCapacitance,
+      regularisation: options.regularisation,
+    });
+    return result.drt;
+  }
+
+  /**
+   * One downloadable file describing a search this worker still holds.
+   *
+   * The text is written in Python by the same functions the command line writes it with, so a
+   * file saved here is the file `--json`, `--csv` or `--spice` would have produced.
+   */
+  async exportDiscovery(
+    job: string,
+    kind: ExportKind,
+    options: ExportOptions = {},
+  ): Promise<ExportArtifactWire> {
+    return this.call<ExportArtifactWire>({
+      op: "export",
+      kind,
+      job,
+      circuit: options.circuit,
+      excluded: options.excluded,
+      top: options.top,
+      name: options.name,
+      error_target: options.errorTarget,
+    });
+  }
+
+  /** The same, for a fit the user drew themselves: the whole fit travels back to be rendered. */
+  async exportFit(
+    fit: FitResultWire,
+    spectrum: SpectrumWire,
+    kind: ExportKind,
+    options: ExportOptions = {},
+  ): Promise<ExportArtifactWire> {
+    return this.call<ExportArtifactWire>({
+      op: "export",
+      kind,
+      fit,
+      spectrum,
+      source: options.source,
+      name: options.name,
+      error_target: options.errorTarget,
+    });
   }
 
   /**

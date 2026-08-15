@@ -229,6 +229,26 @@ export interface RefitStepWire {
  * `refit_progress`, when it is not null, says that the ranking below it is partial.
  */
 export interface ReportWire {
+  /** The search this is the report of; the report screen asks the same worker for more later. */
+  job: string;
+  /**
+   * Every candidate, grouped by the response it produces -- singletons included.
+   *
+   * The grouping is the structure of the answer and not an annotation on it: two topologies in
+   * one class are exact reparameterisations, and no impedance measurement can prefer one. It
+   * arrives grouped rather than being reconstructed here from rows that happen to score alike.
+   */
+  equivalence_classes: string[][];
+  /**
+   * Asserted elements the fit could not pin down, or null when nothing was asserted.
+   *
+   * Null and `[]` say different things: null is "no skeleton", `[]` is "the data tested it".
+   * [measured] A non-empty list is what a *wrong* skeleton looks like -- it leaves no trace in
+   * the residuals or in chi² (`docs/PARTIAL_TOPOLOGY_PLAN.md` §3.2).
+   */
+  unsupported_assertion: string[] | null;
+  /** Per front row, how many distinct places the skeleton sits in it; above one is ambiguous. */
+  skeleton_placements: Record<string, number> | null;
   n_evaluated: number;
   complete_up_to: number | null;
   elapsed_s: WireFloat;
@@ -245,12 +265,114 @@ export interface ReportWire {
   unresolved_everywhere: boolean;
 }
 
+// -- What a skeleton excluded -----------------------------------------------------------------
+//
+// A pass of the same shape as the search, over the topologies the skeleton removed from
+// consideration: it is screened in batches, it can be stopped, and what it may claim afterwards
+// depends on how much of it ran. That last property is the reason it exists at all.
+
+/** What `excluded_start` committed to, before any of it is screened. */
+export interface ExcludedStartWire extends ExcludedReportWire {
+  /**
+   * The spectrum every screen in this pass runs against.
+   *
+   * The reported candidate's *fitted* response, not the measured data: an exact
+   * reparameterisation reaches a noise-free target to machine precision, which the sample's
+   * noise would mask. Python chooses it; this side only carries it to the workers.
+   */
+  target: SpectrumWire;
+}
+
+/** A batch of the pass, with how far it has got and what it has found so far. */
+export interface ExcludedStepWire {
+  tasks: ScreenTaskWire[] | null;
+  screened: number;
+  total: number;
+  equivalents: string[];
+}
+
+/** What the pass may claim, finished or stopped -- the difference is inside `summary`. */
+export interface ExcludedReportWire {
+  job: string;
+  /** The search this pass is about. */
+  search: string;
+  /** The reported candidate whose response the excluded topologies were screened against. */
+  circuit: string;
+  skeleton: string;
+  size: number;
+  /** Topologies of that size containing the skeleton: the ones the search evaluated. */
+  kept: number;
+  /** Topologies of that size that do not, and were therefore never fitted. */
+  excluded: number;
+  /** How many of those were actually checked. Below `excluded` when the pass was stopped. */
+  screened: number;
+  partial: boolean;
+  equivalents: string[];
+  elapsed_s: WireFloat;
+  finished: boolean;
+  stopped: boolean;
+  /** The CLI's sentence, verbatim; it says whether the pass was complete. */
+  summary: string;
+}
+
+// -- The structure probe, and the files that leave the browser --------------------------------
+
+/** One relaxation read off the distribution. */
+export interface DrtPeakWire {
+  tau: WireFloat;
+  f_peak: WireFloat;
+  weight: WireFloat;
+  fwhm_decades: WireFloat;
+  ideal_fwhm_decades: WireFloat;
+  /** Wider than this inversion makes an ideal Debye peak: a distributed process, so try a CPE. */
+  broadened: boolean;
+}
+
+/**
+ * A distribution of relaxation times, as `DRTResult.to_wire()` writes it.
+ *
+ * Advisory, and never fed back into the search: a DRT peak count read off a regularised
+ * inversion of noisy data must not be able to delete the right answer from a search that still
+ * calls itself exhaustive (`docs/DISCOVERY_V2_PLAN.md` §3.4). Check `well_described` first --
+ * a spectrum the Debye model cannot represent still produces peaks, and they mean nothing.
+ */
+export interface DrtWire {
+  version: number;
+  n_relaxations: number;
+  well_described: boolean;
+  r_inf: WireFloat;
+  r_polarisation: WireFloat;
+  inductance: WireFloat;
+  capacitance: WireFloat;
+  lam: WireFloat;
+  lam_rule: string;
+  max_residual: WireFloat;
+  rms_residual: WireFloat;
+  tau: WireArray;
+  gamma: WireArray;
+  peaks: DrtPeakWire[];
+  z_fit: WireComplexArray;
+  residual_real: WireArray;
+  residual_imag: WireArray;
+  /** The CLI's own advice lines, carried verbatim. */
+  hints: string[];
+  summary: string;
+}
+
+/** One downloadable file, rendered in Python by the code the command line writes it with. */
+export interface ExportArtifactWire {
+  filename: string;
+  mime: string;
+  content: string;
+}
+
 /** What build the worker is running; checked at start-up against what this bundle expects. */
 export interface VersionsWire {
   bridge: number;
   fit: number;
   spectrum: number;
   validate: number;
+  drt: number;
   formats: string[];
 }
 

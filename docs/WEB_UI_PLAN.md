@@ -1,13 +1,14 @@
 # Web UI — Phase 6 Plan
 
-Status: steps 1–4 built and measured (2026-08-14); steps 5–6 are a draft awaiting approval.
+Status: steps 1–5 built and measured (2026-08-14); step 6 is a draft awaiting approval.
 The one architectural question this plan carried is settled and prototyped — see §2.1 — and
 that prototype changed §2.2 and the work order, which is what prototypes are for. Step 2 did
 the same to §1: the cold-start figure there came from Node and is wrong for a browser by 3×, see
 §2.3. Step 3 closed gate W1 and, in doing so, replaced an assumption §2.2 had explicitly left
 unmeasured — see §2.4. Step 4 closed W2 and W4 and found that **one clause of W2 was not
 achievable and never had been** — see §2.5, and §6, where the gate now carries what was measured
-instead of a softer promise.
+instead of a softer promise. Step 5 added a gate rather than closing one: W6, that a downloaded
+file is the file the command line writes, see §2.6.
 Prerequisite reading: `docs/IMPLEMENTATION_PLAN.md` §9 (the original sketch, now partly
 superseded by measurement), `benchmarks/pyodide/README.md` (every performance number below),
 and `docs/HANDOFF.md` §3.
@@ -348,6 +349,84 @@ One deviation from §2 worth recording: the pool is **not** created at page load
 Pyodide workers would be added to a cold start that is already ~13 s, for every visitor who
 never presses Discover; it is built on the first search and kept afterwards.
 
+### 2.6 What step 5 built, and the third generator it needed
+
+Step 5 is the Report screen: equivalence classes shown as classes, what a skeleton excluded,
+the downloads, and the DRT probe. `BRIDGE_VERSION` is 4 — `excluded_start`, `excluded_screen`,
+`excluded_report`, `excluded_cancel`, `drt` and `export` join the sixteen before them.
+
+**The one feature here that is not a rendering is the excluded-equivalents pass**, and it is the
+feature `CLAUDE.md` calls non-optional: a skeleton chooses between forms the data cannot
+distinguish, and the report has to name what the choice removed. It could not simply be called:
+`excluded_equivalents()` is 1,132 screens on the capacitor reference (§3.3 of
+`docs/PARTIAL_TOPOLOGY_PLAN.md`), which is ~137 s on one desktop core and would be minutes of a
+frozen single-threaded interpreter in the browser, with no progress and no way out. So it was
+split the way the search was, into `excluded_plan()` — **the third generator of that shape**,
+after `screen_plan` and `refit_plan` — and drivers over it: `excluded_equivalents()` in-process
+or across a process pool, and `core/excluded.ts` across the same four Pyodide workers the search
+uses. There are now three generators holding every decision the discovery machinery makes, and
+five drivers of them holding none.
+
+Three things about that pass are worth not re-deriving.
+
+- **The target is the reported candidate's own fitted response, not the data.** It is carried on
+  the wire (`excluded_start` answers with a whole spectrum) rather than named, because choosing
+  it is a decision: against a noisy sample an exact reparameterisation looks no better than a
+  topology that merely fits well, and the pass would answer a question nobody asked.
+- **A stopped pass claims less, and the claim it drops is the useful one.** "None of them
+  reproduces your model" is a statement about every excluded topology; a pass stopped after 8 of
+  55 knows nothing about the other 47. `ExcludedEquivalents.screened` is what makes the sentence
+  say *"Only 8 of them have been checked … 47 were never checked"* instead. This is the same
+  failure `refit_progress` was added for in step 4, in its third location, and it was found the
+  same way: by asking what the finished sentence would mean if the run had been cut short.
+- **The pool workers did not change.** An excluded screen is a `screen_task` like any other; what
+  makes it a different question is the target it is handed. That is what "JavaScript makes no
+  decisions" buys — a second kind of work, fanned out and cancellable, with no second worker
+  protocol.
+
+**Nothing that leaves the browser is rendered in the browser.** A download outlives the session:
+it gets attached to a report, opened in SPICE, or read a year later by someone who was never at
+the screen. So `export` returns the *text* the command line writes — `DiscoveryResult.to_dict()`,
+`DiscoveryResult.to_csv()`, `fit.report_dict()`, `to_netlist()` — and the CLI grew `--csv` so
+that the table the browser offers has a command-line counterpart rather than being the browser's
+own invention. One consequence is worth stating because it looks like a contradiction: those
+files may contain bare `Infinity` (an exact fit has `-inf` information criteria), which the
+bridge's own responses may never contain. They can, because by then the file is a *string* inside
+a response that is still strict JSON.
+
+**The DRT needed a wire form before it could be shown at all.** `DRTResult.to_dict()` — the CLI's
+`--json` — writes a bare `inf` for the series capacitance whenever the data does not block, which
+is the ordinary case; `json.dumps(..., allow_nan=False)` refuses it and `JSON.parse` would refuse
+it too. So `to_wire()` joins the ones on `Spectrum`, `FitResult` and `KKResult`, and `hints()`
+travels with the numbers as the Lin-KK verdict does.
+
+**[measured] The whole screen, in Chrome.** On the capacitor reference with the skeleton `C1-R1`
+at `exhaustive_limit=3` over the component pool: the search covers 3 elements in ~40 s, and the
+excluded pass then checks **132 of the 146 three-element topologies in ~7 s across four workers**
+and finds one exact equivalent of the reported `C1-R1-SKINF1` — `R1-CPE1-SKINF1`, which is the
+same substitution `docs/PARTIAL_TOPOLOGY_PLAN.md` §3.3 measured at four elements, because a CPE
+with n = −1 *is* a capacitor. Cancelled mid-pass it reports 64 of 132 checked, keeps the
+equivalent it had found, and says *"Another 68 were never checked, so this list is not the whole
+of what was lost."* The exports download as files; the DRT declines to describe this spectrum, as
+it does on the command line.
+
+Three things a real browser found that nothing else would have, all of them about *state*:
+
+- **A screen is unmounted when the user changes tab, and everything in it is lost.** True since
+  step 2 and harmless while the screens were three things you did in order; a fourth screen you
+  walk back and forth to makes it a trap. It cost a wrong measurement here — a form still showing
+  "3 elements, with a skeleton" ran an unconstrained four-element search, because the *displayed*
+  settings were defaults that had been silently restored. `App` now owns the search settings, the
+  excluded pass and the DRT result, so nothing that costs time or states an intent dies on a tab
+  switch.
+- **Both netlists downloaded under the same file name.** The name came from the SPICE subcircuit
+  name, which defaults to `AUTOCIRCUIT` for a discovered model and a manual fit alike, so
+  downloading both gave two files distinguishable only by the browser's "(1)". They are named for
+  what they are now.
+- **A column of "Class n — 1 topology" headings buries the answer.** The panel's headline is how
+  many classes hold more than one member, so it says that in a line before the list — including
+  when the number is none, which is a result rather than an absence of one.
+
 ## 3. Screens
 
 Following ZView's workflow, which is what the target users know:
@@ -378,9 +457,14 @@ Following ZView's workflow, which is what the target users know:
    with the sentence a cancelled run adds to it. The browser searches exhaustively only: there
    is no generator behind the genetic stage, so above the element limit *nothing was looked at*,
    and the panel says so rather than leaving "full auto" to be assumed.
-4. **Report** — equivalence classes shown as classes, never as a ranked list with a winner;
+4. **Report** — ~~equivalence classes shown as classes, never as a ranked list with a winner;
    JSON / CSV / netlist download; the DRT structure probe beside the search as the CLI already
-   prints it.
+   prints it.~~ **Built** (§2.6). Two things the sketch did not have. A constrained search gets
+   a panel of its own — what the data could not test, where the skeleton sits ambiguously, and
+   an opt-in pass naming the equivalent forms the assertion excluded — because that is the part
+   `CLAUDE.md` calls non-optional and the part no other screen can carry. And the exports cover
+   the *manual* fit as well as the search: mode 1 is this program's differentiator, and a fitted
+   model nobody can take out of the browser is not a deliverable.
 
 Plots: linked Nyquist / Bode(|Z|, θ) / residuals, zoom-synced, log axes. Plotly.js to start
 (fast to ship, replaceable) — the only external JS dependency of consequence.
@@ -404,7 +488,7 @@ Plots: linked Nyquist / Bode(|Z|, θ) / residuals, zoom-synced, log axes. Plotly
 | 2 | ~~Vite/React scaffold, data import, plots, Lin-KK panel~~ | **done** — §2.3 |
 | 3 | ~~Circuit canvas + live preview + manual fit~~ | **done** — §2.4; gate W1 measured |
 | 4 | ~~Discovery job screen: progress, streaming, cancel, completeness~~ | **done** — §2.5; gates W2 and W4 measured |
-| 5 | Report: equivalence classes, exports, DRT panel | M |
+| 5 | ~~Report: equivalence classes, exports, DRT panel~~ | **done** — §2.6; gate W6 measured |
 | 6 | Example datasets, loading states, dark/light, deploy to Pages | S |
 
 ## 6. Acceptance gates
@@ -432,6 +516,12 @@ Plots: linked Nyquist / Bode(|Z|, θ) / residuals, zoom-synced, log axes. Plotly
   terminated, since nothing else interrupts a running fit in a single-threaded interpreter, and
   the report distinguishes a complete screen from a shortlist that was only partly refitted.
 - **W5** — the site works offline after first load, and from `file://` as well as Pages.
+- **W6** — a file downloaded from the browser is the file the command line writes. Added with
+  step 5, because an export is the one artefact of this program that outlives the session that
+  produced it, and a browser-side renderer of the same format is a second implementation whose
+  disagreement nobody would ever see. The test drives a whole search through the bridge, exports
+  it, and compares against `discover()` on the same data: every key of the JSON report equal
+  except the clocks, the CSV text equal, and the netlist of the recommended candidate equal.
 
 ## 7. Out of scope
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import json
 from pathlib import Path
 
@@ -286,6 +287,28 @@ def test_discover_excluded_equivalents_reports_what_the_assertion_removed(
     out = capsys.readouterr().out
     assert "What the skeleton excluded" in out
     assert "topologies with" in out
+
+
+def test_discover_csv_writes_the_candidate_table(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The table the browser downloads, written by the same renderer. It exists on the command
+    line so that there is one implementation of it and one place to notice when it is wrong.
+    """
+    data = _simulate_discover_csv(tmp_path)
+    table = tmp_path / "candidates.csv"
+    rc = main(["discover", str(data), "--mode", "exhaustive", "--csv", str(table)]
+              + _DISCOVER_KWARGS)
+    assert rc == 0
+    assert "Wrote the candidate table" in capsys.readouterr().out
+
+    rows = list(csv.DictReader(table.read_text(encoding="utf-8").splitlines()))
+    assert rows
+    assert sum(int(row["recommended"]) for row in rows) == 1
+    assert all(row["circuit"] for row in rows)
+    # A circuit string contains commas -- p(R1,C1) -- so the quoting has to be real CSV
+    # quoting rather than a join, or every parallel block would split into two columns.
+    assert any("," in row["circuit"] for row in rows)
 
 
 def test_discover_json_report_with_skeleton_has_skeleton_and_named_coverage(

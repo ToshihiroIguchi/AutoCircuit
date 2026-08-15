@@ -45,19 +45,21 @@ from autocircuit.core.circuit import (
     subtree_paths,
 )
 from autocircuit.core.discover import RefitTask, ScreenTask, run_refit, run_screen
+from autocircuit.core.drt import DEFAULT_POINTS_PER_DECADE, drt
+from autocircuit.core.drt import WIRE_VERSION as DRT_WIRE_VERSION
 from autocircuit.core.elements import DEFAULT_POOL, POOLS, REGISTRY
 from autocircuit.core.fit import WIRE_VERSION as FIT_WIRE_VERSION
-from autocircuit.core.fit import Weighting, fit, relative_error, search_space
+from autocircuit.core.fit import FitResult, Weighting, fit, relative_error, search_space
 from autocircuit.core.spectrum import WIRE_VERSION as SPECTRUM_WIRE_VERSION
 from autocircuit.core.spectrum import Spectrum
 from autocircuit.core.validate import DEFAULT_MU_CRITERION, DEFAULT_RESIDUAL_LIMIT, lin_kk
 from autocircuit.core.validate import WIRE_VERSION as VALIDATE_WIRE_VERSION
 from autocircuit.core.wire import encode_array, encode_complex_array, encode_float
-from autocircuit.web import job
+from autocircuit.web import export, job
 
 #: Version of the request/response protocol below. The worker checks it against its own build
 #: at start-up, so a stale cached bundle fails loudly rather than answering the wrong question.
-BRIDGE_VERSION = 3
+BRIDGE_VERSION = 4
 
 __all__ = ["BRIDGE_VERSION", "handle"]
 
@@ -87,6 +89,7 @@ def _op_version(payload: dict[str, Any]) -> dict[str, Any]:
         "fit": FIT_WIRE_VERSION,
         "spectrum": SPECTRUM_WIRE_VERSION,
         "validate": VALIDATE_WIRE_VERSION,
+        "drt": DRT_WIRE_VERSION,
         "formats": sorted(io.REGISTRY),
     }
 
@@ -386,6 +389,123 @@ def _op_discover_cancel(payload: dict[str, Any]) -> dict[str, Any]:
     return {"job": running.id, "screened": running.screened, "refitted": running.refitted}
 
 
+# -- What a skeleton excluded ------------------------------------------------------------------
+#
+# The same two halves again: the pool workers answer ``screen_task``, unchanged and unaware that
+# this is a different question, while the orchestrator holds
+# :class:`autocircuit.web.job.ExcludedJob`. The one thing this pass does that the search does not
+# is send the *target* out with the tasks -- an excluded topology is screened against the
+# reported candidate's fitted response, not against the measured data, and choosing that target
+# is a decision that stays in ``core/discover.py``.
+
+
+def _op_excluded_start(payload: dict[str, Any]) -> dict[str, Any]:
+    """Enumerate what the skeleton excluded, without screening any of it yet.
+
+    The counts come back first on purpose: this pass costs about as much as the search that
+    preceded it, so "1,132 topologies to check" is worth seeing before it starts rather than
+    after.
+    """
+    search = job.current(str(payload["job"]))
+    started = job.ExcludedJob(
+        search,
+        search.candidate(payload.get("circuit")),
+        chunk=int(payload.get("chunk", job.EXCLUDED_CHUNK)),
+    )
+    running = job.install_excluded(started)
+    return {**job.excluded_payload(running), "target": running.target.to_wire()}
+
+
+def _op_excluded_screen(payload: dict[str, Any]) -> dict[str, Any]:
+    """Take the last batch's costs, hand out the next batch."""
+    running = job.current_excluded(str(payload["job"]))
+    costs = payload.get("costs")
+    if costs is not None:
+        running.submit([job.from_wire_cost(cost) for cost in costs])
+    tasks = running.next_batch()
+    return {
+        "tasks": (
+            None if tasks is None
+            else [[text, job.to_wire_cost(abandon)] for text, abandon in tasks]
+        ),
+        "screened": running.screened,
+        "total": running.total,
+        "equivalents": list(running.report().equivalents),
+    }
+
+
+def _op_excluded_report(payload: dict[str, Any]) -> dict[str, Any]:
+    """What the pass may claim, finished or stopped -- the difference is inside the sentence."""
+    return job.excluded_payload(job.current_excluded(str(payload["job"])))
+
+
+def _op_excluded_cancel(payload: dict[str, Any]) -> dict[str, Any]:
+    """Stop handing out work; the partial report stays readable and says it is partial."""
+    running = job.current_excluded(str(payload["job"]))
+    running.cancel()
+    return {"job": running.id, "screened": running.screened, "total": running.total}
+
+
+# -- The structure probe, and the files that leave the browser ---------------------------------
+
+
+def _op_drt(payload: dict[str, Any]) -> dict[str, Any]:
+    """The distribution of relaxation times, beside the search and never inside it.
+
+    Advisory, exactly as on the command line: a DRT peak count is read off a regularised
+    inversion of noisy data, and letting it raise the enumeration floor would let it delete the
+    right answer from a search still calling itself exhaustive
+    (docs/DISCOVERY_V2_PLAN.md section 3.4).
+    """
+    spectrum = Spectrum.from_wire(payload["spectrum"])
+    lam = payload.get("regularisation")
+    result = drt(
+        spectrum,
+        points_per_decade=int(payload.get("points_per_decade", DEFAULT_POINTS_PER_DECADE)),
+        series_inductance=_optional_bool(payload.get("series_inductance")),
+        series_capacitance=_optional_bool(payload.get("series_capacitance")),
+        lam=None if lam is None else float(lam),
+    )
+    return {"drt": result.to_wire()}
+
+
+def _op_export(payload: dict[str, Any]) -> dict[str, Any]:
+    """One downloadable file, rendered by the same code the command line writes it with.
+
+    Two sources, because there are two ways to arrive at a fitted circuit here: a search this
+    worker still holds, named by ``job``, or a manual fit the user drew on the Fit screen, whose
+    whole :class:`~autocircuit.core.fit.FitResult` travels back in ``fit``.
+    """
+    kind = str(payload["kind"])
+    name = str(payload.get("name", export.DEFAULT_SUBCKT))
+    error_target = float(payload.get("error_target", export.DEFAULT_SPICE_ERROR))
+    top = payload.get("top")
+    if payload.get("fit") is not None:
+        return export.manual_fit(
+            FitResult.from_wire(payload["fit"]),
+            Spectrum.from_wire(payload["spectrum"]),
+            kind,
+            source=payload.get("source"),
+            name=name,
+            error_target=error_target,
+        )
+    running = job.current(str(payload["job"]))
+    excluded = payload.get("excluded")
+    return export.discovery(
+        running,
+        kind,
+        top=None if top is None else int(top),
+        # The pass is included in the file only if one was actually run: an absent key and an
+        # empty result mean different things here, as they do everywhere a skeleton is involved.
+        excluded=(
+            None if excluded is None else job.current_excluded(str(excluded)).report()
+        ),
+        circuit=payload.get("circuit"),
+        name=name,
+        error_target=error_target,
+    )
+
+
 # -- Shared helpers ---------------------------------------------------------------------------
 
 
@@ -480,6 +600,12 @@ def _code(payload: dict[str, Any]) -> str:
     return code
 
 
+def _optional_bool(raw: Any) -> bool | None:
+    """A tri-state flag from the wire. None is not a default here: it means "decide from the
+    data", which is what the DRT's series terms do when nobody asserts one."""
+    return None if raw is None else bool(raw)
+
+
 def _floats(raw: Any) -> dict[str, float]:
     """A ``{"R1.R": 1.0}`` mapping from the wire, with every value forced to a float."""
     return {str(name): float(value) for name, value in dict(raw or {}).items()}
@@ -511,4 +637,10 @@ _OPERATIONS = {
     "discover_refit": _op_discover_refit,
     "discover_report": _op_discover_report,
     "discover_cancel": _op_discover_cancel,
+    "excluded_start": _op_excluded_start,
+    "excluded_screen": _op_excluded_screen,
+    "excluded_report": _op_excluded_report,
+    "excluded_cancel": _op_excluded_cancel,
+    "drt": _op_drt,
+    "export": _op_export,
 }
