@@ -853,7 +853,7 @@ body {
 
 .palette__item {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
   width: 100%;
   text-align: left;
@@ -875,6 +875,12 @@ body {
   border-color: var(--series-1);
   box-shadow: inset 2px 0 0 var(--series-1);
   background: var(--surface-1);
+}
+
+/* The symbol the canvas will draw, drawn by the same routine -- see ElementSymbol.tsx. */
+.palette__symbol {
+  flex: 0 0 44px;
+  overflow: visible;
 }
 
 .palette__code {

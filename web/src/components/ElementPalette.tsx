@@ -9,6 +9,7 @@
 import { useState } from "react";
 import type { CatalogueWire } from "../core/types";
 import { elementDragData } from "./CircuitCanvas";
+import { SymbolPreview } from "./ElementSymbol";
 
 export interface ElementPaletteProps {
   catalogue: CatalogueWire;
@@ -63,6 +64,7 @@ export function ElementPalette({ catalogue, armedCode, onArm }: ElementPalettePr
                   .map((p) => `${p.name} [${p.unit}]`)
                   .join(", ")}`}
               >
+                <SymbolPreview code={code} />
                 <span className="palette__code">{code}</span>
                 <span className="palette__name">{element.name}</span>
               </button>

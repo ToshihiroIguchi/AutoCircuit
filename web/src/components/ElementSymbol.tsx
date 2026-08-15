@@ -84,22 +84,51 @@ function symbolPaths(code: string): ReactNode {
 
 const DRAWN = new Set(["R", "C", "L", "CPE"]);
 
+/** The symbol itself, centred on (0,0): the code goes inside the box of an element that has one. */
+function body(code: string): ReactNode {
+  return (
+    <>
+      {symbolPaths(code)}
+      {!DRAWN.has(code) && (
+        <text className="cc-sym__code" x={0} y={0} dominantBaseline="central">
+          {code}
+        </text>
+      )}
+    </>
+  );
+}
+
 export function ElementSymbol({ placement, selected }: SymbolProps) {
-  const boxed = !DRAWN.has(placement.code);
   return (
     <g
       className={`cc-sym${selected ? " cc-sym--selected" : ""}`}
       transform={`translate(${placement.cx},${placement.cy})`}
     >
-      {symbolPaths(placement.code)}
-      {boxed && (
-        <text className="cc-sym__code" x={0} y={0} dominantBaseline="central">
-          {placement.code}
-        </text>
-      )}
+      {body(placement.code)}
       <text className="cc-sym__label" x={0} y={-16}>
         {placement.label}
       </text>
     </g>
+  );
+}
+
+/**
+ * The same symbol, standing alone: what the palette offers, drawn as what the canvas will draw.
+ *
+ * The palette used to list codes while the canvas drew shapes, which left the reader to learn the
+ * mapping from the schematic. It is one drawing routine, so the two cannot drift apart.
+ */
+export function SymbolPreview({ code }: { code: string }) {
+  return (
+    <svg
+      className="cc-sym palette__symbol"
+      width={44}
+      height={22}
+      viewBox="-22 -11 44 22"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {body(code)}
+    </svg>
   );
 }
