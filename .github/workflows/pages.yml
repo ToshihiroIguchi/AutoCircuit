@@ -31,9 +31,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -42,7 +42,10 @@ jobs:
       - name: Install the package
         run: pip install -e .
 
-      - uses: actions/setup-node@v4
+      # `cache: npm` is set explicitly rather than left to the automatic package-manager detection
+      # v5 introduced: that detection reads the repository root, and this project's package.json is
+      # in web/.
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
@@ -65,7 +68,12 @@ jobs:
         run: npm run smoke
         working-directory: web
 
-      - uses: actions/upload-pages-artifact@v3
+      # v4 stopped including hidden files. The one dotfile the build leaves in web/dist is
+      # .bytecode-stamp, which web/scripts/precompile.mjs writes to decide whether it may skip a
+      # rebuild; nothing in the browser fetches it, so the published site is unchanged by its
+      # absence. If a dotfile the site actually serves ever appears, this needs
+      # `include-hidden-files: true`.
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: web/dist
 
@@ -77,4 +85,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
