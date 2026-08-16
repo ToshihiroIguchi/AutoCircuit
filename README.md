@@ -60,6 +60,9 @@ autocircuit fit cap.csv -c "C1-R1-L1-SKINF1" --spice cap.cir --json cap.json
 # happened to find. --workers fans the screening pass across cores.
 autocircuit discover cap.csv --pool component --workers 8 --progress
 
+# Rank that search by something other than AIC. `autocircuit criteria` explains the seven.
+autocircuit discover cap.csv --pool component --criterion bic
+
 # Check the data is Kramers-Kronig consistent before believing any of it
 autocircuit validate cap.csv
 
@@ -79,7 +82,10 @@ SKINF1.A         2.12652e-05      1.28e-06     6.0%  ohm*s^n
 SKINF1.n             0.49672       0.00321     0.6%  -
 
 chi^2 (reduced) : 9.07659e-05
-AICc            : -1316.28
+AIC       -1316.72   AICc      -1316.28   BIC       -1301.94
+CAIC      -1296.94   HQC       -1310.71   WAIC       -1315.8
+WAIC effective parameters: 5.58 of 5   (Laplace approximation)
+Data points     : 71   Free parameters: 5
 RMS relative |Z| error : 1.3234%
 
 Warnings:
@@ -156,6 +162,27 @@ it does not fit, not because the search never tried it. `--mode evolve` switches
 genetic search, which is still what runs above `--exhaustive-limit`; `--mode auto` (the
 default) does the enumeration and only falls back to evolution if the residuals still look
 systematic.
+
+**Seven model-selection criteria, and one of them is not a score.** `--criterion` chooses what
+ranks the candidates, draws the Pareto front and orders the tier-1 shortlist: AIC (the default),
+AICc, BIC, CAIC, HQC, WAIC or an F-test. Two of them carry an assumption worth reading before
+using, and `autocircuit criteria` prints it:
+
+* **WAIC** is defined over a posterior and this is a least-squares fitter, so it is computed
+  under a Laplace approximation at the fitted point with the residual linearised through the same
+  Jacobian the covariance comes from. Its penalty counts the parameters the data *resolves*
+  rather than the ones the model declares, which is the reason to ask for it — on a fit where
+  they agree it is AIC to within a fraction of a unit.
+* **An F-test compares two models, not one against a scale.** It ranks by AIC and then walks the
+  Pareto front, stepping up only where the extra parameters are significant — and it assumes each
+  row is nested in the next, which topologies generally are not. It is a guide to whether extra
+  elements earned their place, not a p-value to publish.
+
+None of the seven changes what the report *recommends*. That is a separate rule and a rule about
+identifiability: the simplest model that fits as well as any **and** whose parameters the data
+actually pins down. [measured] Minimum-AICc on a 71-point capacitor spectrum selects a
+9-parameter circuit with two parameters whose standard errors exceed their own values; choosing
+BIC instead does not make that a different kind of mistake.
 
 **You can assert the part you already know.** A film capacitor has an ESR and an ESL in series
 with it; a cell has an electrolyte resistance in series with everything. `--skeleton` states

@@ -2,7 +2,8 @@
 
 Where :mod:`autocircuit.core.fit` answers "what are the parameters of *this* circuit?", this
 module answers "what circuit?". It evolves a population of topologies, fitting each one with
-the same no-initial-values engine and scoring it by AICc.
+the same no-initial-values engine and scoring it by a model-selection criterion
+the caller chooses (AIC by default; see :mod:`autocircuit.core.stats`).
 
 Why not reuse a symbolic-regression package such as PySR? The search *design* transfers, but
 the machinery does not. PySR evolves scalar arithmetic expression trees over a Julia backend,
@@ -66,6 +67,17 @@ from .enumerate import (
 )
 from .fit import FitResult, Weighting, fit, screen
 from .spectrum import Spectrum
+from .stats import (
+    CRITERIA,
+    CRITERION_LABELS,
+    DEFAULT_CRITERION,
+    FTEST_ALPHA,
+    FTEST_RANKING,
+    SCORE_CRITERIA,
+    Criterion,
+    f_test,
+    information_criteria,
+)
 
 # The runs test on residual signs, borrowed from the Kramers-Kronig validator: it answers the
 # same question ("are these residuals noise, or structure the model failed to describe?"), so
@@ -181,6 +193,15 @@ class Candidate:
     def aicc(self) -> float:
         return self.result.statistics.aicc
 
+    def score(self, criterion: Criterion = DEFAULT_CRITERION) -> float:
+        """This topology's value under ``criterion``, smaller being better.
+
+        Under ``ftest`` it answers with :data:`~autocircuit.core.stats.FTEST_RANKING`, because a
+        test between two models provides no axis to sort one list by. What the test decides is
+        :attr:`DiscoveryResult.by_criterion`, and the report says which of the two happened.
+        """
+        return self.result.statistics.criterion_value(criterion)
+
     @property
     def complexity(self) -> float:
         return self.circuit.complexity
@@ -206,11 +227,14 @@ class Candidate:
         """Parameters whose standard error exceeds their own value."""
         return int(np.count_nonzero(self.unresolved))
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, criterion: Criterion = DEFAULT_CRITERION) -> dict[str, Any]:
         payload = self.result.to_dict()
         payload["complexity"] = self.complexity
         payload["n_unresolved"] = self.n_unresolved
         payload["generation"] = self.generation
+        # Every criterion is already under ``statistics``; this is the one the report ranked by,
+        # named, so a reader does not have to re-derive which column the ordering came from.
+        payload["score"] = self.score(criterion)
         return payload
 
 
@@ -219,7 +243,7 @@ class DiscoveryResult:
     """Outcome of a topology search."""
 
     candidates: list[Candidate]
-    """Every distinct topology evaluated, best AICc first."""
+    """Every distinct topology evaluated, best first under :attr:`criterion`."""
     pareto: list[Candidate]
     """The accuracy-versus-complexity trade-off curve, simplest first."""
     n_evaluated: int
@@ -254,10 +278,49 @@ class DiscoveryResult:
     difference is invisible in the numbers, which is this project's characteristic failure
     (docs/HANDOFF.md section 3), so it travels with the claims rather than with the caller.
     """
+    criterion: Criterion = DEFAULT_CRITERION
+    """Which rule ranked :attr:`candidates` and drew :attr:`pareto`.
+
+    It travels with the result for the same reason :attr:`skeleton` does: it changes what the
+    numbers underneath mean, and a front labelled only "score" is a front whose column heading
+    the reader has to guess. It does **not** change :attr:`recommended`; see there.
+    """
 
     @property
     def best(self) -> Candidate | None:
+        """Lowest score under :attr:`criterion`. Under ``ftest`` that ranking is AIC's."""
         return self.candidates[0] if self.candidates else None
+
+    @property
+    def by_criterion(self) -> Candidate | None:
+        """What the chosen criterion picks, which is not what this report recommends.
+
+        For the six scores it is :attr:`best`. For ``ftest`` it is a sequential
+        extra-sum-of-squares test along the Pareto front, simplest first: hold the current
+        choice until a larger model's residual gain is significant at
+        :data:`~autocircuit.core.stats.FTEST_ALPHA`, then move to it. **The test assumes the
+        smaller model is nested in the larger one and front rows generally are not**, which
+        :meth:`summary` states on the line that reports the answer rather than in a footnote.
+        """
+        if not self.candidates:
+            return None
+        if self.criterion != "ftest":
+            return self.best
+        choice: Candidate | None = None
+        for candidate in self.pareto:  # already simplest first
+            if choice is None:
+                choice = candidate
+                continue
+            test = f_test(
+                choice.result.statistics.ssr,
+                choice.result.statistics.n_params,
+                candidate.result.statistics.ssr,
+                candidate.result.statistics.n_params,
+                candidate.result.statistics.n_data,
+            )
+            if test is not None and test.significant:
+                choice = candidate
+        return choice
 
     @property
     def recommended(self) -> Candidate | None:
@@ -270,6 +333,12 @@ class DiscoveryResult:
         and physically meaningless. This applies the parsimony rule instead: among candidates
         that fit essentially as well as the best one found, and whose parameters are all
         actually resolved by the data, take the structurally simplest.
+
+        **This does not follow :attr:`criterion`, on purpose.** Choosing BIC instead of AIC
+        changes which model a penalty term prefers; it does not make "the extra parameter has a
+        standard error larger than its own value" a different kind of mistake. What the chosen
+        criterion picks is :attr:`by_criterion`, and :meth:`summary` prints both lines whenever
+        they disagree.
         """
         if not self.candidates:
             return None
@@ -376,7 +445,7 @@ class DiscoveryResult:
         knowledge of the sample.
         """
         classes: list[list[Candidate]] = []
-        for candidate in sorted(self.candidates, key=lambda c: c.aicc):
+        for candidate in sorted(self.candidates, key=lambda c: c.score(self.criterion)):
             for group in classes:
                 if _same_response(candidate, group[0]):
                     group.append(candidate)
@@ -465,6 +534,15 @@ class DiscoveryResult:
             "reason rather than on the evidence."
         )
 
+    @property
+    def score_label(self) -> str:
+        """The column heading the scores in this report are under.
+
+        Under ``ftest`` the column is AIC -- a test has no axis -- and calling it "F-test" would
+        put a heading over numbers that are not the thing named.
+        """
+        return CRITERION_LABELS[FTEST_RANKING if self.criterion == "ftest" else self.criterion]
+
     def summary(self, spectrum: Spectrum | None = None, limit: int = 10) -> str:
         scope = f"in {self.elapsed_s:.1f} s"
         if self.generations:
@@ -472,6 +550,7 @@ class DiscoveryResult:
         lines = [
             f"Evaluated {self.n_evaluated} distinct topologies {scope} (mode: {self.mode})",
             f"Element pool: {', '.join(self.pool)}",
+            f"Criterion   : {CRITERION_LABELS[self.criterion]}",
         ]
         if self.skeleton is not None:
             lines.append(f"Skeleton     : {self.skeleton} (asserted by you, not discovered)")
@@ -479,7 +558,7 @@ class DiscoveryResult:
             self.completeness(),
             "",
             "Pareto front (accuracy versus complexity):",
-            f"  {'circuit':<34}{'AICc':>11}{'chi2_red':>11}{'cplx':>7}{'free?':>7}",
+            f"  {'circuit':<34}{self.score_label:>11}{'chi2_red':>11}{'cplx':>7}{'free?':>7}",
         ]
         aliases: list[str] = []
         ambiguous: list[str] = []
@@ -487,7 +566,8 @@ class DiscoveryResult:
             unresolved = candidate.n_unresolved
             mark = "ok" if unresolved == 0 else f"{unresolved} bad"
             lines.append(
-                f"  {candidate.circuit.to_string():<34}{candidate.aicc:>11.2f}"
+                f"  {candidate.circuit.to_string():<34}"
+                f"{candidate.score(self.criterion):>11.2f}"
                 f"{candidate.result.chi2_reduced:>11.3g}{candidate.complexity:>7.1f}"
                 f"{mark:>7}"
             )
@@ -538,13 +618,25 @@ class DiscoveryResult:
                     "  so the data neither supports nor refutes that part of your assertion --",
                     "  which is also what a wrong skeleton looks like.",
                 ]
-            if recommended is not self.best:
-                lines.append(
-                    f"Lowest AICc    : {self.best.circuit.to_string()} "
-                    f"({self.best.circuit.n_params} parameters, "
-                    f"{self.best.n_unresolved} of them unresolved) -- better numerically, but "
-                    "the extra elements are not supported by the data."
-                )
+            chosen = self.by_criterion
+            if chosen is not None and chosen is not recommended:
+                if self.criterion == "ftest":
+                    lines += [
+                        f"F-test (a={FTEST_ALPHA:g}): {chosen.circuit.to_string()} "
+                        f"({chosen.circuit.n_params} parameters, "
+                        f"{chosen.n_unresolved} of them unresolved) -- the last step up this",
+                        "  front whose extra parameters were significant. The test assumes each",
+                        "  row is nested in the next and these topologies generally are not, so",
+                        "  read it as a guide to whether the extra elements earned their place,",
+                        "  not as a p-value you could publish.",
+                    ]
+                else:
+                    lines.append(
+                        f"Lowest {self.score_label:<8}: {chosen.circuit.to_string()} "
+                        f"({chosen.circuit.n_params} parameters, "
+                        f"{chosen.n_unresolved} of them unresolved) -- better numerically, but "
+                        "the extra elements are not supported by the data."
+                    )
         if spectrum is not None and recommended is not None:
             lines += ["", "Recommended model:", recommended.result.summary(spectrum)]
         lines += [
@@ -571,6 +663,11 @@ class DiscoveryResult:
         return {
             "pool": list(self.pool),
             "mode": self.mode,
+            "criterion": self.criterion,
+            "criterion_label": CRITERION_LABELS[self.criterion],
+            "by_criterion": (
+                None if self.by_criterion is None else self.by_criterion.circuit.to_string()
+            ),
             "skeleton": self.skeleton,
             "complete_up_to": self.complete_up_to,
             "coverage": self.completeness(),
@@ -604,11 +701,14 @@ class DiscoveryResult:
                 None if self.refit_progress is None else list(self.refit_progress)
             ),
             "recommended": (
-                self.recommended.to_dict() if self.recommended is not None else None
+                self.recommended.to_dict(self.criterion)
+                if self.recommended is not None
+                else None
             ),
-            "pareto": [c.to_dict() for c in self.pareto],
+            "pareto": [c.to_dict(self.criterion) for c in self.pareto],
             "candidates": [
-                c.to_dict() for c in (self.candidates if top is None else self.candidates[:top])
+                c.to_dict(self.criterion)
+                for c in (self.candidates if top is None else self.candidates[:top])
             ],
             "equivalence_classes": [
                 [c.circuit.to_string() for c in group]
@@ -618,12 +718,17 @@ class DiscoveryResult:
         }
 
     def to_csv(self, *, top: int | None = None) -> str:
-        """Every evaluated topology as a spreadsheet, one row each, best AICc first.
+        """Every evaluated topology as a spreadsheet, one row each, best first.
 
         A flat table cannot carry the coverage sentence or an equivalence class, so this is the
         least honest of the three exports and the columns are chosen accordingly: ``equivalents``
-        names the other rows that fit identically, so a reader sorting by AICc in a spreadsheet
-        still meets the ambiguity rather than reading the top row as the answer.
+        names the other rows that fit identically, so a reader sorting by a score in a
+        spreadsheet still meets the ambiguity rather than reading the top row as the answer.
+
+        **All six scores are columns, not just the chosen one.** The row *order* is the chosen
+        criterion's and nothing in a CSV can say which that was, so a file carrying one unnamed
+        "score" column would be a file whose ordering the reader has to guess at. Naming them
+        all costs five columns and removes the guess.
         """
         rows = self.candidates if top is None else self.candidates[:top]
         front = {id(c) for c in self.pareto}
@@ -632,7 +737,8 @@ class DiscoveryResult:
         writer = csv.writer(buffer, lineterminator="\n")
         writer.writerow(
             [
-                "circuit", "canonical", "n_elements", "n_params", "complexity", "aicc",
+                "circuit", "canonical", "n_elements", "n_params", "complexity",
+                "aic", "aicc", "bic", "caic", "hqc", "waic",
                 "chi2_reduced", "n_unresolved", "unresolved", "on_pareto", "recommended",
                 "equivalents",
             ]
@@ -652,7 +758,10 @@ class DiscoveryResult:
                     len(candidate.circuit.leaves),
                     candidate.circuit.n_params,
                     f"{candidate.complexity:.6g}",
-                    f"{candidate.aicc:.10g}",
+                    *(
+                        f"{candidate.result.statistics.criterion_value(name):.10g}"
+                        for name in SCORE_CRITERIA
+                    ),
                     f"{candidate.result.chi2_reduced:.10g}",
                     candidate.n_unresolved,
                     ";".join(unresolved),
@@ -821,20 +930,24 @@ def _same_response(a: Candidate, b: Candidate) -> bool:
     return bool(np.max(np.abs(za - zb) / magnitude) <= EQUIVALENCE_RTOL)
 
 
-def pareto_front(candidates: Sequence[Candidate]) -> list[Candidate]:
-    """Candidates not beaten on both complexity and AICc by any other candidate."""
+def pareto_front(
+    candidates: Sequence[Candidate], criterion: Criterion = DEFAULT_CRITERION
+) -> list[Candidate]:
+    """Candidates not beaten on both complexity and the chosen criterion by any other."""
+    scores = {id(c): c.score(criterion) for c in candidates}
     front: list[Candidate] = []
     for candidate in candidates:
+        mine = scores[id(candidate)]
         dominated = any(
             other is not candidate
             and other.complexity <= candidate.complexity
-            and other.aicc <= candidate.aicc
-            and (other.complexity < candidate.complexity or other.aicc < candidate.aicc)
+            and scores[id(other)] <= mine
+            and (other.complexity < candidate.complexity or scores[id(other)] < mine)
             for other in candidates
         )
         if not dominated:
             front.append(candidate)
-    return sorted(front, key=lambda c: (c.complexity, c.aicc))
+    return sorted(front, key=lambda c: (c.complexity, scores[id(c)]))
 
 
 def discover(
@@ -864,6 +977,7 @@ def discover(
     n_refine: int | None = None,
     time_limit: float | None = None,
     seeds: Sequence[str] | None = None,
+    criterion: Criterion = DEFAULT_CRITERION,
 ) -> DiscoveryResult:
     """Search for equivalent-circuit topologies that explain a spectrum.
 
@@ -928,6 +1042,13 @@ def discover(
             reaches the Pareto front; see :func:`_shortlist`. :data:`REFINE_DEFAULT` holds the
             per-mode default.
         time_limit: Wall-clock budget in seconds; the search stops cleanly when exceeded.
+        criterion: Which model-selection rule ranks the candidates, draws the Pareto front and
+            ranks the tier-1 shortlist -- one of :data:`~autocircuit.core.stats.CRITERIA`,
+            default :data:`~autocircuit.core.stats.DEFAULT_CRITERION`. It does **not** change
+            :attr:`DiscoveryResult.recommended`, which is a rule about identifiability rather
+            than about a penalty term. ``"ftest"`` is not a score: it ranks by AIC and then
+            tests each step up the front, which :attr:`DiscoveryResult.by_criterion` applies and
+            :meth:`DiscoveryResult.summary` labels.
         seeds: Optional circuit strings to inject into the initial population, for example
             textbook models worth testing alongside the evolved ones. Under a skeleton every
             seed must contain it, since a seed is a hint that adds to the candidate list while
@@ -939,6 +1060,9 @@ def discover(
     """
     if mode not in ("auto", "exhaustive", "evolve"):
         raise ValueError(f"unknown discovery mode {mode!r}")
+    if criterion not in CRITERIA:
+        known = ", ".join(CRITERIA)
+        raise ValueError(f"unknown model-selection criterion {criterion!r}; known: {known}")
     started = time.perf_counter()
     codes = tuple(pool)
     refine = REFINE_DEFAULT[mode] if n_refine is None else n_refine
@@ -984,6 +1108,7 @@ def discover(
             time_limit=time_limit,
             seeds=seeds,
             started=started,
+            criterion=criterion,
         )
 
     candidates, complete_up_to, n_screened = _exhaustive(
@@ -1007,6 +1132,7 @@ def discover(
         time_limit=time_limit,
         started=started,
         extra=seeds,
+        criterion=criterion,
     )
     generations_run = 0
 
@@ -1039,15 +1165,16 @@ def discover(
                 time_limit=remaining,
                 seeds=[c.circuit.to_string() for c in candidates[:5]],
                 started=time.perf_counter(),
+                criterion=criterion,
             )
-            candidates = _unique_best(candidates + evolved.candidates)
+            candidates = _unique_best(candidates + evolved.candidates, criterion)
             n_screened += evolved.n_evaluated
             generations_run = evolved.generations
 
-    candidates.sort(key=lambda c: c.aicc)
+    candidates.sort(key=lambda c: c.score(criterion))
     return DiscoveryResult(
         candidates=candidates,
-        pareto=pareto_front(candidates),
+        pareto=pareto_front(candidates, criterion),
         n_evaluated=n_screened,
         generations=generations_run,
         elapsed_s=time.perf_counter() - started,
@@ -1055,6 +1182,7 @@ def discover(
         mode=mode,
         complete_up_to=complete_up_to,
         skeleton=None if frame is None else frame.to_string(),
+        criterion=criterion,
     )
 
 
@@ -1337,6 +1465,7 @@ def _evolve(
     time_limit: float | None,
     seeds: Sequence[str] | None,
     started: float,
+    criterion: Criterion = DEFAULT_CRITERION,
 ) -> DiscoveryResult:
     """The genetic search, unchanged: regularised evolution over the topology grammar."""
     rng = np.random.default_rng(seed)
@@ -1361,7 +1490,7 @@ def _evolve(
         if time_limit is not None and time.perf_counter() - started > time_limit:
             break
 
-        alive = _unique_best(scored)
+        alive = _unique_best(scored, criterion)
         if not alive:
             trees = [
                 random_topology(rng, pool, int(rng.integers(min_elements, max_elements + 1)))
@@ -1369,23 +1498,24 @@ def _evolve(
             ]
             continue
 
-        trees = _next_generation(alive, rng, pool, max_elements, population)
+        trees = _next_generation(alive, rng, pool, max_elements, population, criterion)
 
-    alive = _unique_best(scored)
-    alive.sort(key=lambda c: c.aicc)
+    alive = _unique_best(scored, criterion)
+    alive.sort(key=lambda c: c.score(criterion))
     refined = _refine(alive[:n_refine], spectrum, weighting, final_restarts, seed)
-    merged = _unique_best(refined + alive)
-    merged.sort(key=lambda c: c.aicc)
+    merged = _unique_best(refined + alive, criterion)
+    merged.sort(key=lambda c: c.score(criterion))
 
     return DiscoveryResult(
         candidates=merged,
-        pareto=pareto_front(merged),
+        pareto=pareto_front(merged, criterion),
         n_evaluated=len(evaluator.cache),
         generations=generation + 1,
         elapsed_s=time.perf_counter() - started,
         pool=pool,
         mode="evolve",
         complete_up_to=None,
+        criterion=criterion,
     )
 
 
@@ -1518,6 +1648,7 @@ def _exhaustive(
     time_limit: float | None,
     started: float,
     extra: Sequence[str] | None = None,
+    criterion: Criterion = DEFAULT_CRITERION,
 ) -> tuple[list[Candidate], int | None, int]:
     """Enumerate, screen and refit. Returns (candidates, complete_up_to, topologies seen)."""
     plan = enumerate_candidates(
@@ -1547,26 +1678,42 @@ def _exhaustive(
             started=started,
         )
         candidates = _refit_shortlist(
-            scored, spectrum, weighting, final_restarts, seed, n_refine, executor
+            scored, spectrum, weighting, final_restarts, seed, n_refine, executor, criterion
         )
     return candidates, plan.coverage(len(scored)), len(scored)
 
 
-def _screening_aicc(cost: float, n_params: int, n_data: int) -> float:
-    """AICc from a screening cost alone, without the covariance a full fit would give.
+#: What the screen ranks by when the chosen criterion cannot be computed from a cost alone.
+#:
+#: WAIC needs the leverage, which needs the Jacobian, which is the expensive half of a full fit
+#: and is exactly what tier 1 does not do; ``ftest`` needs two models rather than one. Both fall
+#: back here. That is a decision about *who gets refitted*, not about who wins -- every number
+#: that reaches the user comes from tier 2, where the chosen criterion applies in full.
+SCREENING_FALLBACK: Criterion = "aic"
 
-    The same formula :func:`stats.compute_statistics` uses, fed the weighted sum of squared
-    residuals and the parameter count. That is everything AICc needs; the expensive part of a
-    full fit is the Jacobian, which only the uncertainties require.
+
+def _screening_score(
+    cost: float, n_params: int, n_data: int, criterion: Criterion = DEFAULT_CRITERION
+) -> float:
+    """A model-selection score from a screening cost alone, with no covariance.
+
+    The same formulae :func:`stats.information_criteria` uses, fed the weighted sum of squared
+    residuals and the parameter count. That is everything AIC, AICc, BIC, CAIC and HQC need; the
+    expensive part of a full fit is the Jacobian, which only the uncertainties -- and WAIC --
+    require. See :data:`SCREENING_FALLBACK` for the two that cannot be answered here.
     """
     if not math.isfinite(cost) or cost <= 0.0 or n_data - n_params - 1 <= 0:
         return math.inf
-    aic = n_data * math.log(cost / n_data) + 2.0 * n_params
-    return aic + 2.0 * n_params * (n_params + 1) / (n_data - n_params - 1)
+    name = criterion if criterion in ("aic", "aicc", "bic", "caic", "hqc") else SCREENING_FALLBACK
+    value = information_criteria(cost, n_data, n_params)[name]
+    return value if math.isfinite(value) else math.inf
 
 
 def _shortlist(
-    scored: Sequence[tuple[float, str]], n_refine: int, n_data: int
+    scored: Sequence[tuple[float, str]],
+    n_refine: int,
+    n_data: int,
+    criterion: Criterion = DEFAULT_CRITERION,
 ) -> list[str]:
     """The screened candidates worth a full-budget refit.
 
@@ -1576,12 +1723,12 @@ def _shortlist(
     candidates had five elements and the four-element truth -- the circuit that generated the
     data -- never reached tier 2 at all. Two corrections, both needed:
 
-    * rank *within* a size by screening AICc rather than raw cost, so an extra CPE has to earn
-      its two parameters even against its own size class;
+    * rank *within* a size by a screening information criterion rather than raw cost, so an
+      extra CPE has to earn its two parameters even against its own size class;
     * give every size its own quota, so the Pareto front has candidates at each complexity
       instead of a cluster at the top.
 
-    Within a size the list is the AICc-best ``quota``, plus every candidate whose cost is
+    Within a size the list is the score-best ``quota``, plus every candidate whose cost is
     within :data:`REFINE_COST_FACTOR` of that size's best -- the near-tie rule, which is what
     stops an exact equivalent from being dropped because the sloppy screen ranked it one place
     too low. [measured] That rule needs a ceiling: at 1% noise a factor 10 in cost is only a
@@ -1595,8 +1742,8 @@ def _shortlist(
     by_size: dict[int, list[tuple[float, float, str]]] = {}
     for cost, text in usable:
         circuit = Circuit.parse(text)
-        aicc = _screening_aicc(cost, circuit.n_params, n_data)
-        by_size.setdefault(len(circuit.leaves), []).append((aicc, cost, text))
+        score = _screening_score(cost, circuit.n_params, n_data, criterion)
+        by_size.setdefault(len(circuit.leaves), []).append((score, cost, text))
 
     quota = max(MIN_REFINE_PER_SIZE, n_refine // len(by_size))
     keep: list[str] = []
@@ -1708,6 +1855,7 @@ def refit_plan(
     restarts: int,
     seed: int,
     chunk: int | None = None,
+    criterion: Criterion = DEFAULT_CRITERION,
 ) -> Generator[RefitBatch, Sequence[RefitOutcome], list[Candidate]]:
     """Tier 2 with the *running* of it left to the caller, mirroring :func:`screen_plan`.
 
@@ -1725,14 +1873,14 @@ def refit_plan(
     Pareto front that can be streamed to the UI while the rest is still running
     (``docs/WEB_UI_PLAN.md`` section 3). ``None`` means one batch.
     """
-    texts = _shortlist(scored, n_refine, n_data)
+    texts = _shortlist(scored, n_refine, n_data, criterion)
     results: list[FitResult] = []
     size = max(len(texts) if chunk is None else chunk, 1)
     for start in range(0, len(texts), size):
         window = texts[start : start + size]
         outcomes = yield RefitBatch(
             [RefitTask(text, restarts, seed) for text in window],
-            _ranked(results),
+            _ranked(results, criterion),
             len(texts),
         )
         if len(outcomes) != len(window):
@@ -1740,13 +1888,15 @@ def refit_plan(
                 f"refit_plan was sent {len(outcomes)} outcomes for {len(window)} tasks"
             )
         results.extend(r for r in map(_as_fit_result, outcomes) if r is not None)
-    return _ranked(results)
+    return _ranked(results, criterion)
 
 
-def _ranked(results: Sequence[FitResult]) -> list[Candidate]:
-    """Fitted topologies as candidates, best AICc first."""
+def _ranked(
+    results: Sequence[FitResult], criterion: Criterion = DEFAULT_CRITERION
+) -> list[Candidate]:
+    """Fitted topologies as candidates, best first under ``criterion``."""
     out = [Candidate(r.circuit, r, 0) for r in results]
-    out.sort(key=lambda c: c.aicc)
+    out.sort(key=lambda c: c.score(criterion))
     return out
 
 
@@ -1764,6 +1914,7 @@ def _refit_shortlist(
     seed: int,
     n_refine: int,
     executor: multiprocessing.pool.Pool | None = None,
+    criterion: Criterion = DEFAULT_CRITERION,
 ) -> list[Candidate]:
     """Tier 2: refit the shortlist at full budget. Only these numbers are ever reported.
 
@@ -1771,7 +1922,12 @@ def _refit_shortlist(
     :func:`screen_plan`: it runs the fits and holds no opinion about which ones to run.
     """
     plan = refit_plan(
-        scored, n_refine=n_refine, n_data=2 * spectrum.n, restarts=restarts, seed=seed
+        scored,
+        n_refine=n_refine,
+        n_data=2 * spectrum.n,
+        restarts=restarts,
+        seed=seed,
+        criterion=criterion,
     )
     try:
         batch = next(plan)
@@ -2023,12 +2179,14 @@ def _screen_parallel(
         return list(done.value)
 
 
-def _unique_best(candidates: Sequence[Candidate]) -> list[Candidate]:
+def _unique_best(
+    candidates: Sequence[Candidate], criterion: Criterion = DEFAULT_CRITERION
+) -> list[Candidate]:
     """Keep the best-scoring instance of each distinct topology."""
     best: dict[str, Candidate] = {}
     for candidate in candidates:
         key = candidate.circuit.canonical_form()
-        if key not in best or candidate.aicc < best[key].aicc:
+        if key not in best or candidate.score(criterion) < best[key].score(criterion):
             best[key] = candidate
     return list(best.values())
 
@@ -2039,21 +2197,22 @@ def _next_generation(
     pool: tuple[str, ...],
     max_elements: int,
     population: int,
+    criterion: Criterion = DEFAULT_CRITERION,
 ) -> list[Node]:
     """Elitism over the Pareto front, then tournament selection with mutation/crossover.
 
-    Breeding from the Pareto front rather than from the AICc ranking alone keeps simple
+    Breeding from the Pareto front rather than from the score ranking alone keeps simple
     topologies in play. Otherwise the population converges on whatever fits best regardless
     of size, and the trade-off curve -- the actual deliverable -- collapses to one point.
     """
-    front = pareto_front(alive)
+    front = pareto_front(alive, criterion)
     elite = front[: max(2, population // 6)]
     trees: list[Node] = [candidate.circuit.root for candidate in elite]
 
     while len(trees) < population:
-        parent = _tournament(alive, rng)
+        parent = _tournament(alive, rng, criterion=criterion)
         if rng.random() < 0.3 and len(alive) > 1:
-            other = _tournament(alive, rng)
+            other = _tournament(alive, rng, criterion=criterion)
             child = crossover(parent.circuit.root, other.circuit.root, rng)
         else:
             child = parent.circuit.root
@@ -2063,9 +2222,14 @@ def _next_generation(
     return trees
 
 
-def _tournament(alive: list[Candidate], rng: np.random.Generator, size: int = 3) -> Candidate:
+def _tournament(
+    alive: list[Candidate],
+    rng: np.random.Generator,
+    size: int = 3,
+    criterion: Criterion = DEFAULT_CRITERION,
+) -> Candidate:
     picks = rng.integers(0, len(alive), size=min(size, len(alive)))
-    return min((alive[int(i)] for i in picks), key=lambda c: c.aicc)
+    return min((alive[int(i)] for i in picks), key=lambda c: c.score(criterion))
 
 
 def _refine(

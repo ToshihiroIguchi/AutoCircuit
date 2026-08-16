@@ -20,6 +20,8 @@ export interface FileError {
 export interface DataScreenProps {
   ready: boolean;
   dragActive: boolean;
+  /** The reader names the loaded core offers; shown on the drop zone. */
+  formats: string[];
   spectra: LoadedSpectrum[];
   selected: LoadedSpectrum | null;
   selectedId: string | null;
@@ -35,7 +37,12 @@ export interface DataScreenProps {
 export function DataScreen(props: DataScreenProps) {
   return (
     <>
-      <DropZone disabled={!props.ready} dragActive={props.dragActive} onFiles={props.onFiles} />
+      <DropZone
+        disabled={!props.ready}
+        dragActive={props.dragActive}
+        formats={props.formats}
+        onFiles={props.onFiles}
+      />
 
       <SamplePanel disabled={!props.ready} onFile={(file) => props.onFiles([file])} />
 

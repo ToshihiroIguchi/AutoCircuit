@@ -38,10 +38,18 @@ import { ReportScreen } from "./screens/ReportScreen";
 
 type Screen = "data" | "fit" | "discover" | "report";
 
+/**
+ * The order the work runs in: load, search for a topology, refine the one you picked, take the
+ * answer away.
+ *
+ * Fit came before Discover until the hand-off existed, because the dependency ran that way --
+ * the circuit drawn on the Fit screen is what a constrained search asserts as its skeleton. That
+ * dependency is still there and still runs backwards; it is just no longer the common path.
+ */
 const SCREENS: ReadonlyArray<readonly [Screen, string]> = [
   ["data", "Data"],
-  ["fit", "Fit"],
   ["discover", "Discover"],
+  ["fit", "Fit"],
   ["report", "Report"],
 ];
 
@@ -144,7 +152,17 @@ export function App() {
   const ready = versions !== null;
 
   useEffect(() => {
-    client.ready().then(setVersions).catch((err: unknown) => setBootError(errorMessage(err)));
+    client
+      .ready()
+      .then((answer) => {
+        setVersions(answer);
+        // The default criterion comes from the loaded core, not from a constant here. The two
+        // would otherwise drift apart silently, and the browser disagreeing with the command
+        // line about which model won is exactly the class of failure this project keeps
+        // finding (docs/HANDOFF.md section 3).
+        setSearch((prev) => ({ ...prev, criterion: answer.default_criterion }));
+      })
+      .catch((err: unknown) => setBootError(errorMessage(err)));
   }, [client]);
 
   // Keeps the selected row valid: picks the first spectrum on the initial load and whenever the
@@ -390,6 +408,13 @@ export function App() {
     [client],
   );
 
+  // The Discover screen's hand-off: take a topology to the Fit screen and go there. Only the
+  // circuit travels -- see `DiscoverScreenProps.onFitCircuit` for why the fitted values do not.
+  const fitCircuit = useCallback((text: string) => {
+    setCircuit(text);
+    setScreen("fit");
+  }, []);
+
   const selected = useMemo(() => spectra.find((s) => s.id === selectedId) ?? null, [spectra, selectedId]);
   // "" is a real value while the field is mid-edit (FitScreen shows its own parse error for
   // it); Discover only wants a skeleton when there is one, so a blank field means null.
@@ -425,6 +450,7 @@ export function App() {
           <DataScreen
             ready={ready}
             dragActive={dragActive}
+            formats={versions?.formats ?? []}
             spectra={spectra}
             selected={selected}
             selectedId={selectedId}
@@ -454,7 +480,9 @@ export function App() {
             acquirePool={acquirePool}
             settings={search}
             onSettings={changeSearch}
+            criteria={versions?.criteria ?? []}
             onReport={setDiscovery}
+            onFitCircuit={fitCircuit}
           />
         ) : (
           <ReportScreen

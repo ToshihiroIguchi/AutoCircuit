@@ -118,8 +118,22 @@ export interface StatisticsWire {
   aic: WireFloat;
   aicc: WireFloat;
   bic: WireFloat;
+  caic: WireFloat;
+  hqc: WireFloat;
+  /** Under a Laplace approximation of the posterior; see `compute_statistics` in Python. */
+  waic: WireFloat;
+  /** WAIC's effective parameter count: how many parameters the data actually resolves. */
+  p_waic: WireFloat;
   rank: number;
   warnings: string[];
+}
+
+/** One model-selection rule the running core offers, as `version` reports it. */
+export interface CriterionWire {
+  name: string;
+  label: string;
+  /** One sentence on what it is and what it assumes; shown as the menu's help text. */
+  note: string;
 }
 
 /** `FitResult.to_wire()`, lossless: this is the transport record, not a report. */
@@ -198,14 +212,29 @@ export interface ScreenStepWire {
   best: string | null;
 }
 
-/** One candidate as a results row: what it is, how well it fits, what it cannot pin down. */
+/**
+ * One candidate as a results row: what it is, how well it fits, what it cannot pin down.
+ *
+ * Every criterion is on the row, not only the one that ranked it: they cost nothing to carry,
+ * and `score` names which of them the ordering came from so the table can label its column
+ * rather than print a bare number under a heading the reader has to guess.
+ */
 export interface CandidateRowWire {
   circuit: string;
   canonical: string;
   n_elements: number;
   n_params: number;
   complexity: WireFloat;
+  /** Which criterion `score` is. `"ftest"` scores as AIC -- a test provides no axis. */
+  criterion: string;
+  score: WireFloat;
+  aic: WireFloat;
   aicc: WireFloat;
+  bic: WireFloat;
+  caic: WireFloat;
+  hqc: WireFloat;
+  waic: WireFloat;
+  p_waic: WireFloat;
   chi2_reduced: WireFloat;
   n_unresolved: number;
   /** Parameters whose standard error exceeds their own value. */
@@ -259,6 +288,18 @@ export interface ReportWire {
   stopped: boolean;
   completeness: string;
   summary: string;
+  criterion: string;
+  criterion_label: string;
+  /** The column heading for `score`: AIC's when the criterion is the F-test. */
+  score_label: string;
+  /**
+   * What the criterion picks -- which is not what this report recommends.
+   *
+   * The recommendation is the simplest model that fits as well as any *and* whose parameters
+   * the data resolves; the criterion is a penalty term, and minimising one routinely lands on
+   * a circuit with a parameter whose standard error exceeds its own value. Both are marked.
+   */
+  by_criterion: string | null;
   candidates: CandidateRowWire[];
   pareto: CandidateRowWire[];
   recommended: string | null;
@@ -374,6 +415,9 @@ export interface VersionsWire {
   validate: number;
   drt: number;
   formats: string[];
+  /** The model-selection menu, from the registry in the running build rather than from here. */
+  criteria: CriterionWire[];
+  default_criterion: string;
 }
 
 /** A spectrum the user has loaded, with the bookkeeping the UI adds around it. */

@@ -176,8 +176,6 @@ body {
   color: var(--gridline);
 }
 
-.status-bar__build,
-.status-bar__formats,
 .status-bar__elapsed {
   font-family: var(--font-mono);
 }
@@ -262,6 +260,14 @@ body {
   margin: 0;
   color: var(--text-secondary);
   font-size: 12px;
+}
+
+/* Answers "what can I drop here?" at the place the question is asked. */
+.drop-zone__formats {
+  margin: 0;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
 }
 
 .file-button {
@@ -1087,6 +1093,25 @@ body {
   opacity: 0.75;
 }
 
+/* While an element is being dragged, every place it could land shows itself. Without this a
+   slot looks the same whether or not it will accept what is under the pointer. */
+.cc--dragging .cc-slot {
+  opacity: 1;
+  outline: 1px dashed var(--series-1);
+  outline-offset: 1px;
+}
+
+.cc--dragging .cc-el__pick {
+  outline: 1px dashed var(--series-1);
+  outline-offset: -2px;
+}
+
+/* Read-only: the picture without any of the handles. Nothing here is clickable except the
+   symbols, which stay focusable so the drawing is still reachable from a keyboard. */
+.cc--read-only .cc-el__pick {
+  cursor: default;
+}
+
 .cc-slot:hover:not(:disabled),
 .cc-slot:focus-visible {
   opacity: 1;
@@ -1345,6 +1370,36 @@ body {
   font-size: 12px;
 }
 
+/* All six criteria, in one strip. They are numbers to compare against another fit, not a
+   choice: one fit is not a selection between models. */
+.fit-panel__criteria {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  margin: 10px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--gridline);
+}
+
+.fit-panel__criteria > div {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.fit-panel__criteria dt {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.fit-panel__criteria dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
 .fit-panel__warnings {
   margin: 10px 0 0;
   padding-left: 18px;
@@ -1453,6 +1508,10 @@ body {
   margin: 10px 0 0;
   font-size: 11px;
   color: var(--text-muted);
+}
+
+.search-panel__hint--criterion strong {
+  color: var(--text-secondary);
 }
 
 .search-panel__skeleton {
@@ -1640,6 +1699,32 @@ body {
 
 .pareto-table__row--recommended {
   background: var(--status-neutral-bg);
+}
+
+.pareto-table__row--selected {
+  outline: 2px solid var(--series-1);
+  outline-offset: -2px;
+}
+
+/* The circuit cell becomes the row's own select button when the caller draws a schematic. */
+.pareto-table__pick {
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pareto-table__pick:hover code,
+.pareto-table__pick:focus-visible code {
+  text-decoration: underline;
+}
+
+.pareto-table__badge--score {
+  color: var(--text-muted);
+  font-style: italic;
 }
 
 .pareto-table__badge {

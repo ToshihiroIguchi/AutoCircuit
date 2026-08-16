@@ -129,14 +129,17 @@ def test_pareto_front_is_non_dominated() -> None:
 
 def test_pareto_front_helper_on_hand_built_candidates() -> None:
     class Fake:
-        def __init__(self, complexity: float, aicc: float) -> None:
+        def __init__(self, complexity: float, value: float) -> None:
             self.complexity = complexity
-            self.aicc = aicc
+            self.value = value
             self.circuit = complexity
+
+        def score(self, criterion: str) -> float:
+            return self.value
 
     points = [Fake(1.0, 10.0), Fake(2.0, 5.0), Fake(3.0, 6.0), Fake(2.0, 8.0)]
     front = pareto_front(points)  # type: ignore[arg-type]
-    assert [(p.complexity, p.aicc) for p in front] == [(1.0, 10.0), (2.0, 5.0)]
+    assert [(p.complexity, p.value) for p in front] == [(1.0, 10.0), (2.0, 5.0)]
 
 
 def test_discovery_is_reproducible_from_its_seed() -> None:

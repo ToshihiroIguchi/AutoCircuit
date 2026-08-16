@@ -21,12 +21,13 @@ from autocircuit.core.discover import (
     MIN_REFINE_PER_SIZE,
     REFINE_CEILING_FACTOR,
     SCREEN_BUDGET,
+    SCREENING_FALLBACK,
     DiscoveryResult,
     Enumeration,
     ScreenTask,
     _screen_all,
     _screen_one,
-    _screening_aicc,
+    _screening_score,
     _shortlist,
     discover,
     enumerate_candidates,
@@ -276,14 +277,28 @@ def test_shortlist_stays_bounded_when_everything_is_a_near_tie() -> None:
     assert len(keep) <= max(MIN_REFINE_PER_SIZE, 10) * REFINE_CEILING_FACTOR
 
 
-def test_screening_aicc_charges_for_parameters() -> None:
+def test_screening_score_charges_for_parameters() -> None:
     """Two circuits that fit equally well are not equally good; the bigger one is worse."""
-    assert _screening_aicc(1e-3, 5, 140) < _screening_aicc(1e-3, 8, 140)
-    # ...and a genuinely better fit still wins despite costing more parameters.
-    assert _screening_aicc(1e-6, 8, 140) < _screening_aicc(1e-3, 5, 140)
-    # Degenerate inputs are ranked last rather than raising.
-    assert _screening_aicc(0.0, 5, 140) == float("inf")
-    assert _screening_aicc(1e-3, 200, 140) == float("inf")
+    for name in ("aic", "aicc", "bic", "caic", "hqc"):
+        assert _screening_score(1e-3, 5, 140, name) < _screening_score(1e-3, 8, 140, name)
+        # ...and a genuinely better fit still wins despite costing more parameters.
+        assert _screening_score(1e-6, 8, 140, name) < _screening_score(1e-3, 5, 140, name)
+        # Degenerate inputs are ranked last rather than raising.
+        assert _screening_score(0.0, 5, 140, name) == float("inf")
+        assert _screening_score(1e-3, 200, 140, name) == float("inf")
+
+
+def test_screening_falls_back_where_a_cost_is_not_enough() -> None:
+    """WAIC needs a Jacobian and an F-test needs two models; tier 1 has neither.
+
+    The screen decides who is refitted, not who wins, so falling back is a cost in shortlist
+    ordering and never in a reported number -- but it has to be the *stated* fallback rather
+    than whatever the attribute lookup happens to return.
+    """
+    for name in ("waic", "ftest"):
+        assert _screening_score(1e-3, 5, 140, name) == _screening_score(
+            1e-3, 5, 140, SCREENING_FALLBACK
+        )
 
 
 def test_seed_circuits_are_evaluated_in_exhaustive_mode() -> None:

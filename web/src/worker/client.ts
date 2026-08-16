@@ -74,6 +74,15 @@ export interface SearchOptions {
   weighting?: string;
   seed?: number;
   restarts?: number;
+  /**
+   * Which model-selection rule ranks the candidates and draws the front.
+   *
+   * It travels with the search rather than being applied to the answer, because it also ranks
+   * the tier-1 shortlist -- which topologies get a full-budget refit at all. Re-sorting a
+   * finished report by another criterion would therefore be re-sorting a list whose members a
+   * different criterion had chosen.
+   */
+  criterion?: string;
 }
 
 /** The knobs the DRT exposes. `undefined` for a series term means "decide from the data". */
@@ -133,7 +142,11 @@ const seconds = (ms: number): string => `${(ms / 1000).toFixed(2)} s`;
  * measured here is worth more than any number this project could hard-code: it is the visitor's
  * own. One line per worker, at load only.
  */
-function report(index: number, timings: LoadTimings & { total: number }): void {
+function report(
+  index: number,
+  timings: LoadTimings & { total: number },
+  versions: VersionsWire,
+): void {
   const stages = [
     `boot ${seconds(timings.boot)}`,
     `packages ${seconds(timings.packages)}`,
@@ -142,6 +155,17 @@ function report(index: number, timings: LoadTimings & { total: number }): void {
   ].join(", ");
   const whole = index === 0 ? ` — ${seconds(timings.total)} since navigation` : "";
   console.info(`AutoCircuit worker ${index} ready: ${stages}${whole}`);
+  // The build numbers used to sit in the page header. They are a developer's diagnostic and
+  // the diagnosis they support is already automatic and louder -- `bridge.worker.ts` refuses to
+  // run against a core answering a different bridge version -- so they belong here, where
+  // someone who has been *asked* for them can find them, rather than in the most valuable strip
+  // of the page on every screen forever (docs/METRICS_AND_UX_PLAN.md section 3).
+  if (index === 0) {
+    console.info(
+      `AutoCircuit build: bridge v${versions.bridge}, fit v${versions.fit}, ` +
+        `spectrum v${versions.spectrum}, validate v${versions.validate}, drt v${versions.drt}`,
+    );
+  }
 }
 
 export class BridgeClient {
@@ -186,7 +210,7 @@ export class BridgeClient {
         // `performance.now()` on this thread is measured from the navigation, so it is the whole
         // cold start and not just the worker's share of it -- which is what gate W3 asks about.
         this.loadTimings = { ...timings, total: performance.now() };
-        report(this.index, this.loadTimings);
+        report(this.index, this.loadTimings, versions);
         return versions;
       });
     }
@@ -332,6 +356,7 @@ export class BridgeClient {
       weighting: options.weighting,
       seed: options.seed,
       restarts: options.restarts,
+      criterion: options.criterion,
     });
   }
 

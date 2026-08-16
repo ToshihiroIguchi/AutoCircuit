@@ -98,7 +98,13 @@ static-site Web UI running the same core via WASM (Pyodide).
    built, because a service worker would put a cache between every visitor and a site that
    republishes on every push. A gate written from an expectation is withdrawn with the measurement
    beside it, never reworded into something the build already does.
-6. `docs/SCHEMATIC_PLAN.md` — how the Fit screen draws the circuit. **Implemented; gates S1–S4
+6. `docs/METRICS_AND_UX_PLAN.md` -- the seven model-selection criteria and six UI questions.
+   **Implemented; gates M1-M3 measured.** Its §2.3 is where WAIC had to be given a stated
+   approximation rather than refused or faked, §2.4 is why an F-test is offered as a *test* and
+   never as a score, §2.5 is what a criterion is not allowed to change (the recommendation), and
+   §1.5 is where the obvious cold-start fix was measured to be worse than nothing -- a document's
+   preload cache does not serve a Web Worker's fetch, so the browser downloaded 17 MB twice.
+7. `docs/SCHEMATIC_PLAN.md` — how the Fit screen draws the circuit. **Implemented; gates S1–S4
    measured.** The picture is computed rather than laid out: `web/src/core/schematic.ts` turns the
    parsed tree into coordinates, which is what makes "every wire is axis-aligned", "no wire ends
    in mid-air" and "a junction dot exactly where three or more wires meet" assertions rather than

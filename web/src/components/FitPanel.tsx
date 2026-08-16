@@ -114,16 +114,47 @@ export function FitPanel(props: FitPanelProps) {
               <dd>{stats === null ? "" : formatNumber(decodeFloat(stats.chi2_reduced), 5)}</dd>
             </div>
             <div>
-              <dt>AICc</dt>
-              <dd>{stats === null ? "" : formatNumber(decodeFloat(stats.aicc), 6)}</dd>
-            </div>
-            <div>
               <dt>Points / free parameters</dt>
               <dd>
                 {stats === null ? "" : `${stats.n_data / 2} / ${stats.n_params}`}
               </dd>
             </div>
           </dl>
+
+          {/* All six, not the one a menu chose. A criterion is a rule for choosing *between*
+              models and one fit is not a choice; what is useful here is the number a reader
+              wants to compare against another fit of their own, whichever one that is. Only the
+              Discover screen has something to select with, and there it is a search setting. */}
+          {stats !== null && (
+            <dl className="fit-panel__criteria">
+              {(
+                [
+                  ["AIC", stats.aic],
+                  ["AICc", stats.aicc],
+                  ["BIC", stats.bic],
+                  ["CAIC", stats.caic],
+                  ["HQC", stats.hqc],
+                  ["WAIC", stats.waic],
+                ] as const
+              ).map(([label, value]) => (
+                <div key={label}>
+                  <dt>{label}</dt>
+                  <dd>{formatNumber(decodeFloat(value), 6)}</dd>
+                </div>
+              ))}
+              <div
+                title={
+                  "WAIC counts the parameters the data actually resolves, under a Laplace " +
+                  "approximation of the posterior; AIC counts the ones the model declares."
+                }
+              >
+                <dt>WAIC effective params</dt>
+                <dd>
+                  {formatNumber(decodeFloat(stats.p_waic), 3)} of {stats.n_params}
+                </dd>
+              </div>
+            </dl>
+          )}
           {props.fit.warnings.length > 0 && (
             <ul className="fit-panel__warnings">
               {props.fit.warnings.map((warning) => (

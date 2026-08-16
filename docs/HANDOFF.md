@@ -963,3 +963,137 @@ front page.
   The cold-start figure quoted there is the one measured **from the public URL** (21 s cold,
   5-11 s with the runtime cached), not the `localhost` 5 s — §14 says not to mix the two, and the
   flattering number is the one a reader will not experience.
+
+## 17. Seven model-selection criteria, and six UI questions
+
+`docs/METRICS_AND_UX_PLAN.md` is the record. Seven items were raised together; one of them
+changes what every report in this project ranks by, three are a few lines each, one was already
+implemented, and one is a measurement that came out the opposite way to the obvious design.
+
+### 17.1 The criteria
+
+`--criterion` on `discover`, a `<select>` on the Discover screen, and `autocircuit criteria` to
+explain the choice. **The default moved from AICc to AIC**, which is a change to published
+numbers: `AICc - AIC = 2k(k+1)/(n-k-1)`, which on a 71-point spectrum is 0.29 at k = 4 and 1.36
+at k = 9. It is monotone in k, so the order *within* one parameter count cannot move and only
+comparisons across counts can. **Every measured front recorded in `docs/` before 2026-08-16 was
+taken under AICc and is still labelled that way.**
+
+- **`Statistics` now carries all six scores plus `p_waic`**, always, and `fit --json` writes them
+  all. `fit.WIRE_VERSION` is **2** for that; `BRIDGE_VERSION` is **5**, because a search carries a
+  criterion and every results row carries every score plus the one that ranked it.
+- **The criterion changes the ranking, the Pareto axis and the shortlist. It does not change
+  `recommended`.** That is the parsimony rule, and it is about identifiability rather than about
+  a penalty term (§3 of this file: minimum-AICc selected a 9-parameter circuit with two
+  parameters whose standard errors exceeded their own values). Choosing BIC does not make that a
+  different kind of mistake. `DiscoveryResult.by_criterion` is what the criterion picks, and the
+  report prints both lines whenever they differ.
+- **WAIC is computed analytically under a Laplace approximation, not sampled**, and the
+  approximation is named in the docstring, in `autocircuit criteria` and in the README. The
+  posterior is the covariance `_covariance` already computes and the residual is linearised
+  through the same Jacobian, which makes every integral Gaussian; `_covariance` therefore also
+  returns the leverage, off the SVD it was already doing. It reduces to `deviance + 2*rank` in
+  the small-leverage limit — the *effective* parameter count where AIC has the nominal one —
+  which is the only reason to offer it here. [measured] Against a Monte-Carlo WAIC drawn from the
+  same Laplace posterior, 100,000 draws on a fitted `R1-p(R2,C1)`: **waic −1098.551 against
+  −1098.538, and p_waic 2.660 against 2.666**. That check is what says the closed forms are the
+  integrals they claim to be; it says nothing about the linearisation being a good model of the
+  fit, and neither does anything else here.
+- **The F-test is not a score and was not made into one.** It ranks by AIC — a test between two
+  models provides no axis — and then walks the Pareto front, stepping up only where the extra
+  sum of squares is significant at 0.05. **It assumes each row is nested in the next and Pareto
+  rows generally are not**, which the report says on the line that gives the answer rather than
+  in a footnote. The p-value comes from `scipy.special.betainc` and not `scipy.stats`: `special`
+  is already imported by `core/elements.py`, and `scipy.stats` is a second heavy import on a page
+  whose start-up is §17.5.
+- **Screening cannot compute two of the seven.** WAIC needs the leverage, which needs the
+  Jacobian, which is the expensive half of a full fit and exactly what tier 1 skips; an F-test
+  needs two models. Both fall back to AIC in `_screening_score`, under the constant
+  `SCREENING_FALLBACK` so it is a stated fallback rather than whatever an attribute lookup
+  returns. That decides *who gets refitted*, never who wins.
+- [measured] The browser matches the CLI on all six, digit for digit, on the Randles sample
+  through `R1-p(C1,R2-W1)`: AIC −1311.19, AICc −1310.89, BIC −1299.36, CAIC −1295.36,
+  HQC −1306.38, WAIC −1311, effective parameters 4.02 of 4. That is gate W1 again, on numbers it
+  had not been measured on.
+
+### 17.2 The header's build line is gone
+
+`bridge v4 · fit v1 · spectrum v1 · validate v1` and the reader list were one strip carrying two
+different things. The four versions were a **developer's** diagnostic, and the diagnosis they
+support is already automatic and louder: `bridge.worker.ts` compares its own `BRIDGE_VERSION`
+against what Python answers and refuses to run, naming both numbers. They are a `console.info`
+line from `worker/client.ts` now. The reader list answers a real user question — "what can I
+drop here?" — which was being answered in the page header on every screen instead of at the drop
+zone; it is on the drop zone.
+
+### 17.3 Tab order, and the hand-off that justified it
+
+`Data, Fit, Discover, Report` → `Data, Discover, Fit, Report`. Fit came first because the
+dependency ran that way and **still does**: the circuit drawn on the Fit screen is what a
+constrained search asserts as its skeleton. What changed is that Discover now hands a topology
+forward ("Fit this circuit"), which makes the forward direction the common one.
+
+**It hands over the topology and not the fit.** The discovered values are not carried across as a
+starting guess, because this fitter has none — refitting on the Fit screen re-runs the same
+global search from the same data-derived interval and lands in the same place — and carrying
+numbers would make a screen that says "these do not seed the fit" look as though they did.
+
+### 17.4 The selected front row is drawn
+
+`ParetoTable` rows are selectable (the recommended one on arrival) and `CircuitPreview` draws the
+selection above the table with the *same* `CircuitCanvas` the Fit screen edits, behind a new
+`readOnly` prop. A second renderer would be a second chance for the picture beside a result to
+disagree with the editable one, and `npm run schematic` checks the geometry once. It asks the
+bridge to parse the string, because no JavaScript here parses a circuit.
+
+### 17.5 Cold start: what is slow, and the measurement that inverted the fix
+
+`web/dist` is 41 MB and **17 of them are the numpy and scipy wheels, which `loadPackage` cannot
+ask for until `loadPyodide()` has resolved** — and that call first fetches the 9.6 MB wasm and
+the 7.1 MB stdlib. So 41% of the bytes were sitting behind a barrier they do not depend on.
+[measured, deployed site, fresh Edge profile, two runs] **15.24 s and 13.52 s to a ready worker,
+with the packages stage 7.84 s and 4.39 s of that.**
+
+**The obvious fix does not work, and it is worse than doing nothing.** A `<link rel="preload"
+as="fetch">` in `index.html` is fetched by the *document*, and a document's preload cache does
+not serve a **Web Worker's** fetch. [measured] Chrome downloaded all 17 MB a second time and
+logged "preloaded … but not used" for both wheels. The prefetch therefore lives in
+`bridge.worker.ts`, in the same context as the fetch it feeds: it reads `pyodide/wheels.json`
+(written by `build-assets.mjs`, because the names carry version numbers), starts both fetches
+before `loadPyodide`, and patches `self.fetch` to answer `loadPackage` from them — matching by
+file name, since the URL `loadPackage` builds need not be character-for-character the one this
+built. A failed prefetch resolves to null and falls back to the network. [measured] Each wheel is
+then requested **exactly once**.
+
+Two things not done, both written down rather than left as an impression:
+
+- **Deferring scipy** is the largest remaining lever — 14 MB of the 17, and the Data screen does
+  not need it. `core/elements.py` imports `scipy.special` at module scope and `core/fit.py`
+  imports `scipy.optimize`, so `from autocircuit.web import handle` pulls scipy in before any
+  operation runs. It would mean lazy imports in three core modules and a bridge that can answer
+  some operations and not others, which the front end would have to model — trading the "one
+  handle, no decisions" property that made the browser agree with the CLI digit for digit.
+- **A service worker** is still refused, for §6's reason.
+
+### 17.6 Dragging an element onto the circuit was already implemented
+
+`ElementPalette` has set `draggable` and `CircuitCanvas`'s slots have handled `dragover`/`drop`
+behind a private MIME type since step 3 (§10). What was missing was the affordance: a slot looked
+the same whether or not it would accept what was under the pointer. Two changes, both about that
+rather than about the mechanism — every target lights up while a drag is in progress
+(`cc--dragging`, driven from a window-level `dragenter`, because the drag starts in the palette
+and `dragstart` does not reach the canvas), and an element may now be dropped **onto an existing
+symbol** to place the new one in parallel with it, which is where a drag aimed at a symbol was
+aiming. [measured, Chrome] Both paths produce the circuit the click path produces:
+`p(R1,C1)-R2` + CPE onto the end slot gives `p(R1,C1)-R2-CPE1`, and + L onto `R2` gives
+`p(R1,C1)-p(R2,L1)-CPE1`.
+
+### 17.7 State of the suite
+
+[measured] `python -m pytest tests -q`: **712 passed, 19 skipped, 2 failed** in 718 s, and both
+failures were understood before anything was changed.
+`test_web_bridge.py::test_bridge_version_is_bumped_for_the_new_operations` pins the number and
+had to be bumped to 5 — which is the test doing its job.
+`test_discover.py::test_time_limit_stops_the_search` failed at **65 s inside the full run and
+passed at 37 s in isolation a minute later**, which is the third occurrence of the thermal
+pattern §4 describes. Do not widen that bound. `tests/test_criteria.py` is new: 20 tests, 15 s.

@@ -12,14 +12,21 @@ import { decodeFloat } from "../core/wire";
 import { formatNumber } from "../utils/format";
 
 export interface EquivalenceClassesProps {
-  /** Groups of circuit strings, best AICc first, singletons included. Rendered in this order. */
+  /** Groups of circuit strings, best-scoring first, singletons included; rendered in order. */
   classes: string[][];
   /** Every evaluated candidate; members are looked up here by `circuit`. */
   rows: CandidateRowWire[];
   recommended: string | null;
+  /** What the numbers beside each member are: "AIC", "BIC", ... */
+  scoreLabel?: string;
 }
 
-export function EquivalenceClasses({ classes, rows, recommended }: EquivalenceClassesProps) {
+export function EquivalenceClasses({
+  classes,
+  rows,
+  recommended,
+  scoreLabel = "Score",
+}: EquivalenceClassesProps) {
   const byCircuit = new Map<string, CandidateRowWire>();
   for (const row of rows) byCircuit.set(row.circuit, row);
   const ambiguous = classes.filter((members) => members.length > 1).length;
@@ -70,7 +77,7 @@ export function EquivalenceClasses({ classes, rows, recommended }: EquivalenceCl
                         )}
                         {row !== null && (
                           <span className="equivalence-classes__detail">
-                            AICc {formatNumber(decodeFloat(row.aicc), 6)}, chi²{" "}
+                            {scoreLabel} {formatNumber(decodeFloat(row.score), 6)}, chi²{" "}
                             {formatNumber(decodeFloat(row.chi2_reduced), 5)}, {row.n_params}{" "}
                             params
                             {row.unresolved.length > 0 && (

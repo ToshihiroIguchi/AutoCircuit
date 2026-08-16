@@ -86,7 +86,7 @@ from autocircuit.core.discover import (
     # keeps its own enumerator on purpose so that gate G2 checks one implementation against
     # another.) The following four imports are private:
     _screen_all,
-    _screening_aicc,
+    _screening_score,
     _shortlist,
     _worker_pool,
     discover,
@@ -624,7 +624,7 @@ def _rank_rows(
         if not math.isfinite(cost):
             continue
         circuit = Circuit.parse(text)
-        aicc = _screening_aicc(cost, circuit.n_params, n_data)
+        aicc = _screening_score(cost, circuit.n_params, n_data, "aicc")
         by_size.setdefault(len(circuit.leaves), []).append((aicc, cost, text))
     for group in by_size.values():
         group.sort()

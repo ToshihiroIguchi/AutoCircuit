@@ -10,6 +10,12 @@
       name="description"
       content="Equivalent circuit analysis of impedance data, without user-supplied initial values."
     />
+    <!-- There is deliberately no <link rel="preload"> for the numpy and scipy wheels here.
+         [measured] It was tried and it downloads them twice: the wheels are fetched by
+         `loadPackage` inside the Web Worker, and a document's preload cache does not serve a
+         worker's fetch -- Chrome logs "preloaded ... but not used" and asks for all 17 MB again.
+         The overlap that change was after is done in `src/worker/bridge.worker.ts` instead,
+         where the fetch that needs it lives. See docs/METRICS_AND_UX_PLAN.md section 1. -->
     <!-- The theme is stamped here, before the first paint, so someone who asked for a dark page
          does not get a white one for the second it takes the bundle to arrive -- let alone for the
          thirteen it takes Pyodide to. src/core/theme.ts applies the same rule for every later

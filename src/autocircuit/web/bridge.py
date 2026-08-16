@@ -52,6 +52,7 @@ from autocircuit.core.fit import WIRE_VERSION as FIT_WIRE_VERSION
 from autocircuit.core.fit import FitResult, Weighting, fit, relative_error, search_space
 from autocircuit.core.spectrum import WIRE_VERSION as SPECTRUM_WIRE_VERSION
 from autocircuit.core.spectrum import Spectrum
+from autocircuit.core.stats import CRITERIA, CRITERION_LABELS, CRITERION_NOTES, DEFAULT_CRITERION
 from autocircuit.core.validate import DEFAULT_MU_CRITERION, DEFAULT_RESIDUAL_LIMIT, lin_kk
 from autocircuit.core.validate import WIRE_VERSION as VALIDATE_WIRE_VERSION
 from autocircuit.core.wire import encode_array, encode_complex_array, encode_float
@@ -59,7 +60,10 @@ from autocircuit.web import export, job
 
 #: Version of the request/response protocol below. The worker checks it against its own build
 #: at start-up, so a stale cached bundle fails loudly rather than answering the wrong question.
-BRIDGE_VERSION = 4
+#:
+#: 5 (2026-08-16): a search carries a model-selection ``criterion``, and every results row
+#: carries all six scores plus the one the ranking used.
+BRIDGE_VERSION = 5
 
 __all__ = ["BRIDGE_VERSION", "handle"]
 
@@ -83,7 +87,13 @@ def handle(request: str) -> str:
 
 
 def _op_version(payload: dict[str, Any]) -> dict[str, Any]:
-    """What this build is, so the caller can refuse to talk to the wrong one."""
+    """What this build is, so the caller can refuse to talk to the wrong one.
+
+    ``criteria`` rides along because it is the same kind of fact as ``formats``: what the
+    *running core* offers, not a list the front end keeps its own copy of and has to be
+    remembered to update. It is here rather than on the catalogue so the menu exists from the
+    moment the worker is ready.
+    """
     return {
         "bridge": BRIDGE_VERSION,
         "fit": FIT_WIRE_VERSION,
@@ -91,6 +101,11 @@ def _op_version(payload: dict[str, Any]) -> dict[str, Any]:
         "validate": VALIDATE_WIRE_VERSION,
         "drt": DRT_WIRE_VERSION,
         "formats": sorted(io.REGISTRY),
+        "criteria": [
+            {"name": name, "label": CRITERION_LABELS[name], "note": CRITERION_NOTES[name]}
+            for name in CRITERIA
+        ],
+        "default_criterion": DEFAULT_CRITERION,
     }
 
 
@@ -321,6 +336,7 @@ def _op_discover_start(payload: dict[str, Any]) -> dict[str, Any]:
         feasibility_filter=bool(payload.get("feasibility_filter", True)),
         weighting=job.cast_weighting(payload.get("weighting", "modulus")),
         seed=int(payload.get("seed", 0)),
+        criterion=job.cast_criterion(payload.get("criterion", DEFAULT_CRITERION)),
         final_restarts=int(payload.get("restarts", 5)),
         n_refine=(
             None if payload.get("n_refine") is None else int(payload["n_refine"])
@@ -369,7 +385,7 @@ def _op_discover_refit(payload: dict[str, Any]) -> dict[str, Any]:
         ),
         "refitted": running.refitted,
         "shortlisted": running.shortlisted,
-        "front": [job.candidate_row(c) for c in running.front],
+        "front": [job.candidate_row(c, running.criterion) for c in running.front],
     }
 
 

@@ -178,12 +178,15 @@ export function ReportScreen({
             classes={report.equivalence_classes}
             rows={report.candidates}
             recommended={report.recommended}
+            scoreLabel={report.score_label}
           />
 
           <ParetoTable
             title="Pareto front (accuracy versus complexity)"
             rows={report.pareto}
             recommended={report.recommended}
+            byCriterion={report.by_criterion}
+            scoreLabel={report.score_label}
           />
 
           {/* `unsupported_assertion` is null when nothing was fitted, and an empty list when the

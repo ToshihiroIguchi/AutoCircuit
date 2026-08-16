@@ -78,13 +78,12 @@ export function StatusBar({ stage, detail, versions, bootError }: StatusBarProps
     );
   }
 
-  return (
-    <div className="status-bar status-bar--ready">
-      <span className="status-bar__build">
-        bridge v{versions.bridge} &middot; fit v{versions.fit} &middot; spectrum v
-        {versions.spectrum} &middot; validate v{versions.validate}
-      </span>
-      <span className="status-bar__formats">formats: {versions.formats.join(", ")}</span>
-    </div>
-  );
+  // Nothing once it is ready. The four wire-format versions and the reader list used to live
+  // here; they were a developer's diagnostic and a Data-screen answer respectively, shown on
+  // every screen to everyone forever (docs/METRICS_AND_UX_PLAN.md section 3). The versions are
+  // now a console line from `worker/client.ts` -- and the guard that actually protects anyone
+  // from a stale build was never this text but `bridge.worker.ts`'s version check, which
+  // refuses to run and says both numbers. The reader list moved to the drop zone, which is
+  // where "what can I drop here?" is asked.
+  return null;
 }

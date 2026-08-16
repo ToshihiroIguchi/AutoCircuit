@@ -38,6 +38,69 @@ async function download(url: string): Promise<Uint8Array> {
   return new Uint8Array(await response.arrayBuffer());
 }
 
+/**
+ * Start fetching the numpy and scipy wheels now, and hand them to `loadPackage` later.
+ *
+ * They are 17 MB of the site's 41, and nothing about them depends on the interpreter existing --
+ * but `loadPackage` cannot be called until `loadPyodide()` has resolved, and that call first
+ * fetches the 9.6 MB wasm and the 7.1 MB stdlib. So without this they sit behind a barrier they
+ * do not need, and the download begins only once the boot has finished
+ * (docs/METRICS_AND_UX_PLAN.md section 1).
+ *
+ * [measured] The obvious version of this -- `<link rel="preload">` in index.html -- does not
+ * work and is not merely useless: a document's preload cache does not serve a *worker's* fetch,
+ * so Chrome fetched all 17 MB a second time and logged "preloaded ... but not used". Hence the
+ * interception here, in the same context as the fetch it is feeding.
+ *
+ * Matching is by file name rather than by whole URL, because the string `loadPackage` builds
+ * from `indexURL` need not be character-for-character what this function built. Anything that
+ * goes wrong -- no manifest, a failed fetch -- falls back to the network, which is what would
+ * have happened anyway. Returns a function that puts the real `fetch` back.
+ */
+async function prefetchWheels(indexUrl: string): Promise<() => void> {
+  const base = indexUrl.endsWith("/") ? indexUrl : `${indexUrl}/`;
+  let names: string[];
+  try {
+    const response = await fetch(`${base}wheels.json`);
+    if (!response.ok) return () => {};
+    names = (await response.json()) as string[];
+  } catch {
+    return () => {};
+  }
+  if (names.length === 0) return () => {};
+
+  // Resolves to null rather than rejecting, so a failed prefetch costs a re-fetch and not a
+  // failed boot.
+  const pending = new Map<string, Promise<Response | null>>();
+  for (const name of names) {
+    pending.set(
+      name,
+      fetch(`${base}${name}`).then(
+        (response) => (response.ok ? response : null),
+        () => null,
+      ),
+    );
+  }
+
+  const original = self.fetch.bind(self);
+  self.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+    const url =
+      typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
+    for (const [name, promise] of pending) {
+      if (!url.endsWith(name)) continue;
+      pending.delete(name);
+      return promise.then((response) =>
+        response === null ? original(input, init) : response.clone(),
+      );
+    }
+    return original(input, init);
+  }) as typeof fetch;
+
+  return () => {
+    self.fetch = original;
+  };
+}
+
 async function init(
   pyodideUrl: string,
   indexUrl: string,
@@ -55,6 +118,9 @@ async function init(
 
   status("booting", "Starting the Python runtime");
   const module = await import(/* @vite-ignore */ pyodideUrl);
+  // The wheels are wanted after the boot and depend on nothing in it, so the transfer starts
+  // here and overlaps it; see prefetchWheels.
+  const restoreFetch = await prefetchWheels(indexUrl);
   // Both archives are wanted the moment the wheels are in, and neither depends on the
   // interpreter existing, so they are asked for now and awaited later.
   const archive = download(archiveUrl);
@@ -68,7 +134,11 @@ async function init(
   timings.boot = since();
 
   status("packages", "Loading numpy and scipy");
-  await pyodide.loadPackage(["numpy", "scipy"]);
+  try {
+    await pyodide.loadPackage(["numpy", "scipy"]);
+  } finally {
+    restoreFetch();
+  }
   timings.packages = since();
 
   status("importing", "Loading AutoCircuit");

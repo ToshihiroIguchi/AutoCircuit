@@ -66,7 +66,14 @@ const ask = (request) => JSON.parse(handle(JSON.stringify(request)));
 console.log("version");
 const version = ask({ op: "version" });
 check("version answers", version.ok === true, JSON.stringify(version));
-check("bridge version is 4", version.result?.bridge === 4);
+check("bridge version is 5", version.result?.bridge === 5);
+check(
+  "the model-selection menu comes from the core's own registry",
+  JSON.stringify((version.result?.criteria ?? []).map((c) => c.name)) ===
+    JSON.stringify(["aic", "aicc", "bic", "caic", "hqc", "waic", "ftest"]),
+  JSON.stringify(version.result?.criteria),
+);
+check("and names its default, which the page adopts", version.result?.default_criterion === "aic");
 check(
   "all four readers are present",
   JSON.stringify(version.result?.formats) ===
@@ -248,6 +255,50 @@ check(
 check("nothing is claimed partial when nothing was cut short", report?.refit_progress === null);
 check("it recommends a candidate", typeof report?.recommended === "string", JSON.stringify(report?.recommended));
 check("the Pareto front is not empty", (report?.pareto?.length ?? 0) > 0);
+check("it ran under the default criterion, since none was named", report?.criterion === "aic");
+check("and labels the column its scores are in", report?.score_label === "AIC", report?.score_label);
+check(
+  "every row carries all six scores, not only the one that ranked it",
+  report?.pareto?.every((row) =>
+    ["aic", "aicc", "bic", "caic", "hqc", "waic"].every((name) => name in row),
+  ) === true,
+  JSON.stringify(report?.pareto?.[0]),
+);
+check(
+  "the ranking really is the named criterion's",
+  report?.pareto?.every((row) => row.score === row.aic) === true,
+  JSON.stringify(report?.pareto?.map((row) => [row.score, row.aic])),
+);
+
+// The F-test is the one choice that is not a score, so it is the one worth driving end to end:
+// it must rank by AIC, label the column AIC, and still name a choice of its own.
+const tested = ask({
+  op: "discover_start",
+  spectrum: simulated,
+  pool: ["R", "C", "L"],
+  exhaustive_limit: 3,
+  restarts: 1,
+  criterion: "ftest",
+});
+check("a search can name its criterion", tested.ok === true, JSON.stringify(tested.error));
+check("an F-test search runs to the end", drive(tested.result.job) === "done");
+const testedReport = ask({ op: "discover_report", job: tested.result.job }).result;
+check("it reports the criterion it was asked for", testedReport?.criterion === "ftest");
+check(
+  "and ranks by AIC, because a test between two models is not an axis",
+  testedReport?.score_label === "AIC" &&
+    testedReport?.pareto?.every((row) => row.score === row.aic) === true,
+  testedReport?.score_label,
+);
+check(
+  "it still names what the test chose",
+  typeof testedReport?.by_criterion === "string",
+  JSON.stringify(testedReport?.by_criterion),
+);
+check(
+  "an unknown criterion is an error response rather than a silent default",
+  ask({ op: "discover_start", spectrum: simulated, criterion: "r-squared" }).ok === false,
+);
 
 const cancelled = ask({
   op: "discover_start",

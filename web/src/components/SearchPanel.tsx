@@ -2,9 +2,14 @@
 // controls, a run button, and the state-dependent text under it -- except a search is a job, not
 // an interactive request, so the button toggles into Cancel instead of just showing "busy".
 
+import type { CriterionWire } from "../core/types";
 import { MAX_WORKERS } from "../worker/pool";
 
 export interface SearchPanelProps {
+  /** The model-selection menu, from the running core's own registry rather than from here. */
+  criteria: CriterionWire[];
+  criterion: string;
+  onCriterion: (value: string) => void;
   poolNames: string[];
   poolName: string;
   onPoolName: (name: string) => void;
@@ -30,6 +35,7 @@ const WEIGHTINGS = ["modulus", "proportional", "unit"];
 
 export function SearchPanel(props: SearchPanelProps) {
   const locked = props.disabled || props.running;
+  const chosen = props.criteria.find((entry) => entry.name === props.criterion) ?? null;
 
   return (
     <section className="search-panel">
@@ -86,6 +92,20 @@ export function SearchPanel(props: SearchPanelProps) {
             ))}
           </select>
         </label>
+        <label title={chosen?.note ?? ""}>
+          Criterion
+          <select
+            value={props.criterion}
+            disabled={locked}
+            onChange={(event) => props.onCriterion(event.target.value)}
+          >
+            {props.criteria.map((entry) => (
+              <option key={entry.name} value={entry.name}>
+                {entry.label}
+              </option>
+            ))}
+          </select>
+        </label>
         <label>
           Seed
           <input
@@ -119,6 +139,19 @@ export function SearchPanel(props: SearchPanelProps) {
         Exhaustive search only: every topology with up to this many elements from the pool is
         evaluated, and nothing above the limit is searched at all.
       </p>
+
+      {/* The criterion is a search setting rather than a view of the answer, and it has to be
+          said out loud: it also ranks the shortlist, so it decides which topologies get a
+          full-budget fit at all. Re-sorting a finished report by another criterion would be
+          re-sorting a list whose members a different criterion had chosen. */}
+      {chosen !== null && (
+        <p className="search-panel__hint search-panel__hint--criterion">
+          <strong>{chosen.label}:</strong> {chosen.note} It ranks the results and the shortlist —
+          so it is part of the search, not a view of it. It does not change the recommendation,
+          which is the simplest model that fits as well as any <em>and</em> whose parameters the
+          data resolves.
+        </p>
+      )}
 
       <label className="search-panel__skeleton">
         <input

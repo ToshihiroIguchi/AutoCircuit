@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import textwrap
 import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -29,6 +30,7 @@ from autocircuit.core.fit import FitResult, fit, report_dict
 from autocircuit.core.simulate import log_frequencies, simulate
 from autocircuit.core.spectrum import Spectrum
 from autocircuit.core.spice import to_netlist
+from autocircuit.core.stats import CRITERIA, CRITERION_LABELS, CRITERION_NOTES, DEFAULT_CRITERION
 from autocircuit.core.validate import lin_kk
 from autocircuit.io import read as read_spectrum
 from autocircuit.io import write_csv, write_zview
@@ -207,6 +209,28 @@ def _skeleton_plan(skeleton: str, exhaustive_limit: int | None, max_candidates: 
     )
 
 
+def cmd_criteria(args: argparse.Namespace) -> int:
+    """Explain the model-selection criteria, so a choice is not made from a name alone."""
+    print(_criterion_help())
+    return 0
+
+
+def _criterion_help() -> str:
+    """The text of that, kept separate so a test can read it without capturing stdout."""
+    width = max(len(label) for label in CRITERION_LABELS.values())
+    lines = ["Model-selection criteria (--criterion):", ""]
+    for name in CRITERIA:
+        head = f"  {CRITERION_LABELS[name]:<{width}}  ({name})"
+        lines.append(head)
+        lines.extend(textwrap.wrap(CRITERION_NOTES[name], 88, initial_indent="      ",
+                                   subsequent_indent="      "))
+        lines.append("")
+    lines.append("The recommendation follows none of them: it is the simplest model that fits")
+    lines.append("as well as any *and* whose parameters the data resolves. A criterion changes")
+    lines.append("the ranking beside it, not that rule.")
+    return "\n".join(lines)
+
+
 def cmd_discover(args: argparse.Namespace) -> int:
     spectrum = _load(args)
     print(_describe(spectrum))
@@ -237,6 +261,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
         max_candidates=args.max_candidates,
         workers=args.workers,
         feasibility_filter=not args.no_feasibility_filter,
+        criterion=args.criterion,
         on_progress=_progress_reporter() if args.progress else None,
         generations=args.generations,
         population=args.population,
@@ -553,6 +578,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="inject a known circuit into the initial population; repeatable",
     )
     p_disc.add_argument("--seed", type=int, default=0)
+    p_disc.add_argument(
+        "--criterion", choices=list(CRITERIA), default=DEFAULT_CRITERION,
+        help="model-selection rule for the ranking, the Pareto front and the shortlist "
+        "(default %(default)s). It does not change the recommendation, which is a rule about "
+        "which parameters the data resolves; 'ftest' is a test rather than a score, so it "
+        "ranks by AIC and then tests each step up the front. 'autocircuit criteria' explains "
+        "each one",
+    )
     p_disc.add_argument("--time-limit", type=float, help="wall-clock budget in seconds")
     p_disc.add_argument("--no-validate", action="store_true")
     _add_output_arguments(p_disc)
@@ -632,6 +665,12 @@ def build_parser() -> argparse.ArgumentParser:
     # elements
     p_el = subparsers.add_parser("elements", help="list the available circuit elements")
     p_el.set_defaults(func=cmd_elements)
+
+    # criteria
+    p_crit = subparsers.add_parser(
+        "criteria", help="explain the model-selection criteria discover can rank by"
+    )
+    p_crit.set_defaults(func=cmd_criteria)
 
     return parser
 

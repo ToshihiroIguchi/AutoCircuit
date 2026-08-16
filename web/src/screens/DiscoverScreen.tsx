@@ -9,11 +9,17 @@
 // comes back.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { CatalogueWire, LoadedSpectrum, ReportWire } from "../core/types";
+import type {
+  CatalogueWire,
+  CriterionWire,
+  LoadedSpectrum,
+  ReportWire,
+} from "../core/types";
 import { idleProgress, SearchRun, type SearchProgress } from "../core/search";
 import { BridgeClient, BridgeError, type SearchOptions } from "../worker/client";
 import { defaultPoolSize } from "../worker/pool";
 import type { SearchPool } from "../worker/pool";
+import { CircuitPreview } from "../components/CircuitPreview";
 import { ParetoTable } from "../components/ParetoTable";
 import { SearchPanel } from "../components/SearchPanel";
 import { SearchProgressPanel } from "../components/SearchProgress";
@@ -43,10 +49,22 @@ export interface DiscoverScreenProps {
    */
   settings: SearchSettings;
   onSettings: (change: Partial<SearchSettings>) => void;
+  /** The model-selection menu the loaded core offers; empty until the worker is ready. */
+  criteria: CriterionWire[];
   /** A finished search, for the Report screen. Null while one is running, or after a cancel. */
   onReport: (
     discovery: { report: ReportWire; options: SearchOptions; workers: number } | null,
   ) => void;
+  /**
+   * Take one of these topologies over to the Fit screen.
+   *
+   * **The topology, and not the fit.** The discovered parameter values are not carried across
+   * as a starting guess, because this fitter has none: pressing Fit there re-runs the same
+   * global search from the same data-derived interval and lands in the same place. Carrying
+   * numbers over would make a screen that says "these do not seed the fit" look as though they
+   * did (docs/METRICS_AND_UX_PLAN.md section 6).
+   */
+  onFitCircuit: (circuit: string) => void;
 }
 
 /** Everything the search panel holds. Every field is an argument `discover` has too, except
@@ -58,6 +76,16 @@ export interface SearchSettings {
   workers: number;
   seed: number;
   weighting: string;
+  /**
+   * Which model-selection rule ranks the answer -- and the shortlist.
+   *
+   * A search setting, not a display option: it decides which topologies earn a full-budget
+   * refit, so a finished report cannot be re-sorted into what another criterion would have
+   * produced. The initial value here is a placeholder until the worker answers with the core's
+   * own default (`App` adopts it); hard-coding a different one would be this file quietly
+   * disagreeing with the CLI.
+   */
+  criterion: string;
 }
 
 export function defaultSearchSettings(): SearchSettings {
@@ -68,6 +96,7 @@ export function defaultSearchSettings(): SearchSettings {
     workers: defaultPoolSize(),
     seed: 0,
     weighting: "modulus",
+    criterion: "aic",
   };
 }
 
@@ -83,9 +112,11 @@ export function DiscoverScreen({
   acquirePool,
   settings,
   onSettings,
+  criteria,
   onReport,
+  onFitCircuit,
 }: DiscoverScreenProps) {
-  const { poolName, exhaustiveLimit, useSkeleton, workers, seed, weighting } = settings;
+  const { poolName, exhaustiveLimit, useSkeleton, workers, seed, weighting, criterion } = settings;
   const [catalogue, setCatalogue] = useState<CatalogueWire | null>(null);
 
   const [progress, setProgress] = useState<SearchProgress>(idleProgress());
@@ -93,6 +124,9 @@ export function DiscoverScreen({
   const [report, setReport] = useState<ReportWire | null>(null);
   const [stoppedEarly, setStoppedEarly] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Which front row is drawn above the table. Null until a report arrives, then the recommended
+  // one -- the row this report is actually about.
+  const [picked, setPicked] = useState<string | null>(null);
 
   // The pool is not built at page load: four more Pyodide workers, each ~1.5 s and its own copy
   // of numpy and scipy, would tax every visitor who never presses Discover, on top of the ~13 s
@@ -132,6 +166,7 @@ export function DiscoverScreen({
       exhaustiveLimit,
       weighting,
       seed,
+      criterion,
     };
 
     const run = new SearchRun(client, pool, spectrum.current, options, setProgress);
@@ -144,6 +179,7 @@ export function DiscoverScreen({
       if (result === null) setStoppedEarly(true);
       else {
         setReport(result);
+        setPicked(result.recommended ?? result.pareto[0]?.circuit ?? null);
         onReport({ report: result, options, workers });
       }
     } catch (err) {
@@ -152,7 +188,7 @@ export function DiscoverScreen({
       setRunning(false);
       runRef.current = null;
     }
-  }, [spectrum, running, workers, catalogue, poolName, useSkeleton, skeleton, exhaustiveLimit, weighting, seed, client, acquirePool, onReport]);
+  }, [spectrum, running, workers, catalogue, poolName, useSkeleton, skeleton, exhaustiveLimit, weighting, seed, criterion, client, acquirePool, onReport]);
 
   const cancelSearch = useCallback(() => {
     void runRef.current?.cancel();
@@ -174,6 +210,9 @@ export function DiscoverScreen({
     <div className="discover-screen">
       <RuntimeNotice ready={ready} />
       <SearchPanel
+        criteria={criteria}
+        criterion={criterion}
+        onCriterion={(value) => onSettings({ criterion: value })}
         poolNames={catalogue === null ? [poolName] : Object.keys(catalogue.pools)}
         poolName={poolName}
         onPoolName={(value) => onSettings({ poolName: value })}
@@ -217,10 +256,42 @@ export function DiscoverScreen({
             </p>
           )}
 
+          {/* The picture of whichever row is selected, above the numbers rather than beside
+              them: a topology string is what the search *found*, and reading `p(R1,C1-R2)` off
+              a table is a translation the reader should not have to do. It is the same renderer
+              the Fit screen edits, in read-only mode. */}
+          <section className="discover-report__picked">
+            <h2 className="panel-title">
+              Selected circuit{picked === null ? "" : ": "}
+              {picked !== null && <code>{picked}</code>}
+            </h2>
+            <CircuitPreview client={client} ready={ready} circuit={picked} />
+            {picked !== null && (
+              <div className="discover-report__handoff">
+                <button
+                  type="button"
+                  className="discover-report__to-fit"
+                  onClick={() => onFitCircuit(picked)}
+                >
+                  Fit this circuit
+                </button>
+                <span className="discover-report__handoff-note">
+                  Takes the topology to the Fit screen, not the fitted values: this fitter uses
+                  no starting guess, so refitting there re-runs the same global search and lands
+                  in the same place.
+                </span>
+              </div>
+            )}
+          </section>
+
           <ParetoTable
             title="Pareto front (accuracy versus complexity)"
             rows={report.pareto}
             recommended={report.recommended}
+            byCriterion={report.by_criterion}
+            scoreLabel={report.score_label}
+            selected={picked}
+            onSelect={setPicked}
           />
 
           <p className="discover-report__note">

@@ -57,6 +57,13 @@ from autocircuit.core.elements import DEFAULT_POOL, REGISTRY
 from autocircuit.core.enumerate import DEFAULT_DEGENERACY_BUDGET
 from autocircuit.core.fit import Weighting
 from autocircuit.core.spectrum import Spectrum
+from autocircuit.core.stats import (
+    CRITERIA,
+    CRITERION_LABELS,
+    DEFAULT_CRITERION,
+    SCORE_CRITERIA,
+    Criterion,
+)
 from autocircuit.core.wire import encode_float
 
 #: Screens handed out per round trip. The same figure the desktop pool uses, because the batch
@@ -107,6 +114,7 @@ class DiscoveryJob:
         feasibility_budget: int = DEFAULT_DEGENERACY_BUDGET,
         weighting: Weighting = "modulus",
         seed: int = 0,
+        criterion: Criterion = DEFAULT_CRITERION,
         final_restarts: int = 5,
         n_refine: int | None = None,
         screen_chunk: int = SCREEN_CHUNK,
@@ -120,6 +128,10 @@ class DiscoveryJob:
         self.pool = tuple(pool)
         self.weighting: Weighting = weighting
         self.seed = seed
+        if criterion not in CRITERIA:
+            known = ", ".join(CRITERIA)
+            raise ValueError(f"unknown model-selection criterion {criterion!r}; known: {known}")
+        self.criterion: Criterion = criterion
         self.final_restarts = final_restarts
         self.n_refine = REFINE_DEFAULT["exhaustive"] if n_refine is None else n_refine
         self.frame = None if skeleton is None else Circuit.parse(skeleton)
@@ -262,6 +274,7 @@ class DiscoveryJob:
             restarts=self.final_restarts,
             seed=self.seed,
             chunk=self.refit_chunk,
+            criterion=self.criterion,
         )
         try:
             self._batch = next(self._refit)
@@ -289,7 +302,7 @@ class DiscoveryJob:
     @property
     def front(self) -> list[Candidate]:
         """The Pareto front of what has been refitted so far."""
-        return pareto_front(self._candidates)
+        return pareto_front(self._candidates, self.criterion)
 
     # -- Finishing ---------------------------------------------------------------------------
 
@@ -348,10 +361,10 @@ class DiscoveryJob:
             # Nothing was refitted, not even opened -- but the shortlist size is knowable
             # without fitting, and "0 of 37" is a far more useful thing to report than "0".
             self._open_refit()
-        candidates = sorted(self._candidates, key=lambda c: c.aicc)
+        candidates = sorted(self._candidates, key=lambda c: c.score(self.criterion))
         return DiscoveryResult(
             candidates=candidates,
-            pareto=pareto_front(candidates),
+            pareto=pareto_front(candidates, self.criterion),
             n_evaluated=len(self._scored),
             generations=0,
             elapsed_s=time.perf_counter() - self.started,
@@ -362,6 +375,7 @@ class DiscoveryJob:
             refit_progress=(
                 None if self.finished else (len(candidates), self._shortlisted)
             ),
+            criterion=self.criterion,
         )
 
 
@@ -552,21 +566,31 @@ def current(job_id: str) -> DiscoveryJob:
     return _CURRENT
 
 
-def candidate_row(candidate: Candidate) -> dict[str, Any]:
+def candidate_row(
+    candidate: Candidate, criterion: Criterion = DEFAULT_CRITERION
+) -> dict[str, Any]:
     """One line of a results table: what it is, how well it fits, and what it cannot pin down.
 
     ``n_unresolved`` travels beside the scores rather than behind a details view because a
-    lower AICc bought with a parameter the data cannot resolve is the trap this whole project
+    lower score bought with a parameter the data cannot resolve is the trap this whole project
     is built to avoid presenting as a win.
+
+    Every criterion is on the row, not only the chosen one: they cost nothing to carry, the
+    front table can then re-label its column without another round trip, and ``score`` names
+    which of them the ordering came from.
     """
     circuit = candidate.circuit
+    statistics = candidate.result.statistics
     return {
         "circuit": circuit.to_string(),
         "canonical": circuit.canonical_form(),
         "n_elements": len(circuit.leaves),
         "n_params": circuit.n_params,
         "complexity": encode_float(candidate.complexity),
-        "aicc": encode_float(candidate.aicc),
+        "criterion": criterion,
+        "score": encode_float(candidate.score(criterion)),
+        **{name: encode_float(statistics.criterion_value(name)) for name in SCORE_CRITERIA},
+        "p_waic": encode_float(statistics.p_waic),
         "chi2_reduced": encode_float(candidate.result.chi2_reduced),
         "n_unresolved": candidate.n_unresolved,
         "unresolved": [
@@ -651,8 +675,16 @@ def report_payload(job: DiscoveryJob) -> dict[str, Any]:
         "stopped": job.stopped,
         "completeness": result.completeness(),
         "summary": result.summary(job.spectrum),
-        "candidates": [candidate_row(c) for c in result.candidates],
-        "pareto": [candidate_row(c) for c in result.pareto],
+        "criterion": result.criterion,
+        "criterion_label": CRITERION_LABELS[result.criterion],
+        "score_label": result.score_label,
+        # What the criterion picks, which is not what the report recommends -- the front table
+        # marks both, because a reader shown only one of them will read it as the other.
+        "by_criterion": (
+            None if result.by_criterion is None else result.by_criterion.circuit.to_string()
+        ),
+        "candidates": [candidate_row(c, result.criterion) for c in result.candidates],
+        "pareto": [candidate_row(c, result.criterion) for c in result.pareto],
         "recommended": (
             None if result.recommended is None else result.recommended.circuit.to_string()
         ),
@@ -709,3 +741,10 @@ def cast_weighting(value: Any) -> Weighting:
     if value not in ("modulus", "unit", "proportional"):
         raise ValueError(f"unknown weighting {value!r}")
     return cast(Weighting, value)
+
+
+def cast_criterion(value: Any) -> Criterion:
+    """A model-selection criterion from the wire, checked before it reaches the search."""
+    if value not in CRITERIA:
+        raise ValueError(f"unknown model-selection criterion {value!r}")
+    return cast(Criterion, value)

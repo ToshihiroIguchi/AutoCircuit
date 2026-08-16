@@ -67,9 +67,18 @@ still *displays* what you asked for.
 | screen | what it does |
 |--------|--------------|
 | Data | drop a file, see it plotted, trim its frequency window, read the Lin-KK verdict |
+| Discover | search the topology space against the data: pool, element limit, model-selection criterion, optional skeleton, streamed progress, cancel, Pareto front, and the schematic of whichever front row you pick |
 | Fit | draw a circuit, watch it against the data, fit it — with no initial values |
-| Discover | search the topology space against the data: pool, element limit, optional skeleton, streamed progress, cancel, Pareto front |
 | Report | read the answer: equivalence classes as classes, what a skeleton excluded, the downloads, the DRT probe |
+
+The tab order is the order the work runs in, and it changed once: Fit used to come before
+Discover, because the dependency ran that way — the circuit drawn on the Fit screen is what a
+constrained search asserts as its skeleton. It still does. What changed is that Discover now
+hands a topology *forward* to Fit ("Fit this circuit"), which made the forward direction the
+common one. That button carries the topology and not the fitted values: this fitter takes no
+starting guess, so refitting on the Fit screen re-runs the same global search and lands in the
+same place, and carrying numbers over would make a screen that says "these do not seed the fit"
+look as though they did.
 
 The Discover screen is a job, not a request — a real search takes minutes even in the browser
 (`docs/WEB_UI_PLAN.md` §1) — and its worker arrangement has two roles rather than one. One

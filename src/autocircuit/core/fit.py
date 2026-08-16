@@ -59,7 +59,9 @@ _RESTART_SPREAD_WARNING = 0.05
 #: Version of :meth:`FitResult.to_wire`. A worker and its orchestrator can be different builds
 #: -- a browser tab holding an old Pyodide bundle, say -- and a silently mismatched payload
 #: would surface as a wrong report rather than as an error.
-WIRE_VERSION = 1
+#:
+#: 2 (2026-08-16) added CAIC, HQC, WAIC and its effective parameter count to ``Statistics``.
+WIRE_VERSION = 2
 
 
 def weight_vectors(
@@ -287,9 +289,16 @@ class FitResult:
                 "n_params": self.statistics.n_params,
                 "ssr": self.statistics.ssr,
                 "chi2_reduced": self.statistics.chi2_reduced,
+                # Every criterion, always -- a report file outlives the session that chose one,
+                # and a reader who wants BIC should not have to refit to get it.
                 "aic": self.statistics.aic,
                 "aicc": self.statistics.aicc,
                 "bic": self.statistics.bic,
+                "caic": self.statistics.caic,
+                "hqc": self.statistics.hqc,
+                "waic": self.statistics.waic,
+                "p_waic": self.statistics.p_waic,
+                "rank": self.statistics.rank,
             },
             "restart_spread": self.restart_spread,
             "warnings": list(self.warnings),
@@ -315,12 +324,18 @@ class FitResult:
             tag = " (fixed)" if name in self.fixed else ""
             rel = f"{err / abs(value):.1%}" if value != 0 and math.isfinite(err) else "-"
             lines.append(f"{name:<14}{value:>14.6g}{err:>14.3g}{rel:>9}  {spec.unit}{tag}")
+        st = self.statistics
         lines += [
             "",
-            f"chi^2 (reduced) : {self.statistics.chi2_reduced:.6g}",
-            f"AICc            : {self.statistics.aicc:.6g}",
-            f"Data points     : {self.statistics.n_data // 2}"
-            f"   Free parameters: {self.statistics.n_params}",
+            f"chi^2 (reduced) : {st.chi2_reduced:.6g}",
+            f"AIC  {st.aic:>13.6g}   AICc {st.aicc:>13.6g}   BIC  {st.bic:>13.6g}",
+            f"CAIC {st.caic:>13.6g}   HQC  {st.hqc:>13.6g}   WAIC {st.waic:>13.6g}",
+            # WAIC's penalty counts what the data resolves; printing it beside the nominal count
+            # is what makes the two numbers above readable as the same kind of thing.
+            f"WAIC effective parameters: {st.p_waic:.3g} of {st.n_params}"
+            f"   (Laplace approximation)",
+            f"Data points     : {st.n_data // 2}"
+            f"   Free parameters: {st.n_params}",
         ]
         if spectrum is not None:
             lines.append(f"RMS relative |Z| error : {self.relative_error(spectrum):.4%}")

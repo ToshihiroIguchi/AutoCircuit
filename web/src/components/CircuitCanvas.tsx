@@ -17,7 +17,7 @@
 // is ever drawn as a conductor. It also keeps the handles as real <button>s -- focusable,
 // labelled, drop targets -- rather than SVG shapes wearing ARIA roles.
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { DragEvent } from "react";
 import type { CircuitNodeWire } from "../core/types";
 import type { SlotPlacement } from "../core/schematic";
@@ -32,6 +32,14 @@ export interface CircuitCanvasProps {
   armedCode: string | null;
   /** True while an edit is in flight; the canvas stops accepting new ones. */
   busy: boolean;
+  /**
+   * Draw the circuit and nothing else: no slots, no delete buttons, no drop targets.
+   *
+   * A prop rather than a second component. Two renderers would be two chances for the picture
+   * shown beside a search result to disagree with the editable one, and `npm run schematic`
+   * checks the geometry once (`docs/SCHEMATIC_PLAN.md`).
+   */
+  readOnly?: boolean;
   onSelect: (path: number[]) => void;
   onInsert: (
     path: number[],
@@ -55,20 +63,59 @@ function droppedCode(event: DragEvent): string | null {
   return code === "" ? null : code;
 }
 
+/** Claim a drop only when the drag really carries an element, so a file drop still loads. */
+function allowElementDrop(event: DragEvent): void {
+  if (event.dataTransfer.types.includes(DRAG_TYPE)) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  }
+}
+
 function samePath(a: number[] | null, b: number[]): boolean {
   return a !== null && a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
 export function CircuitCanvas(props: CircuitCanvasProps) {
   const layout = useMemo(() => layoutSchematic(props.tree), [props.tree]);
-  const { armedCode, busy, onSelect, onRemove } = props;
+  const { armedCode, busy, onSelect, onRemove, readOnly = false } = props;
+  // True from the moment an element leaves the palette until the drag ends, so every target can
+  // show itself. Without it a slot looks the same whether or not it will accept what is under
+  // the pointer, and the small `+` has to be guessed at -- which is why dragging read as
+  // missing when it had been there since step 3 (`docs/METRICS_AND_UX_PLAN.md` section 7).
+  const [dragging, setDragging] = useState(false);
+
+  useEffect(() => {
+    if (readOnly) return undefined;
+    // `dragenter` on the window, not `dragstart` here: the drag starts in the palette, which is
+    // not a child of this element, and `dragstart` does not reach it.
+    function onEnter(event: globalThis.DragEvent): void {
+      if (event.dataTransfer?.types.includes(DRAG_TYPE) === true) setDragging(true);
+    }
+    function onEnd(): void {
+      setDragging(false);
+    }
+    window.addEventListener("dragenter", onEnter);
+    window.addEventListener("dragend", onEnd);
+    window.addEventListener("drop", onEnd);
+    return () => {
+      window.removeEventListener("dragenter", onEnter);
+      window.removeEventListener("dragend", onEnd);
+      window.removeEventListener("drop", onEnd);
+    };
+  }, [readOnly]);
+
+  const classes = [
+    "cc",
+    armedCode !== null && !readOnly ? "cc--armed" : "",
+    dragging ? "cc--dragging" : "",
+    readOnly ? "cc--read-only" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <div className="canvas">
-      <div
-        className={`cc${armedCode === null ? "" : " cc--armed"}`}
-        style={{ width: layout.width, height: layout.height }}
-      >
+      <div className={classes} style={{ width: layout.width, height: layout.height }}>
         <svg
           className="cc__paint"
           width={layout.width}
@@ -103,20 +150,36 @@ export function CircuitCanvas(props: CircuitCanvasProps) {
 
         {layout.elements.map((element) => {
           const selected = samePath(props.selectedPath, element.path);
+          // Dropping onto a symbol puts the dropped element in *parallel* with it -- the
+          // operation the || button already offers, and the one a drag aimed at a symbol is
+          // aiming at. Series insertion keeps its own targets, between the symbols, where a
+          // drag aimed at a gap in the wire lands.
+          function receive(event: DragEvent): void {
+            event.preventDefault();
+            const code = droppedCode(event);
+            if (code !== null && !busy) props.onInsert(element.path, "parallel", "after", code);
+          }
           return (
             <div
               key={element.path.join(".")}
               className={`cc-el${selected ? " cc-el--selected" : ""}`}
               style={{ left: element.x, top: element.y, width: element.w, height: element.h }}
+              onDragOver={readOnly ? undefined : allowElementDrop}
+              onDrop={readOnly ? undefined : receive}
             >
               <button
                 type="button"
                 className="cc-el__pick"
                 onClick={() => onSelect(element.path)}
-                title={`${element.name} (${element.code})`}
+                title={
+                  readOnly
+                    ? `${element.name} (${element.code})`
+                    : `${element.name} (${element.code}) — drop an element here to put it in parallel`
+                }
                 aria-pressed={selected}
                 aria-label={`Select ${element.label}, ${element.name}`}
               />
+              {readOnly ? null : (
               <span className="cc-el__tools">
                 <button
                   type="button"
@@ -145,13 +208,14 @@ export function CircuitCanvas(props: CircuitCanvasProps) {
                   &times;
                 </button>
               </span>
+              )}
             </div>
           );
         })}
 
-        {layout.slots.map((slot) => (
-          <Slot key={slot.key} slot={slot} {...props} />
-        ))}
+        {readOnly
+          ? null
+          : layout.slots.map((slot) => <Slot key={slot.key} slot={slot} {...props} />)}
       </div>
     </div>
   );
@@ -175,15 +239,6 @@ function Slot({
     if (code !== null) place(code);
   }
 
-  function handleDragOver(event: DragEvent): void {
-    // Only claim the drop when the drag really carries an element, so a file dragged onto the
-    // page still reaches the window-level handler that loads it.
-    if (event.dataTransfer.types.includes(DRAG_TYPE)) {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = "copy";
-    }
-  }
-
   const width = branch ? 34 : GEOMETRY.slotSize;
   const height = branch ? GEOMETRY.chipH : GEOMETRY.slotSize;
   const what = branch ? "as a new branch of" : slot.position;
@@ -194,7 +249,7 @@ function Slot({
       style={{ left: slot.x - width / 2, top: slot.y - height / 2, width, height }}
       disabled={busy}
       onClick={() => armedCode !== null && place(armedCode)}
-      onDragOver={handleDragOver}
+      onDragOver={allowElementDrop}
       onDrop={handleDrop}
       title={
         armedCode === null

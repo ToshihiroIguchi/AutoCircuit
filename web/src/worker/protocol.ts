@@ -8,7 +8,7 @@
 import type { VersionsWire } from "../core/types";
 
 /** Protocol version this bundle speaks; the worker refuses a core that answers differently. */
-export const BRIDGE_VERSION = 4;
+export const BRIDGE_VERSION = 5;
 
 export type WorkerRequest =
   | {
