@@ -242,11 +242,16 @@ search returns the same Pareto front row for row, and every file it downloads is
 same Python function `autocircuit fit --json`, `--spice` and `discover --json` use. Example
 spectra are built into the site, so there is something to try without a measurement of your own.
 
-One honest number: a first visit has to fetch and start a Python runtime, and that is 41 MB.
-Measured from the public URL on the development machine, a cold visit reached a usable page in
-21 s, and a later one with the runtime cached in 5–11 s — that spread is the machine's own load,
-not the network. After that a fit takes a second or two, as it does on the command line. See
-`web/README.md` to build or serve it yourself.
+One honest number: a first visit has to fetch and start a Python runtime, and that is 41 MB — but
+not all of it before the page works. The load is two stages: numpy and the data path first
+(22.1 MB), then scipy and the fitter behind a page that can already read, plot and validate.
+Measured from the public URL on the development machine, in a fresh browser profile: **reading data
+at 18–22 s, fitting at 36–69 s**, and an example clicked 0.4 s after the page appeared was loaded
+the moment the first stage landed — the click waits, you do not. That second range is the link's
+own spread; the same 19 MB took 45 s on one visit and 16 s on another. With the runtime cached both
+stages are seconds. After that a fit takes a second or two, as it does on the command line. See
+`web/README.md` to build or serve it yourself, and `docs/STARTUP_AND_EDITING_PLAN.md` for how the
+staging was measured.
 
 ## Development
 

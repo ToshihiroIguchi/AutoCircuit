@@ -386,4 +386,37 @@ describes.
 round.** §3.1 reasoned from bytes: 18.3 MB of 41 is 45%, so roughly half. The measured local
 improvement is 3.4×, because the bytes were never the whole cost on this machine — installing and
 importing scipy is CPU, and that is what came out of the critical path. The reading over a real
-network will sit between the two, and is §7's job rather than something to claim here.
+network is §7's, and it is a different shape again.
+
+## 7. On the published site
+
+<https://toshihiroiguchi.github.io/AutoCircuit/>, after the deploy. Two cold visits, each in a
+**fresh browser context** — empty HTTP cache, which is what makes them first visits rather than
+reloads — on the development machine's own link:
+
+| | visit 1 | visit 2 |
+|---|---|---|
+| usable for data | **21.67 s** (boot 14.04, numpy 6.44, unpack 0.07, import 0.21) | **18.01 s** (boot 12.35, numpy 5.03, unpack 0.06, import 0.19) |
+| usable for fitting | 68.65 s (scipy 45.04, unpack 0.22, import 1.72) | 36.16 s (scipy 16.30, unpack 0.23, import 1.62) |
+
+**The bytes the page no longer waits for, timed from the same origin in a third fresh context:**
+the scipy wheel is 14.01 MB in **21.06 s** and its overlay 5.00 MB in **2.84 s** — about **24 s of
+transfer that used to sit in front of the first usable moment and now sits behind it**. (numpy for
+comparison: 2.92 MB in 2.18 s, its overlay 0.79 MB in 2.44 s.)
+
+**And the example loads early on the real site, not only on localhost.** Load clicked at **0.40 s**
+after navigation — before Python exists at all — and the spectrum appeared at **18.08 s**, which is
+70 ms after the data stage landed. The click waited; the visitor did not have to.
+
+Three things this run says that the localhost measurement could not:
+
+* **The second stage's spread is the network's, and it is wide** — 45.04 s against 16.30 s for the
+  same 19 MB, minutes apart. This is the same machine and link the rest of this project's cold-start
+  numbers come from, which is exactly why they are always reported as a pair.
+* **No cross-session comparison is available, and none is claimed.** `README.md` recorded 21 s to a
+  usable page for the *previous* build on an earlier day; today's link delivers roughly half the
+  throughput that one implies, so the two numbers cannot be subtracted. What can be compared is
+  what was measured in one sitting: 22.1 MB before the page works instead of 41.0 MB, and 24 s of
+  measured transfer moved out of the way.
+* The version handshake passes — the published core answers 8 and the published bundle speaks 8 —
+  and drag-to-move works in production: `C1-R1-L1` dragged to `L1-C1-R1` on the live page.

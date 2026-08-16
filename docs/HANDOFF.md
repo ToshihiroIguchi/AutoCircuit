@@ -1273,3 +1273,22 @@ process, twenty other tests have already imported scipy.
 
 `npm run check`, `npm run build` and `npm run smoke` all pass; the smoke run now drives both load
 stages in the order the worker does.
+
+### 19.6 On the published site
+
+[measured] Two cold visits in a **fresh browser context** each — empty HTTP cache, so first visits
+rather than reloads — to <https://toshihiroiguchi.github.io/AutoCircuit/> after the deploy: usable
+for data at **21.67 s / 18.01 s**, usable for fitting at **68.65 s / 36.16 s**. The second stage's
+spread is the link's: the same 19 MB took 45.04 s on one visit and 16.30 s on the other, minutes
+apart. Timed on their own from the same origin, the scipy wheel is 14.01 MB in **21.06 s** and its
+overlay 5.00 MB in **2.84 s** — about 24 s of transfer that used to sit in front of the first
+usable moment.
+
+An example clicked **0.40 s** after navigation, before Python existed, appeared at **18.08 s**, 70
+ms after the data stage landed. The version handshake passes (published core 8, published bundle
+8), and a drag-to-move on the live page turned `C1-R1-L1` into `L1-C1-R1`.
+
+**No comparison against the old build's 21 s is available and none is claimed.** That reading is
+from an earlier day; today's link delivers roughly half the throughput it implies, so the two
+cannot be subtracted. What was measured in one sitting is what is claimed: 22.1 MB before the page
+works instead of 41.0 MB, and 24 s of measured transfer moved out of the way.
