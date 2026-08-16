@@ -324,3 +324,55 @@ can only ever fail to find a violation. What actually rules them out is that eac
 counter and its own row, and a row is only ever drawn full when `stateOf` says its stage is
 finished — which it refuses to say on a cancelled run, because a cancelled tier did not complete.
 The measurement is worth having as a check on the wiring; it is not what carries the guarantee.
+
+## 9. On the published site
+
+Repeated against <https://toshihiroiguchi.github.io/AutoCircuit/> after the deploy, on the same
+sample and settings, because a green workflow says the build succeeded and not that the site works:
+
+* the version handshake passes — the published core answers 6 and the published bundle speaks 6;
+* the search runs and reports the same coverage sentence and the same three front rows;
+* the selected row draws its four panels, captioned with the searched spectrum;
+* **zero indicator violations across 56 states** at 100 ms sampling, on a slower machine than §7's;
+* Discover → Fit → Discover leaves the coverage sentence, the front and the plots identical.
+
+One number worth keeping: the cold start on this run was **11.1 s to a usable page**, which sits
+between the two readings gate W3 is reported as (`docs/WEB_UI_PLAN.md`: ~6.6 s rested, ~13 s loaded)
+and was taken on a machine that had just finished a test suite. It is recorded here as a third
+reading rather than used to restate W3.
+
+## 10. What the plots made visible on their first run
+
+Not a defect this phase introduced, and not one it fixes. It is recorded because a feature whose
+first use surfaces something should say what it surfaced.
+
+The recommended row on the reference sample is `p(R1,C1)`, labelled *simplest that fits as well as
+any*, with χ²(reduced) 0.23731 — which reads as healthy in the table. The plot does not: the model's
+|Z| is flat where the data spans three decades, and at the low-frequency end it misses by a factor
+of nearly fifty.
+
+Verified against the core in-process, same pool, limit and seed, to rule out the browser drawing
+something of its own:
+
+| | browser | core |
+|---|---|---|
+| front, AIC | −231.028 / −272.330 / −324.335 | −231.028 / −272.330 / −324.335 |
+| front, χ²(reduced) | 0.23731 / 0.18279 / 0.13180 | 0.23731 / 0.18279 / 0.13180 |
+| recommended | `p(R1,C1)` | `p(R1,C1)` |
+| best by criterion | `p(R1-CPE1,C1)` | `p(R1-CPE1,C1)` |
+| \|Z\| at 0.1 Hz, model / data | 10469.9 / 510661 | 10469.9 / 510661 |
+
+So the picture is the core's own fit, exactly. And the core's own numbers for that fit are **rms
+relative |Z| error 68.467%** and **max |weighted residual| 0.9797**.
+
+That second number is the mechanism. Under modulus weighting the residual of an *underestimate* is
+bounded by 1 — a model can be wrong by any factor below the data and never pay more than unit
+residual for it — so χ² stays small while the fit is nowhere near. The criterion is not being
+misapplied; it is measuring what it measures.
+
+Two things follow, both outside this phase's scope and neither done here:
+
+* The Pareto table shows AIC and χ² but not the rms relative error, which is the number that would
+  have made this legible without a plot. The Fit screen already displays it.
+* Whether "fits as well as any" should be allowed to hold at 68% rms relative error is a question
+  about `core/discover.py`, not about the UI.
