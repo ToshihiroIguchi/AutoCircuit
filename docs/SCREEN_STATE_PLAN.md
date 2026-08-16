@@ -365,14 +365,25 @@ something of its own:
 So the picture is the core's own fit, exactly. And the core's own numbers for that fit are **rms
 relative |Z| error 68.467%** and **max |weighted residual| 0.9797**.
 
-That second number is the mechanism. Under modulus weighting the residual of an *underestimate* is
-bounded by 1 — a model can be wrong by any factor below the data and never pay more than unit
-residual for it — so χ² stays small while the fit is nowhere near. The criterion is not being
-misapplied; it is measuring what it measures.
+That second number is a real property of modulus weighting: the residual of an *underestimate* is
+bounded by 1, so a model sitting any factor below the data never pays more than unit residual for
+it, and χ² stays small while the fit is nowhere near.
 
-Two things follow, both outside this phase's scope and neither done here:
+**Corrected.** The first reading of this was that the recommendation logic might be at fault for
+calling a 68%-error model "simplest that fits as well as any". It is not, and a longer run says
+why. Left unconstrained above three elements — 785 topologies over 30 generations, 753 s — the same
+search on the same sample recommends **`p(C1,R1,C2-R2)` at χ²(reduced) 9.01 × 10⁻⁵**, four orders of
+magnitude better than anything on the three-element front, and groups it with three
+reparameterisations the data cannot choose between. The sample was generated from a four-element
+circuit.
 
-* The Pareto table shows AIC and χ² but not the rms relative error, which is the number that would
-  have made this legible without a plot. The Fit screen already displays it.
-* Whether "fits as well as any" should be allowed to hold at 68% rms relative error is a question
-  about `core/discover.py`, not about the UI.
+So `p(R1,C1)` was the best available *in the space that was searched*, the search was capped at
+three elements because that is what the run asked for, and `complete_up_to`'s sentence says so in as
+many words. The report was honest throughout. What was missing was not correctness but **legibility**:
+AIC −231.028 and χ² 0.23731 in a table give a reader no way to tell "best of a constrained set, and
+still 68% off" from "good fit". The plot shows it in one glance — which is the strongest case this
+phase can make for the feature, and a better one than the defect that was not there.
+
+One thing does follow, outside this phase's scope and not done here: the Pareto table carries AIC and
+χ² but not the rms relative error, which is the number that would have made this legible without a
+plot. The Fit screen already displays it.
