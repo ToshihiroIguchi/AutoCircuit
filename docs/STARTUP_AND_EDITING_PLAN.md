@@ -414,6 +414,12 @@ comparison: 2.92 MB in 2.18 s, its overlay 0.79 MB in 2.44 s.)
 after navigation — before Python exists at all — and the spectrum appeared at **18.08 s**, which is
 70 ms after the data stage landed. The click waited; the visitor did not have to.
 
+A third visit, after the redeploy that took the light-operation list out of the worker (§6), on the
+build that is live now: Load clicked at **0.79 s**, data stage at 16.12 s, the spectrum read at
+**16.16 s** and its **Lin-KK verdict at 16.41 s** — with the second-stage line still on screen —
+and fitting at 26.49 s. Reading *and validating* a spectrum on the published site, ten seconds
+before scipy has finished arriving, is the whole of what the staging was for.
+
 Three things this run says that the localhost measurement could not:
 
 * **The second stage's spread is the network's, and it is wide** — 45.04 s against 16.30 s for the

@@ -1291,6 +1291,10 @@ An example clicked **0.40 s** after navigation, before Python existed, appeared 
 ms after the data stage landed. The version handshake passes (published core 8, published bundle
 8), and a drag-to-move on the live page turned `C1-R1-L1` into `L1-C1-R1`.
 
+A third visit, on the build that is live now (after the redeploy that took the light-operation list
+out of the worker): data at 16.12 s, the spectrum read at **16.16 s** and its **Lin-KK verdict at
+16.41 s** with the second stage still running, fitting at 26.49 s.
+
 **No comparison against the old build's 21 s is available and none is claimed.** That reading is
 from an earlier day; today's link delivers roughly half the throughput it implies, so the two
 cannot be subtracted. What was measured in one sitting is what is claimed: 22.1 MB before the page
