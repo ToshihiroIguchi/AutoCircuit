@@ -115,6 +115,9 @@ print(json.dumps(ask({"op": "version"})))
         "ftest",
     ]
     assert result["default_criterion"] == "aic"
+    # What the worker schedules on: it sends anything not in this list only once scipy is in, and
+    # it reads the list from here rather than keeping its own.
+    assert result["light_operations"] == sorted(LIGHT_OPERATIONS)
     # The fit and DRT wire versions are deliberately absent: they belong to modules that do not
     # exist yet, and inventing them here would be the front end trusting a number nothing checked.
     assert "fit" not in result

@@ -449,6 +449,14 @@ export interface VersionsWire {
   spectrum: number;
   validate: number;
   formats: string[];
+  /**
+   * Which operations the first stage can already answer.
+   *
+   * The worker sends anything else only once scipy is in. It comes from the core because a copy
+   * of the list here could disagree in the direction that matters: an operation the front end
+   * believed was light would be answered "scipy is not installed" instead of answered.
+   */
+  light_operations: string[];
   /** The model-selection menu, from the registry in the running build rather than from here. */
   criteria: CriterionWire[];
   default_criterion: string;

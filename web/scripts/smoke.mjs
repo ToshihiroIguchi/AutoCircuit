@@ -113,6 +113,14 @@ check(
     JSON.stringify(["generic_csv", "keysight", "touchstone", "zview"]),
   JSON.stringify(version.result?.formats),
 );
+check(
+  // The worker reads this to decide what may go straight through before scipy is in, rather than
+  // keeping its own copy of the list -- a copy could say "light" about an operation that is not.
+  "and it names the operations this stage can answer",
+  JSON.stringify(version.result?.light_operations) ===
+    JSON.stringify(["read", "trim", "validate", "version"]),
+  JSON.stringify(version.result?.light_operations),
+);
 pyodide.FS.mkdirTree("/uploads/0");
 pyodide.FS.writeFile("/uploads/0/early.csv", new TextEncoder().encode(CSV));
 const early = ask({ op: "read", path: "/uploads/0/early.csv" });

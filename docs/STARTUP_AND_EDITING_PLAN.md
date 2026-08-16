@@ -337,6 +337,12 @@ What is fetched before the page can read a file went **41.0 MB → 22.1 MB**: th
 than by package) are no longer among them, and the app bundle fell from 1.42 MB to 284 kB
 (gzip 468 kB → 88 kB) with Plotly moved into a chunk fetched when the first plot is drawn.
 
+**The Data screen is not merely reachable during stage B, it is finished.** In a fresh browser
+context on localhost: data stage at 1.05 s, the example read at **1.14 s**, and its **Lin-KK verdict
+at 1.39 s** — with the second-stage line still on screen and scipy still installing. Full readiness
+at 3.79 s. Reading, trimming, plotting and validating are the whole of that screen, and none of
+them waits for the fitter.
+
 And the second half of question 3, which is not a speed measurement at all: clicking **Load** on an
 example **45 ms after the first paint** — before Python exists — now works. The click is accepted,
 the row reads *"capacitor.csv — Waiting for the Python runtime, then reading — you do not have to
@@ -420,3 +426,15 @@ Three things this run says that the localhost measurement could not:
   measured transfer moved out of the way.
 * The version handshake passes — the published core answers 8 and the published bundle speaks 8 —
   and drag-to-move works in production: `C1-R1-L1` dragged to `L1-C1-R1` on the live page.
+
+**The worker kept its own copy of which operations are light, and that copy could be wrong in the
+one direction that matters.** The first version of the staged worker had the four light operation
+names written out in TypeScript, described in its own comment as a scheduling hint that "can only
+cost a wait, never a wrong answer". That was false, and the review that caught it was of the
+comment rather than the code: a wait is what an operation *wrongly called heavy* costs. An
+operation wrongly called **light** is sent straight through, reaches the lazy import in
+`web/light.py` before scipy exists, and comes back as *"scipy is not installed"* — an error message
+about a request that was perfectly valid. The list now travels in the `version` answer, from the
+core that defines it, which is the rule this project already applies to the reader list, the
+element pools and the criteria menu. It is empty until `version` has answered, so the default is
+that everything waits, which is the safe direction.

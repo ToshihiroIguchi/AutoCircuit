@@ -101,13 +101,17 @@ def _op_version(payload: dict[str, Any]) -> dict[str, Any]:
 
     ``criteria`` rides along because it is the same kind of fact as ``formats``: what the
     *running core* offers, not a list the front end keeps its own copy of and has to be
-    remembered to update.
+    remembered to update. ``light_operations`` is there for a sharper version of the same reason
+    -- the worker uses it to decide which requests may go straight through and which wait for the
+    second stage, and a copy of that list in TypeScript would turn one forgotten line into a
+    request answered with "scipy is not installed" instead of an answer.
     """
     return {
         "bridge": BRIDGE_VERSION,
         "spectrum": SPECTRUM_WIRE_VERSION,
         "validate": VALIDATE_WIRE_VERSION,
         "formats": sorted(io.REGISTRY),
+        "light_operations": sorted(LIGHT_OPERATIONS),
         "criteria": [
             {"name": name, "label": CRITERION_LABELS[name], "note": CRITERION_NOTES[name]}
             for name in CRITERIA

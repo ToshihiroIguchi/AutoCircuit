@@ -1274,6 +1274,9 @@ process, twenty other tests have already imported scipy.
 `npm run check`, `npm run build` and `npm run smoke` all pass; the smoke run now drives both load
 stages in the order the worker does.
 
+[measured] On `ubuntu-latest` the Tests workflow ran **761 passed in 585 s** -- the same suite plus
+the nineteen ngspice round-trip tests that skip on this machine -- with `ruff` and `mypy` green.
+
 ### 19.6 On the published site
 
 [measured] Two cold visits in a **fresh browser context** each — empty HTTP cache, so first visits

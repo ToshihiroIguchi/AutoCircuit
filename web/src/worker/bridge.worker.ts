@@ -39,8 +39,18 @@ let uploads = 0;
  */
 let fitting: Promise<void> | null = null;
 
-/** The operations stage A can already answer; everything else waits for stage B. */
-const LIGHT_OPERATIONS = new Set(["version", "read", "trim", "validate"]);
+/**
+ * The operations stage A can already answer; everything else waits for stage B.
+ *
+ * Filled in from the core's own `version` answer rather than written out here. A copy of the list
+ * in TypeScript could disagree in the direction that matters -- an operation this file thought
+ * was light would be sent straight through and answered "scipy is not installed" instead of
+ * answered -- and this project has the same rule for the reader list, the element pools and the
+ * criteria menu: what the running build offers, not what the front end remembers.
+ *
+ * Empty until `version` has answered, which means everything waits. That is the safe direction.
+ */
+let lightOperations = new Set<string>();
 
 function post(message: WorkerResponse): void {
   self.postMessage(message);
@@ -153,6 +163,7 @@ from autocircuit.web import handle
   const answer = JSON.parse(call(JSON.stringify({ op: "version" })));
   if (!answer.ok) throw new Error(answer.error.message);
   const versions = answer.result as VersionsWire;
+  lightOperations = new Set(versions.light_operations);
   if (versions.bridge !== BRIDGE_VERSION) {
     // A cached bundle talking to a freshly deployed core, or the reverse. Saying so is the
     // whole point of the version: the alternative is a plausible-looking wrong answer.
@@ -214,7 +225,7 @@ function call(request: string): string {
 /** Which stage an incoming request needs, read off the operation it names. */
 function needsFitting(request: string): boolean {
   try {
-    return !LIGHT_OPERATIONS.has(JSON.parse(request).op);
+    return !lightOperations.has(JSON.parse(request).op);
   } catch {
     // Malformed JSON is an error response the bridge writes, not something to decide here.
     return false;
