@@ -104,15 +104,17 @@ patched `self.fetch` so `loadPackage` was answered from them. Each wheel was the
 exactly once, and the stage it targeted collapsed. Measured from the deployed site with a fresh
 Edge profile each time:
 
-| | boot | packages | total to a ready worker |
+| | packages | total to a ready worker | median total |
 |---|---|---|---|
-| before | 4.46 / 6.24 s | **7.84 / 4.39 s** | **15.24 / 13.52 s** |
-| with the worker prefetch | 17.60 / 12.09 / 9.98 / 26.20 s | **1.67 / 1.80 / 2.75 / 1.66 s** | **22.27 / 16.56 / 15.75 / 30.60 s** |
+| without (before, and again after the revert) | 7.84 / 4.39 / 4.63 / 7.36 s | 15.24 / 13.52 / 12.72 / 20.31 s | **14.4 s** |
+| with the worker prefetch | **1.67 / 1.80 / 2.75 / 1.66 s** | 22.27 / 16.56 / 15.75 / 30.60 s | **19.4 s** |
 
-The packages stage fell by 3–4×. Every reading of the *total* was at or above the worst reading
-without it. The cold start over this link is **bandwidth-bound**, so the wheels do not overlap
-the boot — they compete with it, and the wasm the boot blocks on arrives later. The time moved
-from one stage to another and a little was lost on the way.
+The packages stage fell by 3-4x and the total did not follow it down. This link's spread is wide
+enough that no single pair settles anything -- hence four readings each way, two of the "without"
+taken *after* the revert so both sides span the same evening -- but the prefetched side is higher
+throughout and its best reading is worse than the other side's median. The load is
+**bandwidth-bound**, so the wheels do not overlap the boot; they compete with it, and the wasm
+the boot blocks on arrives later.
 
 So it was reverted, and the reasoning is left in `bridge.worker.ts` and `index.html` where
 someone would otherwise have the same idea again. **Reordering transfers cannot help a

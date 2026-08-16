@@ -1061,11 +1061,13 @@ from this session; what ships is the reason not to try it again.**
   attribute fixes that; the document and the worker are different fetch contexts.
 - **Doing it inside the worker works, and makes the total worse.** [measured, deployed site,
   fresh Edge profile per run] Prefetching in `bridge.worker.ts` and answering `loadPackage` from
-  the result took the packages stage from **7.84 / 4.39 s to 1.67 / 1.80 / 2.75 / 1.66 s** — and
-  the total to a ready worker went from **15.24 / 13.52 s to 22.27 / 16.56 / 15.75 / 30.60 s**,
-  every reading at or above the worst one without it. The load is **bandwidth-bound**, so the
-  wheels do not overlap the boot, they compete with it: the wasm the boot blocks on arrives
-  later. The time moved between stages and a little was lost.
+  the result took the packages stage from **7.84 / 4.39 s to 1.67 / 1.80 / 2.75 / 1.66 s** --
+  and the total to a ready worker did not follow it down. Four readings each way, two of the
+  "without" taken after the revert so both sides span the same evening: **12.72 / 13.52 / 15.24 /
+  20.31 s without (median 14.4) against 15.75 / 16.56 / 22.27 / 30.60 s with (median 19.4)**. The
+  spread is wide, and the prefetched side is higher throughout with a best reading worse than the
+  other side's median. The load is **bandwidth-bound**, so the wheels do not overlap the boot,
+  they compete with it: the wasm the boot blocks on arrives later. The time moved between stages and a little was lost.
 
 **The methodological point is the one to keep: the stage breakdown said this was a large win and
 the total said it was a loss.** Do not accept a per-stage improvement as a cold-start
