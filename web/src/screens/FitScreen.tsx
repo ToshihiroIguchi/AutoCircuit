@@ -9,6 +9,12 @@
 //
 // The canvas is also, already, a skeleton editor: a partly drawn circuit is exactly what
 // `discover(skeleton=...)` takes. Step 4 adds the button; nothing here has to change for it.
+//
+// What this screen keeps and what `App` keeps is the rule in `docs/SCREEN_STATE_PLAN.md`: the fit,
+// the values it produced, the holds and bounds it honoured and the settings it ran with are
+// *results* and live in `App`, because a tab switch unmounts this component. What stays here is
+// what the user is composing -- the armed palette button, the selected element, the parse error --
+// and whatever a single round trip recomputes from the circuit string.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
@@ -32,21 +38,66 @@ import { RuntimeNotice } from "../components/RuntimeNotice";
 /** The simplest circuit there is. Anything else would be a guess about the device. */
 export const INITIAL_CIRCUIT = "R1";
 
+/**
+ * Everything about a manual fit that must outlive a glance at another tab.
+ *
+ * Held by `App`. The async fit writes through `App`'s setter rather than this screen's, which is
+ * what lets a fit that lands while the user is elsewhere still arrive.
+ */
+export interface FitState {
+  /** What the user typed, or what the last fit produced, by parameter name. */
+  values: Record<string, number>;
+  /** Parameters the fitter must not move. */
+  held: string[];
+  bounds: Record<string, [number, number]>;
+  /**
+   * The finished fit, and enough about it to know when it stops being about what is on screen.
+   *
+   * `signature` is the circuit-and-values this fit describes: editing either retires it, so
+   * fitted numbers never sit beside a model they no longer belong to. The spectrum travels as
+   * itself and not as a reference, because an export is a claim about *which data was fitted* --
+   * a netlist header states the frequency window the model is valid over.
+   */
+  fit: {
+    result: FitWire;
+    signature: string;
+    spectrumId: string;
+    spectrum: SpectrumWire;
+  } | null;
+  fitting: boolean;
+  error: string | null;
+  /** What a fit runs with. Provenance too: the panel must never show a fit under other settings. */
+  weighting: string;
+  restarts: number;
+  seed: number;
+}
+
+export function defaultFitState(): FitState {
+  return {
+    values: {},
+    held: [],
+    bounds: {},
+    fit: null,
+    fitting: false,
+    error: null,
+    weighting: "modulus",
+    restarts: 5,
+    seed: 0,
+  };
+}
+
 export interface FitScreenProps {
   client: BridgeClient;
   ready: boolean;
+  /** The element catalogue, fetched once by `App`; null until the worker has answered. */
+  catalogue: CatalogueWire | null;
   spectrum: LoadedSpectrum | null;
   /** Lifted into `App` so the Discover screen can offer this circuit as a search skeleton. */
   circuit: string;
   onCircuit: (value: string) => void;
-  /**
-   * The current fit, for the Report screen to export -- null whenever there is not one.
-   *
-   * It carries the spectrum it was fitted to, not a reference to whichever one is selected
-   * later, because an export is a claim about which data was fitted: a netlist header states the
-   * frequency window the model is valid over.
-   */
-  onFit: (fit: { fit: FitWire; spectrumId: string; spectrum: SpectrumWire } | null) => void;
+  /** The session's fit state, and the setter that owns it. */
+  state: FitState;
+  onState: (update: (previous: FitState) => FitState) => void;
 }
 
 function errorMessage(error: unknown): string {
@@ -74,29 +125,29 @@ function labelAtPath(node: CircuitNodeWire, path: number[]): string | null {
 export function FitScreen({
   client,
   ready,
+  catalogue,
   spectrum,
   circuit: circuitText,
   onCircuit: setCircuitText,
-  onFit: reportFit,
+  state,
+  onState,
 }: FitScreenProps) {
   const wire = spectrum?.current ?? null;
+  const { values, held, bounds, fitting, weighting, restarts, seed } = state;
 
-  const [catalogue, setCatalogue] = useState<CatalogueWire | null>(null);
   const [describe, setDescribe] = useState<CircuitWire | null>(null);
   const [circuitError, setCircuitError] = useState<string | null>(null);
-  const [values, setValues] = useState<Record<string, number>>({});
-  const [held, setHeld] = useState<string[]>([]);
-  const [bounds, setBounds] = useState<Record<string, [number, number]>>({});
   const [armedCode, setArmedCode] = useState<string | null>(null);
   const [selectedLabel, setSelectedLabel] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewWire | null>(null);
-  const [fit, setFit] = useState<{ result: FitWire; signature: string } | null>(null);
   const [editing, setEditing] = useState(false);
-  const [fitting, setFitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [weighting, setWeighting] = useState("modulus");
-  const [restarts, setRestarts] = useState(5);
-  const [seed, setSeed] = useState(0);
+
+  /** One change to the session's fit state. */
+  const update = useCallback(
+    (change: Partial<FitState>) => onState((previous) => ({ ...previous, ...change })),
+    [onState],
+  );
+  const setError = useCallback((message: string | null) => update({ error: message }), [update]);
 
   // What the last `circuit` request asked about. Comparing against this rather than against the
   // answer is what keeps an equivalent-but-differently-spelled string ("C1 - R1") from being
@@ -104,25 +155,26 @@ export function FitScreen({
   const asked = useRef<{ text: string; wire: SpectrumWire | null } | null>(null);
   const previewTicket = useRef(0);
 
-  useEffect(() => {
-    if (!ready) return;
-    client.elements().then(setCatalogue).catch((err: unknown) => setError(errorMessage(err)));
-  }, [client, ready]);
-
   /** Store a parsed circuit and drop any hold or bound that its parameters no longer have. */
-  const adopt = useCallback((result: CircuitWire) => {
-    const names = new Set(result.params.map((param) => param.name));
-    setDescribe(result);
-    setCircuitError(null);
-    setHeld((previous) => {
-      const kept = previous.filter((name) => names.has(name));
-      return kept.length === previous.length ? previous : kept;
-    });
-    setBounds((previous) => {
-      const entries = Object.entries(previous).filter(([name]) => names.has(name));
-      return entries.length === Object.keys(previous).length ? previous : Object.fromEntries(entries);
-    });
-  }, []);
+  const adopt = useCallback(
+    (result: CircuitWire) => {
+      const names = new Set(result.params.map((param) => param.name));
+      setDescribe(result);
+      setCircuitError(null);
+      onState((previous) => {
+        const heldKept = previous.held.filter((name) => names.has(name));
+        const boundEntries = Object.entries(previous.bounds).filter(([name]) => names.has(name));
+        if (
+          heldKept.length === previous.held.length &&
+          boundEntries.length === Object.keys(previous.bounds).length
+        ) {
+          return previous;
+        }
+        return { ...previous, held: heldKept, bounds: Object.fromEntries(boundEntries) };
+      });
+    },
+    [onState],
+  );
 
   // Parse whatever is in the text field. A syntax error leaves the last good circuit on the
   // canvas: the user is usually mid-edit, and blanking the screen at every intermediate
@@ -160,31 +212,25 @@ export function FitScreen({
   }, [params, values]);
 
   const signature = `${describe?.circuit ?? ""}|${JSON.stringify(effective)}`;
-  const currentFit = fit !== null && fit.signature === signature ? fit.result : null;
+  const currentFit = state.fit !== null && state.fit.signature === signature ? state.fit.result : null;
 
-  // Publish the fit for the Report screen's exports. Editing the circuit or a value retires the
-  // fit here, so this un-publishes it too: there is nothing to export from a model that is no
-  // longer on screen.
+  // Retire a fit the moment it stops describing what is on screen -- an edit to the circuit or to
+  // any value. Done as a write rather than as a filter on read, because the Report screen's
+  // exports come off the same record: it must not be possible to download a fit this screen is
+  // no longer showing (docs/SCREEN_STATE_PLAN.md section 2 measured that pair the other way
+  // round).
   //
-  // The guard is for a *remount*, not for the first fit. Switching tabs unmounts this screen and
-  // takes its state with it, so without it the act of walking over to the Report screen and back
-  // would retire a fit that nothing about the model had invalidated.
-  //
-  // `wire` is read here but is deliberately not a dependency: it is captured as it was when the
-  // fit landed, and a later trim of the same spectrum must not silently re-label that fit as
-  // having been made against the new window.
-  const spectrumId = spectrum?.id ?? null;
-  const published = useRef(false);
+  // Guarded on `describe`, which is null for one round trip after a mount or a circuit change.
+  // Without the guard, walking to the Report screen and back would retire a fit that nothing
+  // about the model had invalidated -- there would simply be no parsed circuit yet to compare to.
   useEffect(() => {
-    if (currentFit === null && !published.current) return;
-    published.current = currentFit !== null;
-    reportFit(
-      currentFit === null || spectrumId === null || wire === null
-        ? null
-        : { fit: currentFit, spectrumId, spectrum: wire },
+    if (describe === null) return;
+    onState((previous) =>
+      previous.fit === null || previous.fit.signature === signature
+        ? previous
+        : { ...previous, fit: null },
     );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentFit, spectrumId, reportFit]);
+  }, [describe, signature, onState]);
 
   // The preview curve. It is recomputed for every change to the circuit or to a value, which is
   // cheap: one impedance evaluation, no fitting.
@@ -203,7 +249,7 @@ export function FitScreen({
       .catch((err: unknown) => {
         if (previewTicket.current === ticket) setError(errorMessage(err));
       });
-  }, [client, ready, describe, effective, wire]);
+  }, [client, ready, describe, effective, wire, setError]);
 
   const applyEdit = useCallback(
     async (request: Parameters<BridgeClient["edit"]>[0]) => {
@@ -220,13 +266,16 @@ export function FitScreen({
         setEditing(false);
       }
     },
-    [client, wire, adopt],
+    [client, wire, adopt, setError],
   );
 
+  // Every write below goes through `onState`, which belongs to `App`: a fit that lands while the
+  // user is reading another tab therefore arrives, instead of being dropped into a component that
+  // no longer exists.
+  const spectrumId = spectrum?.id ?? null;
   const handleFit = useCallback(async () => {
-    if (describe === null || wire === null) return;
-    setFitting(true);
-    setError(null);
+    if (describe === null || wire === null || spectrumId === null) return;
+    update({ fitting: true, error: null });
     try {
       const fixed: Record<string, number> = {};
       for (const name of held) if (name in effective) fixed[name] = effective[name] as number;
@@ -245,14 +294,23 @@ export function FitScreen({
         next[param.name] = fitted[index] as number;
         shown[param.name] = fitted[index] as number;
       });
-      setValues(next);
-      setFit({ result, signature: `${describe.circuit}|${JSON.stringify(shown)}` });
+      update({
+        values: next,
+        fit: {
+          result,
+          signature: `${describe.circuit}|${JSON.stringify(shown)}`,
+          spectrumId,
+          // The window as it was when the fit ran. A later trim of the same spectrum must not
+          // silently re-label this fit as having been made against the new one.
+          spectrum: wire,
+        },
+      });
     } catch (err) {
-      setError(errorMessage(err));
+      update({ error: errorMessage(err) });
     } finally {
-      setFitting(false);
+      update({ fitting: false });
     }
-  }, [client, describe, wire, held, effective, values, params, weighting, restarts, seed, bounds]);
+  }, [client, describe, wire, spectrumId, held, effective, values, params, weighting, restarts, seed, bounds, update]);
 
   const model: ModelOverlay | null = useMemo(() => {
     if (currentFit !== null) {
@@ -387,10 +445,10 @@ export function FitScreen({
         seed={seed}
         fitting={fitting}
         disabled={!ready || describe === null || editing}
-        error={error}
-        onWeighting={setWeighting}
-        onRestarts={setRestarts}
-        onSeed={setSeed}
+        error={state.error}
+        onWeighting={(value) => update({ weighting: value })}
+        onRestarts={(value) => update({ restarts: value })}
+        onSeed={(value) => update({ seed: value })}
         onFit={() => void handleFit()}
       />
 
@@ -405,40 +463,45 @@ export function FitScreen({
           fit={currentFit}
           selectedLabel={selectedLabel}
           disabled={fitting}
-          onValue={(name, value) => setValues((previous) => ({ ...previous, [name]: value }))}
+          onValue={(name, value) =>
+            onState((previous) => ({ ...previous, values: { ...previous.values, [name]: value } }))
+          }
           onFix={(name, hold) => {
             // Ticking Fix captures the value as it stands, so the hold means a number rather
             // than a reference to whatever the box shows later.
-            if (hold) {
-              setValues((previous) => ({ ...previous, [name]: effective[name] as number }));
-              setHeld((previous) => (previous.includes(name) ? previous : [...previous, name]));
-            } else {
-              setHeld((previous) => previous.filter((entry) => entry !== name));
-            }
+            onState((previous) =>
+              hold
+                ? {
+                    ...previous,
+                    values: { ...previous.values, [name]: effective[name] as number },
+                    held: previous.held.includes(name) ? previous.held : [...previous.held, name],
+                  }
+                : { ...previous, held: previous.held.filter((entry) => entry !== name) },
+            );
           }}
           onBound={(name, index, value) =>
-            setBounds((previous) => {
+            onState((previous) => {
               const param = params.find((entry) => entry.name === name);
               const fallback: [number, number] = [
                 param?.lower === undefined ? 0 : decodeFloat(param.lower),
                 param?.upper === undefined ? 0 : decodeFloat(param.upper),
               ];
-              const next: Record<string, [number, number]> = { ...previous };
+              const next: Record<string, [number, number]> = { ...previous.bounds };
               if (value === null) {
                 delete next[name];
-                return next;
+                return { ...previous, bounds: next };
               }
-              const pair: [number, number] = [...(previous[name] ?? fallback)];
+              const pair: [number, number] = [...(previous.bounds[name] ?? fallback)];
               pair[index] = value;
               next[name] = pair;
-              return next;
+              return { ...previous, bounds: next };
             })
           }
           onSelectLabel={setSelectedLabel}
         />
       )}
 
-      <PlotsPanel key={`fit-plots-${spectrum.id}`} spectrum={spectrum} model={model} />
+      <PlotsPanel key={`fit-plots-${spectrum.id}`} spectrum={spectrum.current} model={model} />
     </div>
   );
 }

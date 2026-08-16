@@ -433,7 +433,65 @@ def test_an_unknown_element_in_the_pool_is_refused_before_anything_runs() -> Non
     assert "unknown element codes" in error["message"]
 
 
-@pytest.mark.parametrize("op", ["discover_screen", "discover_refit", "discover_report"])
+# =============================================================================================
+# 4b. The fit behind a results row, so the screen that ran the search can plot what it found
+# =============================================================================================
+
+
+def test_a_reported_row_hands_back_the_fit_it_was_ranked_on() -> None:
+    """`discover_candidate` returns the search's own fit, not a new one.
+
+    The check that matters is the last two: the curve and the residuals come from the
+    `FitResult` the job has held since its tier-2 refit, so the picture the Discover screen
+    draws is the fit the ranking was computed from rather than a re-run that might land
+    somewhere else (docs/SCREEN_STATE_PLAN.md section 4).
+    """
+    spectrum = _semicircle()
+    driver = Driver(spectrum, pool=list(POOL), exhaustive_limit=LIMIT)
+    driver.screen()
+    driver.refit()
+    report = driver.report()
+    row = report["pareto"][0]
+
+    answer = _call("discover_candidate", job=driver.id, circuit=row["circuit"])
+
+    assert answer["fit"]["circuit"] == row["circuit"]
+    assert answer["fit"]["statistics"]["aicc"] == row["aicc"]
+    assert answer["fit"]["statistics"]["chi2_reduced"] == row["chi2_reduced"]
+    # As many residual points as data points, split real-then-imaginary by Python so no front
+    # end has to know the objective function's concatenation order.
+    assert len(answer["residual_real"]["data"]) == len(answer["residual_imag"]["data"])
+    assert answer["summary"] != ""
+
+
+def test_the_recommended_row_is_the_default_candidate() -> None:
+    """Omitting the circuit asks for the row the report recommends, as the exports do."""
+    spectrum = _semicircle()
+    driver = Driver(spectrum, pool=list(POOL), exhaustive_limit=LIMIT)
+    driver.screen()
+    driver.refit()
+    report = driver.report()
+
+    answer = _call("discover_candidate", job=driver.id)
+
+    assert answer["fit"]["circuit"] == report["recommended"]
+
+
+def test_a_topology_this_search_never_fitted_is_refused() -> None:
+    """A stale front end asking about a row from another search gets a message, not a fit."""
+    spectrum = _semicircle()
+    driver = Driver(spectrum, pool=list(POOL), exhaustive_limit=LIMIT)
+    driver.screen()
+    driver.refit()
+
+    error = _error("discover_candidate", job=driver.id, circuit="R1-R2-R3-R4")
+
+    assert "not one of the topologies this search fitted" in error["message"]
+
+
+@pytest.mark.parametrize(
+    "op", ["discover_screen", "discover_refit", "discover_report", "discover_candidate"]
+)
 def test_every_discovery_operation_answers_without_a_job(op: str) -> None:
     """The bridge never raises: a stale front end gets a message, not a dead worker."""
     job_module._CURRENT = None

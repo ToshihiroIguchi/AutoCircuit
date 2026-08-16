@@ -89,7 +89,17 @@ export function DataScreen(props: DataScreenProps) {
                 onReset={props.onResetTrim}
               />
               <KKPanel spectrum={props.selected} />
-              <PlotsPanel key={`plots-${props.selected.id}`} spectrum={props.selected} />
+              {/* The only screen that draws the Lin-KK reconstruction, so the only one that
+                  passes it: elsewhere the overlay is a fitted circuit. */}
+              <PlotsPanel
+                key={`plots-${props.selected.id}`}
+                spectrum={props.selected.current}
+                validation={{
+                  result: props.selected.validation,
+                  running: props.selected.validating,
+                  error: props.selected.validationError,
+                }}
+              />
             </>
           )}
         </section>

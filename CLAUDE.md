@@ -107,7 +107,19 @@ static-site Web UI running the same core via WASM (Pyodide).
    (17 MB downloaded twice), and doing it inside the worker cut the stage it targeted by 3-4x
    while making the *total* worse, because the load is bandwidth-bound. The stage breakdown said
    win and the total said loss; that is the part to remember.
-7. `docs/SCHEMATIC_PLAN.md` — how the Fit screen draws the circuit. **Implemented; gates S1–S4
+7. `docs/SCREEN_STATE_PLAN.md` — where a result lives and where it is shown. **Implemented; gates
+   G1–G4 measured.** Its §3 is the one to read before wiring any two screens together: it
+   enumerates five arrangements for the Discover→Fit hand-off and rejects the obvious one, because
+   installing a Pareto row as "the fit" converts *one of several topologies the data cannot tell
+   apart* into an assertion. §7's G2 is that argument measured rather than asserted — the search's
+   refit and an independent refit on the Fit screen agree to every digit (AIC −324.335,
+   χ² 0.13180), so carrying the values across would save a refit and change nothing. The rule this
+   phase establishes is *a result belongs to the session, a screen owns only what is being typed*;
+   the corollary is that a screen which may not hand its result on owes the user a full view of
+   it, which is why Discover now plots. §8 records where a "before" measurement was
+   over-claimed at a 200 ms sampling interval and was left as the timeline it is rather than
+   restated.
+8. `docs/SCHEMATIC_PLAN.md` — how the Fit screen draws the circuit. **Implemented; gates S1–S4
    measured.** The picture is computed rather than laid out: `web/src/core/schematic.ts` turns the
    parsed tree into coordinates, which is what makes "every wire is axis-aligned", "no wire ends
    in mid-air" and "a junction dot exactly where three or more wires meet" assertions rather than

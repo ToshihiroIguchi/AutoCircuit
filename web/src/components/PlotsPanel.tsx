@@ -1,11 +1,18 @@
-﻿// Four panels for the selected spectrum: Nyquist, Bode magnitude, Bode phase, and Lin-KK
-// residuals. Zoom is linked across the three frequency-axis panels (magnitude, phase, residuals)
-// by lifting each plot's x-range into this component's state and feeding it back into all three
-// layouts. Nyquist has no frequency axis, so it is deliberately left out of that link.
+﻿// Four panels for one spectrum: Nyquist, Bode magnitude, Bode phase, and residuals. Zoom is
+// linked across the three frequency-axis panels (magnitude, phase, residuals) by lifting each
+// plot's x-range into this component's state and feeding it back into all three layouts. Nyquist
+// has no frequency axis, so it is deliberately left out of that link.
+//
+// Three screens draw these, over three different models of the same measurement: the Data screen
+// over the Lin-KK reconstruction, the Fit screen over the circuit the user drew, and the Discover
+// screen over the fit behind whichever row of the front they selected. So this takes a bare
+// `SpectrumWire` -- the data, and nothing about which row of a table it came from -- plus at most
+// one overlay. The Lin-KK verdict is an argument rather than something read off the spectrum for
+// the same reason: it belongs to the Data screen's bookkeeping, not to the measurement.
 
 import { useMemo, useState } from "react";
 import type Plotly from "plotly.js";
-import type { LoadedSpectrum } from "../core/types";
+import type { SpectrumWire, ValidationWire } from "../core/types";
 import { usePlotTokens, type PlotTokens } from "../core/theme";
 import { decodeArray, decodeComplexArray } from "../core/wire";
 import { Plot, type RelayoutEvent } from "./Plot";
@@ -18,10 +25,10 @@ function panelTitle(text: string): Partial<Plotly.Layout>["title"] {
   return { text, x: 0, xanchor: "left", font: { size: 12 } };
 }
 
-function useDecodedSpectrum(spectrum: LoadedSpectrum) {
+function useDecodedSpectrum(spectrum: SpectrumWire) {
   return useMemo(() => {
-    const f = decodeArray(spectrum.current.f);
-    const { re, im } = decodeComplexArray(spectrum.current.z);
+    const f = decodeArray(spectrum.f);
+    const { re, im } = decodeComplexArray(spectrum.z);
     const magnitude = new Float64Array(f.length);
     const phaseDeg = new Float64Array(f.length);
     for (let i = 0; i < f.length; i += 1) {
@@ -31,7 +38,7 @@ function useDecodedSpectrum(spectrum: LoadedSpectrum) {
       phaseDeg[i] = (Math.atan2(iv, rv) * 180) / Math.PI;
     }
     return { f, re, im, magnitude, phaseDeg };
-  }, [spectrum.current]);
+  }, [spectrum]);
 }
 
 /**
@@ -54,36 +61,50 @@ export interface ModelOverlay {
   residualPlaceholder: string;
 }
 
-function useKKOverlay(spectrum: LoadedSpectrum): ModelOverlay | null {
+/**
+ * The Lin-KK verdict on this spectrum, as the Data screen holds it.
+ *
+ * Only that screen passes one: it is what the panels draw when there is no model to draw
+ * instead, and its two pending states are distinct messages rather than a blank.
+ */
+export interface ValidationState {
+  result: ValidationWire | null;
+  running: boolean;
+  error: string | null;
+}
+
+function useKKOverlay(validation: ValidationState | null): ModelOverlay | null {
   return useMemo(() => {
-    if (spectrum.validation === null) return null;
-    const { re, im } = decodeComplexArray(spectrum.validation.z_fit);
+    if (validation?.result == null) return null;
+    const { re, im } = decodeComplexArray(validation.result.z_fit);
     return {
       label: "Lin-KK fit",
       re,
       im,
-      residualReal: decodeArray(spectrum.validation.residual_real),
-      residualImag: decodeArray(spectrum.validation.residual_imag),
+      residualReal: decodeArray(validation.result.residual_real),
+      residualImag: decodeArray(validation.result.residual_imag),
       residualTitle: "Lin-KK residuals",
       residualUnit: "%",
       residualPlaceholder: "Residuals unavailable.",
     };
-  }, [spectrum.validation]);
+  }, [validation?.result]);
 }
 
 export function PlotsPanel({
   spectrum,
   model = null,
+  validation = null,
 }: {
-  spectrum: LoadedSpectrum;
+  spectrum: SpectrumWire;
   model?: ModelOverlay | null;
+  validation?: ValidationState | null;
 }) {
   const [xRange, setXRange] = useState<XRange>(null);
   const tokens = usePlotTokens();
   const base = plotLayoutBase(tokens);
   const axis = axisBase(tokens);
   const { f, re, im, magnitude, phaseDeg } = useDecodedSpectrum(spectrum);
-  const kk = useKKOverlay(spectrum);
+  const kk = useKKOverlay(validation);
   const overlay = model ?? kk;
   const fit = useMemo(() => {
     if (overlay === null) return null;
@@ -250,10 +271,10 @@ export function PlotsPanel({
           />
         ) : (
           <div className="plots-panel__plot plots-panel__placeholder">
-            {model === null && spectrum.validating
+            {model === null && (validation?.running ?? false)
               ? "Computing the Lin-KK residuals…"
               : model === null
-                ? (spectrum.validationError ?? "Residuals unavailable.")
+                ? (validation?.error ?? "Residuals unavailable.")
                 : (overlay?.residualPlaceholder ?? "Residuals unavailable.")}
           </div>
         )}

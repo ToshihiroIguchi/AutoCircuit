@@ -1556,6 +1556,44 @@ body {
   color: var(--text-primary);
 }
 
+/* One row per tier, all of them on screen at once. A tier that has not started is dimmed rather
+   than hidden, so the reader knows how many bars there are before the first one fills -- which is
+   the whole point of showing them together (see the component's header comment). */
+.search-progress__row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.search-progress__row--waiting {
+  opacity: 0.55;
+}
+
+.search-progress__row-head {
+  margin: 0;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 11px;
+}
+
+.search-progress__step {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  min-width: 84px;
+}
+
+.search-progress__label {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* A finished tier keeps the same fill colour it had while running. --series-2 is the model
+   overlay everywhere else on the page and would read as a different kind of thing here. */
+
 .search-progress__bar {
   height: 6px;
   border-radius: 3px;
@@ -1647,6 +1685,39 @@ body {
 }
 
 .discover-report__full {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* ---- the selected row, drawn ---- */
+
+.discover-plots {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Names the data these curves are of. The search captured its spectrum when it started, so this
+   is not necessarily what the Data screen has selected now, and a plot that did not say so would
+   be a picture of something that never happened. */
+.discover-plots__source {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.discover-plots__error {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 3px;
+  background: var(--status-warning-bg);
+  color: var(--status-warning-text);
+  font-size: 12px;
+}
+
+.discover-plots__warnings {
+  margin: 0;
+  padding-left: 18px;
   font-size: 11px;
   color: var(--text-secondary);
 }

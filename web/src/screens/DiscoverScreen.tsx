@@ -5,22 +5,29 @@
 //
 // Every decision behind the search -- which topologies exist, which earn a full-budget refit,
 // what the run may claim afterwards -- was made in Python (`autocircuit.core.discover`, driven
-// through `autocircuit.web.job`). This screen and `SearchRun` only move batches and draw what
-// comes back.
+// through `autocircuit.web.job`). This screen draws what comes back; `App` runs the search and
+// holds it, because a search is a result of the session and not of a tab
+// (`docs/SCREEN_STATE_PLAN.md`).
+//
+// It plots the selected row for a reason that is the other half of one decision. The fitted
+// values do *not* travel to the Fit screen (see `onFitCircuit`), which is right -- and it leaves
+// this screen owing the user a full view of what the search found, rather than a table and a
+// schematic. The fit it draws is the tier-2 refit the row was *ranked* on, fetched from the
+// worker that still holds it: nothing is re-fitted to make this picture.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useMemo } from "react";
 import type {
   CatalogueWire,
   CriterionWire,
   LoadedSpectrum,
-  ReportWire,
 } from "../core/types";
-import { idleProgress, SearchRun, type SearchProgress } from "../core/search";
-import { BridgeClient, BridgeError, type SearchOptions } from "../worker/client";
+import { decodeArray, decodeComplexArray } from "../core/wire";
+import type { SearchState } from "../App";
+import { BridgeClient } from "../worker/client";
 import { defaultPoolSize } from "../worker/pool";
-import type { SearchPool } from "../worker/pool";
 import { CircuitPreview } from "../components/CircuitPreview";
 import { ParetoTable } from "../components/ParetoTable";
+import { PlotsPanel, type ModelOverlay } from "../components/PlotsPanel";
 import { SearchPanel } from "../components/SearchPanel";
 import { SearchProgressPanel } from "../components/SearchProgress";
 import { RuntimeNotice } from "../components/RuntimeNotice";
@@ -28,33 +35,36 @@ import { RuntimeNotice } from "../components/RuntimeNotice";
 export interface DiscoverScreenProps {
   client: BridgeClient;
   ready: boolean;
+  /** The element catalogue, fetched once by `App`; null until the worker has answered. */
+  catalogue: CatalogueWire | null;
+  /** The spectrum a *new* search would run against. The finished one carries its own. */
   spectrum: LoadedSpectrum | null;
   /** The circuit currently drawn on the Fit screen, or null/empty if there isn't one. */
   skeleton: string | null;
   /**
-   * The page's one worker pool, built on first use and kept afterwards.
+   * The session's search: the job, its progress, and what it found. Null until one is started.
    *
-   * Held by `App` rather than here because the Report screen runs work on it too -- the
-   * excluded-equivalents pass is a continuation of this search -- and two pools would mean eight
-   * Pyodide workers on a machine where the speed-up already saturates at four.
+   * Held by `App` rather than here. [measured] While it lived in this component, one click to
+   * another tab and back emptied the screen of a search the Report screen was still showing --
+   * and re-armed the Discover button while the search was still running, so a second search
+   * could be started onto the pool the first one was using (`docs/SCREEN_STATE_PLAN.md` §2).
    */
-  acquirePool: (workers: number, onStatus: (ready: number, total: number) => void) => SearchPool;
+  search: SearchState | null;
   /**
    * What to search with, and how to change it.
    *
-   * Owned by `App` for the same reason everything else there is: a screen is unmounted when the
-   * user visits another tab, so settings kept here would silently return to their defaults
-   * between one search and the next. [browser] That is not hypothetical -- it produced an
-   * unconstrained four-element run from a form that had said three and a skeleton.
+   * Owned by `App` for the same reason: settings kept here would silently return to their
+   * defaults between one search and the next. [browser] That is not hypothetical -- it produced
+   * an unconstrained four-element run from a form that had said three and a skeleton.
    */
   settings: SearchSettings;
   onSettings: (change: Partial<SearchSettings>) => void;
   /** The model-selection menu the loaded core offers; empty until the worker is ready. */
   criteria: CriterionWire[];
-  /** A finished search, for the Report screen. Null while one is running, or after a cancel. */
-  onReport: (
-    discovery: { report: ReportWire; options: SearchOptions; workers: number } | null,
-  ) => void;
+  onStart: (spectrum: LoadedSpectrum) => void;
+  onCancel: () => void;
+  /** Draw, plot and offer one row of the front. */
+  onPick: (circuit: string) => void;
   /**
    * Take one of these topologies over to the Fit screen.
    *
@@ -62,7 +72,10 @@ export interface DiscoverScreenProps {
    * as a starting guess, because this fitter has none: pressing Fit there re-runs the same
    * global search from the same data-derived interval and lands in the same place. Carrying
    * numbers over would make a screen that says "these do not seed the fit" look as though they
-   * did (docs/METRICS_AND_UX_PLAN.md section 6).
+   * did (docs/METRICS_AND_UX_PLAN.md section 6), and it would install one row of a front the
+   * data cannot rank into a screen whose whole framing is *you asserted this circuit*
+   * (docs/SCREEN_STATE_PLAN.md section 3). The data selection travels with it, though: `App`
+   * re-selects the spectrum this search ran against.
    */
   onFitCircuit: (circuit: string) => void;
 }
@@ -100,101 +113,61 @@ export function defaultSearchSettings(): SearchSettings {
   };
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof BridgeError || error instanceof Error ? error.message : String(error);
+/**
+ * The selected row's fit, as the plots want it.
+ *
+ * The residuals arrive already split into real and imaginary parts by Python, because their
+ * concatenation order is a detail of the objective function; and they are the *weighted*
+ * residuals the refit minimised, so they are labelled as such rather than as percentages.
+ */
+function useOverlay(search: SearchState | null): ModelOverlay | null {
+  const fit = search?.pickedFit ?? null;
+  return useMemo(() => {
+    if (fit === null) return null;
+    const { re, im } = decodeComplexArray(fit.fit.z_model);
+    return {
+      label: "Search fit",
+      re,
+      im,
+      residualReal: decodeArray(fit.residual_real),
+      residualImag: decodeArray(fit.residual_imag),
+      residualTitle: `Refit residuals (${fit.fit.weighting} weighting)`,
+      residualUnit: "weighted",
+      residualPlaceholder: "",
+    };
+  }, [fit]);
 }
 
 export function DiscoverScreen({
   client,
   ready,
+  catalogue,
   spectrum,
   skeleton,
-  acquirePool,
+  search,
   settings,
   onSettings,
   criteria,
-  onReport,
+  onStart,
+  onCancel,
+  onPick,
   onFitCircuit,
 }: DiscoverScreenProps) {
   const { poolName, exhaustiveLimit, useSkeleton, workers, seed, weighting, criterion } = settings;
-  const [catalogue, setCatalogue] = useState<CatalogueWire | null>(null);
+  const overlay = useOverlay(search);
 
-  const [progress, setProgress] = useState<SearchProgress>(idleProgress());
-  const [running, setRunning] = useState(false);
-  const [report, setReport] = useState<ReportWire | null>(null);
-  const [stoppedEarly, setStoppedEarly] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  // Which front row is drawn above the table. Null until a report arrives, then the recommended
-  // one -- the row this report is actually about.
-  const [picked, setPicked] = useState<string | null>(null);
+  const running = search?.running ?? false;
+  const report = search?.report ?? null;
+  const picked = search?.picked ?? null;
 
-  // The pool is not built at page load: four more Pyodide workers, each ~1.5 s and its own copy
-  // of numpy and scipy, would tax every visitor who never presses Discover, on top of the ~13 s
-  // cold start the page already has (`docs/WEB_UI_PLAN.md` section 2.3). So it comes up on the
-  // first Discover press and then stays up for the next one -- rebuilt only if the worker count
-  // changes, since that is the one control that changes what the pool itself has to be. `App`
-  // owns it, because the Report screen's excluded-equivalents pass runs on the same one.
-  const runRef = useRef<SearchRun | null>(null);
-
-  useEffect(() => {
-    if (!ready) return;
-    client.elements().then(setCatalogue).catch((err: unknown) => setError(errorMessage(err)));
-  }, [client, ready]);
-
+  // A skeleton that has gone away un-ticks the box, so a run cannot assert a circuit that is no
+  // longer drawn.
   const skeletonAvailable = skeleton !== null && skeleton.trim() !== "";
   useEffect(() => {
     if (!skeletonAvailable && useSkeleton) onSettings({ useSkeleton: false });
   }, [skeletonAvailable, useSkeleton, onSettings]);
 
-  const startSearch = useCallback(async () => {
-    if (spectrum === null || running) return;
-    setError(null);
-    setReport(null);
-    // The old report is dropped as the new search starts, not when it finishes: the Report
-    // screen must not show one search's classes beside another search's coverage claim.
-    onReport(null);
-    setStoppedEarly(false);
-    setProgress(idleProgress());
-
-    const pool = acquirePool(workers, (up) =>
-      setProgress((prev) => ({ ...prev, workersReady: up })),
-    );
-
-    const options: SearchOptions = {
-      pool: catalogue?.pools[poolName],
-      skeleton: useSkeleton ? skeleton : null,
-      exhaustiveLimit,
-      weighting,
-      seed,
-      criterion,
-    };
-
-    const run = new SearchRun(client, pool, spectrum.current, options, setProgress);
-    runRef.current = run;
-    setRunning(true);
-    try {
-      const result = await run.run();
-      // Null means cancel landed before the pool -- or the enumeration -- ever produced
-      // anything to report, which is a real outcome and not the same as an empty search.
-      if (result === null) setStoppedEarly(true);
-      else {
-        setReport(result);
-        setPicked(result.recommended ?? result.pareto[0]?.circuit ?? null);
-        onReport({ report: result, options, workers });
-      }
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setRunning(false);
-      runRef.current = null;
-    }
-  }, [spectrum, running, workers, catalogue, poolName, useSkeleton, skeleton, exhaustiveLimit, weighting, seed, criterion, client, acquirePool, onReport]);
-
-  const cancelSearch = useCallback(() => {
-    void runRef.current?.cancel();
-  }, []);
-
-  if (spectrum === null) {
+  if (spectrum === null && search === null) {
     return (
       <>
         <RuntimeNotice ready={ready} />
@@ -228,22 +201,24 @@ export function DiscoverScreen({
         weighting={weighting}
         onWeighting={(value) => onSettings({ weighting: value })}
         running={running}
-        disabled={!ready || catalogue === null}
-        error={error}
-        onStart={() => void startSearch()}
-        onCancel={cancelSearch}
+        disabled={!ready || catalogue === null || spectrum === null}
+        error={search?.error ?? null}
+        onStart={() => spectrum !== null && onStart(spectrum)}
+        onCancel={onCancel}
       />
 
-      {running && <SearchProgressPanel progress={progress} poolSize={workers} />}
+      {running && search !== null && (
+        <SearchProgressPanel progress={search.progress} poolSize={search.workers} />
+      )}
 
-      {!running && stoppedEarly && (
+      {!running && (search?.stoppedEarly ?? false) && (
         <p className="discover-screen__stopped">
           Cancelled before the search reached anything to report -- no topology had been
           screened or refitted yet.
         </p>
       )}
 
-      {!running && report !== null && (
+      {!running && report !== null && search !== null && (
         <section className="discover-report">
           {/* The CLI's own sentence, verbatim: what a constrained or partial search may claim
               is exactly the part a paraphrase would get subtly wrong. */}
@@ -278,7 +253,8 @@ export function DiscoverScreen({
                 <span className="discover-report__handoff-note">
                   Takes the topology to the Fit screen, not the fitted values: this fitter uses
                   no starting guess, so refitting there re-runs the same global search and lands
-                  in the same place.
+                  in the same place. Go there to <em>change</em> the circuit — the search's own
+                  fit of it is plotted below.
                 </span>
               </div>
             )}
@@ -291,7 +267,7 @@ export function DiscoverScreen({
             byCriterion={report.by_criterion}
             scoreLabel={report.score_label}
             selected={picked}
-            onSelect={setPicked}
+            onSelect={onPick}
           />
 
           <p className="discover-report__note">
@@ -305,6 +281,48 @@ export function DiscoverScreen({
             <summary>Full report</summary>
             <pre>{report.summary}</pre>
           </details>
+        </section>
+      )}
+
+      {/* The selected row, drawn over the data the search ran against -- which is captured when
+          the search starts and is not necessarily what is selected on the Data screen now, so it
+          is named rather than assumed. Nothing here is re-fitted: this is the tier-2 refit the
+          row was ranked on. */}
+      {/* `picked` is null only when the run was stopped before it refitted anything, and there is
+          then no fit to draw -- not an empty panel where one should be. */}
+      {!running && report !== null && search !== null && picked !== null && (
+        <section className="discover-plots">
+          {overlay !== null && (
+            <p className="discover-plots__source">
+              <code>{picked}</code> as the search fitted it, against {search.spectrumLabel} in the
+              frequency window the search ran over — not necessarily the spectrum selected on the
+              Data screen now, and not re-fitted here.
+            </p>
+          )}
+          {search.pickedError !== null && (
+            <p className="discover-plots__error" role="alert">
+              {search.pickedError}
+            </p>
+          )}
+          {overlay === null && search.picking && (
+            <p className="empty-hint">Fetching the fit behind this row…</p>
+          )}
+          {overlay !== null && (
+            <>
+              {search.pickedFit !== null && search.pickedFit.warnings.length > 0 && (
+                <ul className="discover-plots__warnings">
+                  {search.pickedFit.warnings.map((warning) => (
+                    <li key={warning}>{warning}</li>
+                  ))}
+                </ul>
+              )}
+              <PlotsPanel
+                key={`discover-plots-${search.token}`}
+                spectrum={search.spectrum}
+                model={overlay}
+              />
+            </>
+          )}
         </section>
       )}
     </div>

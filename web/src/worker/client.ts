@@ -378,6 +378,18 @@ export class BridgeClient {
     return this.call<ReportWire>({ op: "discover_report", job });
   }
 
+  /**
+   * The fit behind one row of a finished search: the curve it drew and the residuals it minimised.
+   *
+   * Nothing is fitted by this call. Every reported row came from a tier-2 refit whose whole
+   * `FitResult` the orchestrator still holds, so this is a hand-over rather than a computation --
+   * which is what makes plotting a front row cost nothing (docs/SCREEN_STATE_PLAN.md §4). Omit
+   * the circuit to ask for the recommended row.
+   */
+  async discoverCandidate(job: string, circuit?: string | null): Promise<FitWire> {
+    return this.call<FitWire>({ op: "discover_candidate", job, circuit: circuit ?? null });
+  }
+
   /** Stop handing out work. The report stays readable afterwards, and says it was stopped. */
   async discoverCancel(job: string): Promise<{ job: string; screened: number; refitted: number }> {
     return this.call({ op: "discover_cancel", job });

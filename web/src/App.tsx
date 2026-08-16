@@ -4,16 +4,35 @@
 // and take it away). They share the loaded spectra because a fit is fitted to the spectrum the
 // Data screen has selected, in the window it has been trimmed to.
 //
-// What lives here rather than in a screen is anything that must outlive a tab switch. A screen
-// is unmounted the moment the user looks at another one, so state left inside it is state the
-// user loses by glancing away: the drawn circuit, the finished search, the manual fit, and the
-// two long-running jobs the Report screen starts. The pool is here for the same reason plus one
-// more -- two screens run work on it, and a second pool would be four more Pyodide workers.
+// What lives here rather than in a screen follows one rule, and it is the rule the whole of
+// `docs/SCREEN_STATE_PLAN.md` exists to state:
+//
+//   **A result belongs to the session. A screen owns only what the user is composing.**
+//
+// A React screen is unmounted the moment the user looks at another tab. So a finished search, a
+// finished fit, a structure probe, and the runs producing them are held here; a half-typed
+// circuit string, an armed palette button and a parse error are left in the screen, because
+// losing a draft on a tab switch is the behaviour a draft should have.
+//
+// [measured] The rule used to be the weaker "lift what *another* screen needs", which preserved
+// every result except on the screen that produced it: one tab switch away and back emptied the
+// Discover screen of a search the Report screen was still showing, and left the Fit screen
+// saying "Not fitted" while the Report screen offered "Download the fit of R1"
+// (docs/SCREEN_STATE_PLAN.md section 2).
+//
+// The same arrangement also put `running` inside the screen, so returning to a tab mid-search
+// found a re-armed Discover button and a second search could be dispatched onto the pool the
+// first one was using. That one is read off the old code rather than measured -- what is measured
+// is the behaviour now, which is that the button stays disabled and the progress rows carry on.
+//
+// The pool is here for that reason plus one more -- two screens run work on it, and a second
+// pool would be four more Pyodide workers.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BridgeClient, BridgeError, type SearchOptions } from "./worker/client";
 import type { LoadStage } from "./worker/protocol";
 import type {
+  CatalogueWire,
   DrtWire,
   ExcludedReportWire,
   FitWire,
@@ -23,6 +42,7 @@ import type {
   VersionsWire,
 } from "./core/types";
 import { ExcludedRun, idleExcluded, type ExcludedProgress } from "./core/excluded";
+import { idleProgress, SearchRun, type SearchProgress } from "./core/search";
 import { ThemeContext, useTheme } from "./core/theme";
 import { SearchPool } from "./worker/pool";
 import { StatusBar } from "./components/StatusBar";
@@ -33,7 +53,7 @@ import {
   defaultSearchSettings,
   type SearchSettings,
 } from "./screens/DiscoverScreen";
-import { FitScreen, INITIAL_CIRCUIT } from "./screens/FitScreen";
+import { FitScreen, INITIAL_CIRCUIT, defaultFitState, type FitState } from "./screens/FitScreen";
 import { ReportScreen } from "./screens/ReportScreen";
 
 type Screen = "data" | "fit" | "discover" | "report";
@@ -59,12 +79,62 @@ const SCREENS: ReadonlyArray<readonly [Screen, string]> = [
  * The options travel with the report because the excluded-equivalents pass on the Report screen
  * is a continuation of *this* search and has to screen with the same weighting and seed. The job
  * id is inside the report itself.
+ *
+ * Derived from `SearchState` below rather than stored: it is the Report screen's view of a
+ * search, and there is only one search.
  */
 export interface Discovery {
   report: ReportWire;
   options: SearchOptions;
   /** The pool size that search ran on, so its continuation does not rebuild the pool. */
   workers: number;
+}
+
+/**
+ * The topology search: the job, where it has got to, and what it found.
+ *
+ * Held here rather than on the Discover screen for the reason at the top of this file. Two of its
+ * fields are provenance rather than results, and they are the reason this is one record instead
+ * of several pieces of state:
+ *
+ *  * `spectrum` is **the data the search ran against**, captured when it started -- not a
+ *    reference to whichever spectrum is selected by the time the answer is read. The Discover
+ *    screen plots the found model over it, and plotting a model over a window it was not fitted
+ *    to would be a picture of something that never happened. Same reasoning as `ManualFit`.
+ *  * `options` is what it ran with, which the excluded-equivalents pass has to match.
+ */
+export interface SearchState {
+  /**
+   * This run, as distinct from any other.
+   *
+   * Not the job id, which does not exist until the space has been enumerated -- and the window
+   * between pressing Discover and that answer is exactly when a cancel-and-restart happens. A
+   * message from a superseded run is dropped by comparing this.
+   */
+  token: string;
+  spectrumId: string;
+  /** What the user calls that data, for the caption over the plots. */
+  spectrumLabel: string;
+  spectrum: SpectrumWire;
+  options: SearchOptions;
+  workers: number;
+  progress: SearchProgress;
+  running: boolean;
+  report: ReportWire | null;
+  /** Which front row is drawn, plotted and offered to the Fit screen. */
+  picked: string | null;
+  /**
+   * The fit behind `picked`, fetched from the worker that still holds it.
+   *
+   * Not computed here and not re-fitted: it is the tier-2 refit this row was *ranked* on, so the
+   * curve on screen is the curve the score describes (docs/SCREEN_STATE_PLAN.md section 4).
+   */
+  pickedFit: FitWire | null;
+  pickedError: string | null;
+  picking: boolean;
+  /** Cancelled before anything had been screened or refitted, which is a real outcome. */
+  stoppedEarly: boolean;
+  error: string | null;
 }
 
 /**
@@ -132,14 +202,22 @@ export function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [fileErrors, setFileErrors] = useState<FileError[]>([]);
   const [dragActive, setDragActive] = useState(false);
-  // Both live here because two screens need them: the Discover screen produces a report and the
-  // Report screen reads it, and the Fit screen produces a fit that the Report screen exports.
-  const [discovery, setDiscovery] = useState<Discovery | null>(null);
-  const [manualFit, setManualFit] = useState<ManualFit | null>(null);
-  const [search, setSearch] = useState<SearchSettings>(defaultSearchSettings);
+  // The element catalogue: what the loaded core was built with, so it cannot change while the
+  // page is open. Fetched once here rather than by each of the two screens that need it -- the
+  // palette on Fit and the pool menu on Discover -- and by the search, which needs the pool.
+  const [catalogue, setCatalogue] = useState<CatalogueWire | null>(null);
+  // The three long-running jobs of the session, and the manual fit. Every one of them outlives
+  // the screen that started it; see the file header.
+  const [search, setSearch] = useState<SearchState | null>(null);
+  const [fitState, setFitState] = useState<FitState>(defaultFitState);
+  const [settings, setSettings] = useState<SearchSettings>(defaultSearchSettings);
   const [excluded, setExcluded] = useState<ExcludedState | null>(null);
   const [drt, setDrt] = useState<DrtState | null>(null);
   const excludedRun = useRef<ExcludedRun | null>(null);
+  const searchRun = useRef<SearchRun | null>(null);
+  // The fits behind the front rows, keyed `job|circuit`. A refetch would be cheap -- the worker
+  // has the fit and does not refit it -- but flicking between rows should not flicker.
+  const candidateFits = useRef(new Map<string, FitWire>());
 
   const clientRef = useRef<BridgeClient | null>(null);
   if (clientRef.current === null) {
@@ -160,8 +238,10 @@ export function App() {
         // would otherwise drift apart silently, and the browser disagreeing with the command
         // line about which model won is exactly the class of failure this project keeps
         // finding (docs/HANDOFF.md section 3).
-        setSearch((prev) => ({ ...prev, criterion: answer.default_criterion }));
+        setSettings((prev) => ({ ...prev, criterion: answer.default_criterion }));
+        return client.elements();
       })
+      .then(setCatalogue)
       .catch((err: unknown) => setBootError(errorMessage(err)));
   }, [client]);
 
@@ -343,9 +423,151 @@ export function App() {
   );
 
   // Stable, because the Discover screen keeps it in an effect's dependencies.
-  const changeSearch = useCallback((change: Partial<SearchSettings>) => {
-    setSearch((prev) => ({ ...prev, ...change }));
+  const changeSettings = useCallback((change: Partial<SearchSettings>) => {
+    setSettings((prev) => ({ ...prev, ...change }));
   }, []);
+
+  // -- The topology search -----------------------------------------------------------------
+  //
+  // Run from here rather than from the Discover screen, so that a tab switch mid-search neither
+  // loses the progress nor re-arms the Discover button. Every write goes through `setSearch`,
+  // which belongs to this component and is therefore still alive when a batch lands while the
+  // user is reading something else.
+
+  const startSearch = useCallback(
+    async (spectrum: LoadedSpectrum, skeleton: string | null) => {
+      const options: SearchOptions = {
+        pool: catalogue?.pools[settings.poolName],
+        skeleton: settings.useSkeleton ? skeleton : null,
+        exhaustiveLimit: settings.exhaustiveLimit,
+        weighting: settings.weighting,
+        seed: settings.seed,
+        criterion: settings.criterion,
+      };
+      const { workers } = settings;
+      const token = nextId();
+      // The whole record is replaced as the search starts, not when it finishes: the Report
+      // screen must not show one search's classes beside another search's coverage claim, and
+      // the plots must not show the previous search's model over the new search's data.
+      setSearch({
+        token,
+        spectrumId: spectrum.id,
+        spectrumLabel: spectrum.label,
+        spectrum: spectrum.current,
+        options,
+        workers,
+        progress: idleProgress(),
+        running: true,
+        report: null,
+        picked: null,
+        pickedFit: null,
+        pickedError: null,
+        picking: false,
+        stoppedEarly: false,
+        error: null,
+      });
+      // Only ever updates the run it was made for: a search started right after a cancel must
+      // not have its record overwritten by the cancelled one's last message.
+      const update = (change: Partial<SearchState>) =>
+        setSearch((prev) => (prev === null || prev.token !== token ? prev : { ...prev, ...change }));
+
+      const pool = acquirePool(workers, (up) =>
+        update({ progress: { ...idleProgress(), workersReady: up } }),
+      );
+      const run = new SearchRun(client, pool, spectrum.current, options, (progress) =>
+        update({ progress }),
+      );
+      searchRun.current = run;
+      try {
+        const result = await run.run();
+        // Null means cancel landed before the pool -- or the enumeration -- ever produced
+        // anything to report, which is a real outcome and not the same as an empty search.
+        if (result === null) update({ stoppedEarly: true });
+        else update({ report: result, picked: result.recommended ?? result.pareto[0]?.circuit ?? null });
+      } catch (err) {
+        update({ error: errorMessage(err) });
+      } finally {
+        update({ running: false });
+        // Guarded for the same reason `update` is: a superseded run finishing must not clear the
+        // handle its successor is being cancelled through.
+        if (searchRun.current === run) searchRun.current = null;
+      }
+    },
+    [client, catalogue, settings, acquirePool],
+  );
+
+  const cancelSearch = useCallback(() => {
+    void searchRun.current?.cancel();
+  }, []);
+
+  /** Draw and plot one row of the front. The fit comes from the worker that still holds it. */
+  const pickCandidate = useCallback(
+    async (circuitText: string) => {
+      const job = search?.report?.job;
+      if (job === undefined) return;
+      const key = `${job}|${circuitText}`;
+      const cached = candidateFits.current.get(key);
+      const update = (change: Partial<SearchState>) =>
+        setSearch((prev) => (prev === null || prev.report?.job !== job ? prev : { ...prev, ...change }));
+      if (cached !== undefined) {
+        update({ picked: circuitText, pickedFit: cached, pickedError: null, picking: false });
+        return;
+      }
+      update({ picked: circuitText, pickedFit: null, pickedError: null, picking: true });
+      try {
+        const answer = await client.discoverCandidate(job, circuitText);
+        candidateFits.current.set(key, answer);
+        // Guarded on the row as well as the job: a fast click through three rows must land on
+        // the one the user stopped at, whatever order the answers come back in.
+        setSearch((prev) =>
+          prev === null || prev.report?.job !== job || prev.picked !== circuitText
+            ? prev
+            : { ...prev, pickedFit: answer, pickedError: null, picking: false },
+        );
+      } catch (err) {
+        setSearch((prev) =>
+          prev === null || prev.report?.job !== job || prev.picked !== circuitText
+            ? prev
+            : { ...prev, pickedError: errorMessage(err), picking: false },
+        );
+      }
+    },
+    [client, search?.report?.job],
+  );
+
+  // The recommended row is what the report is about, so it is what gets drawn -- but only once
+  // the search has finished, and the fetch is the same one a click makes.
+  const picked = search?.picked ?? null;
+  const pickedFit = search?.pickedFit ?? null;
+  const picking = search?.picking ?? false;
+  const pickedError = search?.pickedError ?? null;
+  useEffect(() => {
+    if (picked !== null && pickedFit === null && !picking && pickedError === null) {
+      void pickCandidate(picked);
+    }
+  }, [picked, pickedFit, picking, pickedError, pickCandidate]);
+
+  // What the Report screen reads. Both are views of state held above rather than copies of it:
+  // there is one search and one manual fit in a session, and two records of either is two things
+  // that can disagree.
+  const discovery = useMemo<Discovery | null>(
+    () =>
+      search === null || search.report === null
+        ? null
+        : { report: search.report, options: search.options, workers: search.workers },
+    [search],
+  );
+  const manualFit = useMemo<ManualFit | null>(
+    () =>
+      fitState.fit === null
+        ? null
+        : {
+            fit: fitState.fit.result,
+            spectrumId: fitState.fit.spectrumId,
+            spectrum: fitState.fit.spectrum,
+          },
+    [fitState.fit],
+  );
 
   // The two pieces of work the Report screen starts. They live here for the same reason the pool
   // does: the screen that starts them is unmounted the moment the user looks at another tab, and
@@ -408,12 +630,24 @@ export function App() {
     [client],
   );
 
-  // The Discover screen's hand-off: take a topology to the Fit screen and go there. Only the
-  // circuit travels -- see `DiscoverScreenProps.onFitCircuit` for why the fitted values do not.
-  const fitCircuit = useCallback((text: string) => {
-    setCircuit(text);
-    setScreen("fit");
-  }, []);
+  /**
+   * The Discover screen's hand-off: take a topology to the Fit screen and go there.
+   *
+   * The topology and the data selection, and nothing else. Why the fitted values do not travel is
+   * `DiscoverScreenProps.onFitCircuit` and `docs/SCREEN_STATE_PLAN.md` section 3; why the *data*
+   * does is the other half of the same argument. A search ran against one spectrum, and handing
+   * its topology to a Fit screen pointed at a different one would fit a model to data the search
+   * never saw while the button that did it said "Fit this circuit".
+   */
+  const fitCircuit = useCallback(
+    (text: string) => {
+      setCircuit(text);
+      const searched = search?.spectrumId;
+      if (searched !== undefined && spectra.some((s) => s.id === searched)) setSelectedId(searched);
+      setScreen("fit");
+    },
+    [search?.spectrumId, spectra],
+  );
 
   const selected = useMemo(() => spectra.find((s) => s.id === selectedId) ?? null, [spectra, selectedId]);
   // "" is a real value while the field is mid-edit (FitScreen shows its own parse error for
@@ -466,22 +700,27 @@ export function App() {
           <FitScreen
             client={client}
             ready={ready}
+            catalogue={catalogue}
             spectrum={selected}
             circuit={circuit}
             onCircuit={setCircuit}
-            onFit={setManualFit}
+            state={fitState}
+            onState={setFitState}
           />
         ) : screen === "discover" ? (
           <DiscoverScreen
             client={client}
             ready={ready}
+            catalogue={catalogue}
             spectrum={selected}
             skeleton={skeleton}
-            acquirePool={acquirePool}
-            settings={search}
-            onSettings={changeSearch}
+            search={search}
+            settings={settings}
+            onSettings={changeSettings}
             criteria={versions?.criteria ?? []}
-            onReport={setDiscovery}
+            onStart={(spectrumToSearch) => void startSearch(spectrumToSearch, skeleton)}
+            onCancel={cancelSearch}
+            onPick={(row) => void pickCandidate(row)}
             onFitCircuit={fitCircuit}
           />
         ) : (
