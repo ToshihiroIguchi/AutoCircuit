@@ -193,6 +193,23 @@ class Candidate:
     def aicc(self) -> float:
         return self.result.statistics.aicc
 
+    @property
+    def relative_error(self) -> float:
+        """RMS ``|Z_model - Z_data| / |Z_data|``: how far this topology is from the data.
+
+        The front's other two numbers are computed from the *weighted* residuals, so neither is
+        readable without knowing the weighting: a chi-squared of 0.13 says nothing about how
+        close the curve is under ``modulus`` weighting and something completely different under
+        ``unit``. This says it in the one unit every reader of an impedance spectrum already
+        has -- percent -- and it is the same quantity the Fit screen puts under a manual fit, so
+        a row here and a fit there can be compared at all.
+
+        It is *not* a substitute for the score. It falls monotonically as elements are added,
+        which is precisely why the score carries a parameter penalty and why the recommendation
+        is a parsimony rule rather than either number's minimum.
+        """
+        return self.result.relative_error
+
     def score(self, criterion: Criterion = DEFAULT_CRITERION) -> float:
         """This topology's value under ``criterion``, smaller being better.
 
@@ -543,7 +560,7 @@ class DiscoveryResult:
         """
         return CRITERION_LABELS[FTEST_RANKING if self.criterion == "ftest" else self.criterion]
 
-    def summary(self, spectrum: Spectrum | None = None, limit: int = 10) -> str:
+    def summary(self, limit: int = 10) -> str:
         scope = f"in {self.elapsed_s:.1f} s"
         if self.generations:
             scope = f"over {self.generations} generations {scope}"
@@ -558,7 +575,13 @@ class DiscoveryResult:
             self.completeness(),
             "",
             "Pareto front (accuracy versus complexity):",
-            f"  {'circuit':<34}{self.score_label:>11}{'chi2_red':>11}{'cplx':>7}{'free?':>7}",
+            # Three numbers for "accuracy" rather than one, because they answer different
+            # questions and this project's characteristic failure is a report that looks healthy.
+            # The score ranks; chi2_red says whether the misfit is at the level of the weighting's
+            # implied noise; RMS |dZ|/|Z| says how far off the curve actually is, in a unit that
+            # survives a change of weighting and matches what the Fit screen shows.
+            f"  {'circuit':<34}{self.score_label:>11}{'chi2_red':>11}"
+            f"{'RMS|dZ/Z|':>11}{'cplx':>7}{'free?':>7}",
         ]
         aliases: list[str] = []
         ambiguous: list[str] = []
@@ -568,7 +591,9 @@ class DiscoveryResult:
             lines.append(
                 f"  {candidate.circuit.to_string():<34}"
                 f"{candidate.score(self.criterion):>11.2f}"
-                f"{candidate.result.chi2_reduced:>11.3g}{candidate.complexity:>7.1f}"
+                f"{candidate.result.chi2_reduced:>11.3g}"
+                f"{candidate.relative_error:>11.3%}"
+                f"{candidate.complexity:>7.1f}"
                 f"{mark:>7}"
             )
             equivalents = self.equivalents_of(candidate)
@@ -637,8 +662,8 @@ class DiscoveryResult:
                         f"{chosen.n_unresolved} of them unresolved) -- better numerically, but "
                         "the extra elements are not supported by the data."
                     )
-        if spectrum is not None and recommended is not None:
-            lines += ["", "Recommended model:", recommended.result.summary(spectrum)]
+        if recommended is not None:
+            lines += ["", "Recommended model:", recommended.result.summary()]
         lines += [
             "",
             "Equivalent circuits are degenerate: several topologies often fit the same data",
@@ -739,7 +764,8 @@ class DiscoveryResult:
             [
                 "circuit", "canonical", "n_elements", "n_params", "complexity",
                 "aic", "aicc", "bic", "caic", "hqc", "waic",
-                "chi2_reduced", "n_unresolved", "unresolved", "on_pareto", "recommended",
+                "chi2_reduced", "relative_error",
+                "n_unresolved", "unresolved", "on_pareto", "recommended",
                 "equivalents",
             ]
         )
@@ -763,6 +789,10 @@ class DiscoveryResult:
                         for name in SCORE_CRITERIA
                     ),
                     f"{candidate.result.chi2_reduced:.10g}",
+                    # A fraction, not a percentage: a spreadsheet formats its own percentages
+                    # and a column that has already been multiplied by 100 cannot be told from
+                    # one that has not.
+                    f"{candidate.relative_error:.10g}",
                     candidate.n_unresolved,
                     ";".join(unresolved),
                     int(id(candidate) in front),

@@ -140,7 +140,7 @@ def report_distinguishability() -> None:
                 result = fit(circuit, data, restarts=3, seed=0)
             except Exception:  # noqa: BLE001 - a candidate that cannot be fitted is not a match
                 continue
-            if result.relative_error(data) < 1e-9:
+            if result.relative_error < 1e-9:
                 identical.append(circuit.to_string())
 
         print(f"\ntrue circuit : {dsl}   (pool {','.join(pool)}, {n} elements)")

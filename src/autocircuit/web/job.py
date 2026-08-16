@@ -592,6 +592,9 @@ def candidate_row(
         **{name: encode_float(statistics.criterion_value(name)) for name in SCORE_CRITERIA},
         "p_waic": encode_float(statistics.p_waic),
         "chi2_reduced": encode_float(candidate.result.chi2_reduced),
+        # The weighting-free companion to chi2_reduced, and the only number on this row a
+        # reader can compare against a fit made on the Fit screen.
+        "relative_error": encode_float(candidate.relative_error),
         "n_unresolved": candidate.n_unresolved,
         "unresolved": [
             name
@@ -674,7 +677,7 @@ def report_payload(job: DiscoveryJob) -> dict[str, Any]:
         ),
         "stopped": job.stopped,
         "completeness": result.completeness(),
-        "summary": result.summary(job.spectrum),
+        "summary": result.summary(),
         "criterion": result.criterion,
         "criterion_label": CRITERION_LABELS[result.criterion],
         "score_label": result.score_label,

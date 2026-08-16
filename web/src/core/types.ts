@@ -148,6 +148,8 @@ export interface FitResultWire {
   success: boolean;
   message: string;
   n_restarts: number;
+  /** RMS |Z_model - Z_data| / |Z_data|, as a fraction; the weighting-free fit quality. */
+  relative_error: WireFloat;
   restart_spread: Record<string, WireFloat>;
   fixed: Record<string, WireFloat>;
   elapsed_s: WireFloat;
@@ -236,6 +238,14 @@ export interface CandidateRowWire {
   waic: WireFloat;
   p_waic: WireFloat;
   chi2_reduced: WireFloat;
+  /**
+   * RMS |Z_model - Z_data| / |Z_data|, as a fraction.
+   *
+   * The row's other accuracy numbers come from the *weighted* residuals, so their scale moves
+   * with the weighting the search ran under; this one does not, and it is the same quantity the
+   * Fit screen puts under a manual fit, which is what lets a row here be compared with one.
+   */
+  relative_error: WireFloat;
   n_unresolved: number;
   /** Parameters whose standard error exceeds their own value. */
   unresolved: string[];

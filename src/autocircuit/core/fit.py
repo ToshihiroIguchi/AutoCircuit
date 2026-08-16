@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import math
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
 import numpy as np
@@ -61,7 +61,8 @@ _RESTART_SPREAD_WARNING = 0.05
 #: would surface as a wrong report rather than as an error.
 #:
 #: 2 (2026-08-16) added CAIC, HQC, WAIC and its effective parameter count to ``Statistics``.
-WIRE_VERSION = 2
+#: 3 (2026-08-16) added ``relative_error``, the fit's RMS |dZ|/|Z| over the spectrum.
+WIRE_VERSION = 3
 
 
 def weight_vectors(
@@ -141,7 +142,15 @@ def search_space(
 
 
 def relative_error(z_model: Complex, spectrum: Spectrum) -> float:
-    """Root-mean-square |Z_model - Z_data| / |Z_data| over the spectrum.
+    """Root-mean-square ``|Z_model - Z_data| / |Z_data|`` over the spectrum.
+
+    The deviation in the numerator is the **complex** one, so this is the distance between the
+    two points on the Nyquist plane divided by the radius of the measured one -- not a
+    disagreement in magnitude with the phases ignored. It is the one goodness-of-fit number in
+    this project that does not depend on the weighting: chi-squared and every information
+    criterion are computed from the weighted residuals, so their scale changes when the user
+    changes ``--weighting``, and two runs under different weightings cannot be compared on them.
+    This can, and it is a percentage a reader already knows how to interpret.
 
     Shared with the browser's live preview, which shows this number for a model that has not
     been fitted yet. Pressing Fit must move the same quantity rather than swap it for a
@@ -165,6 +174,16 @@ class FitResult:
     success: bool
     message: str
     n_restarts: int
+    relative_error: float = math.nan
+    """RMS ``|Z_model - Z_data| / |Z_data|``; see the module function of the same name.
+
+    Stored rather than offered as a method taking a spectrum, because it is the only number a
+    fit reports that needs the data as well as the model, and a method would let a caller
+    compute it against a spectrum this result was not fitted to. It is also what makes the
+    quantity available where the data is not: a Pareto row crosses a worker boundary as a
+    :class:`~autocircuit.core.discover.Candidate`, and the shortlist that produced it is long
+    gone by the time the table is drawn.
+    """
     restart_spread: dict[str, float] = field(default_factory=dict)
     """Relative spread of each parameter across restarts; large values mean non-unique."""
     fixed: dict[str, float] = field(default_factory=dict)
@@ -185,10 +204,6 @@ class FitResult:
     @property
     def aicc(self) -> float:
         return self.statistics.aicc
-
-    def relative_error(self, spectrum: Spectrum) -> float:
-        """Root-mean-square |Z_model - Z_data| / |Z_data| over the spectrum."""
-        return relative_error(self.z_model, spectrum)
 
     @property
     def warnings(self) -> tuple[str, ...]:
@@ -228,6 +243,7 @@ class FitResult:
             "success": self.success,
             "message": self.message,
             "n_restarts": self.n_restarts,
+            "relative_error": encode_float(self.relative_error),
             "restart_spread": encode_mapping(self.restart_spread),
             "fixed": encode_mapping(self.fixed),
             "elapsed_s": encode_float(self.elapsed_s),
@@ -256,6 +272,7 @@ class FitResult:
             success=bool(payload["success"]),
             message=str(payload["message"]),
             n_restarts=int(payload["n_restarts"]),
+            relative_error=decode_float(payload["relative_error"]),
             restart_spread=decode_mapping(payload["restart_spread"]),
             fixed=decode_mapping(payload["fixed"]),
             elapsed_s=decode_float(payload["elapsed_s"]),
@@ -289,6 +306,9 @@ class FitResult:
                 "n_params": self.statistics.n_params,
                 "ssr": self.statistics.ssr,
                 "chi2_reduced": self.statistics.chi2_reduced,
+                # The weighting-free companion to the two above: they are computed from the
+                # weighted residuals and change scale with ``weighting``, this does not.
+                "relative_error": self.relative_error,
                 # Every criterion, always -- a report file outlives the session that chose one,
                 # and a reader who wants BIC should not have to refit to get it.
                 "aic": self.statistics.aic,
@@ -305,8 +325,14 @@ class FitResult:
             "elapsed_s": self.elapsed_s,
         }
 
-    def summary(self, spectrum: Spectrum | None = None) -> str:
-        """Human-readable report for the command line."""
+    def summary(self) -> str:
+        """Human-readable report for the command line.
+
+        This used to take the spectrum, because the RMS relative error was the one line here
+        that needed the data. It is now carried on the result itself, so the report no longer
+        depends on the caller having the right spectrum to hand -- and cannot be printed
+        against the wrong one.
+        """
         lines = [
             f"Circuit      : {self.circuit.to_string()}",
             f"Weighting    : {self.weighting}",
@@ -327,7 +353,11 @@ class FitResult:
         st = self.statistics
         lines += [
             "",
-            f"chi^2 (reduced) : {st.chi2_reduced:.6g}",
+            f"chi^2 (reduced) : {st.chi2_reduced:.6g}   ({self.weighting} weighting)",
+            # Deliberately not "RMS relative |Z| error", which this line used to say: the
+            # numerator is the complex deviation, not a disagreement in magnitude, and the old
+            # wording named the wrong quantity.
+            f"RMS |dZ|/|Z|    : {self.relative_error:.4%}",
             f"AIC  {st.aic:>13.6g}   AICc {st.aicc:>13.6g}   BIC  {st.bic:>13.6g}",
             f"CAIC {st.caic:>13.6g}   HQC  {st.hqc:>13.6g}   WAIC {st.waic:>13.6g}",
             # WAIC's penalty counts what the data resolves; printing it beside the nominal count
@@ -337,8 +367,6 @@ class FitResult:
             f"Data points     : {st.n_data // 2}"
             f"   Free parameters: {st.n_params}",
         ]
-        if spectrum is not None:
-            lines.append(f"RMS relative |Z| error : {self.relative_error(spectrum):.4%}")
         if self.warnings:
             lines.append("")
             lines.append("Warnings:")
@@ -615,6 +643,7 @@ def fit(
         success=bool(best.success),
         message=messages[0] if len(messages) == 1 else f"best of {n_restarts} restarts",
         n_restarts=n_restarts,
+        relative_error=relative_error(z_model, spectrum),
         restart_spread=spread,
         fixed=dict(fixed or {}),
         elapsed_s=time.perf_counter() - started,
@@ -750,7 +779,14 @@ def _restart_spread(problem: _Problem, xs: list[Float], best_cost: float) -> dic
 
 
 def _expand_statistics(stats: Statistics, circuit: Circuit, problem: _Problem) -> Statistics:
-    """Re-index free-parameter statistics onto the full parameter list (fixed ones get 0)."""
+    """Re-index free-parameter statistics onto the full parameter list (fixed ones get 0).
+
+    Only the two per-parameter arrays are re-indexed; everything else is carried across
+    unchanged. ``dataclasses.replace`` rather than a field-by-field rebuild, because a rebuild
+    silently drops whatever field is added to :class:`Statistics` next -- which is exactly what
+    happened to CAIC, HQC, WAIC and the Jacobian rank, all of which came back NaN (and rank 0)
+    from any fit that held a parameter fixed.
+    """
     n = len(circuit.param_names)
     if problem.free_idx.size == n:
         return stats
@@ -759,15 +795,4 @@ def _expand_statistics(stats: Statistics, circuit: Circuit, problem: _Problem) -
     correlation = np.eye(n)
     idx = problem.free_idx
     correlation[np.ix_(idx, idx)] = stats.correlation
-    return Statistics(
-        n_data=stats.n_data,
-        n_params=stats.n_params,
-        ssr=stats.ssr,
-        chi2_reduced=stats.chi2_reduced,
-        stderr=stderr,
-        correlation=correlation,
-        aic=stats.aic,
-        aicc=stats.aicc,
-        bic=stats.bic,
-        warnings=stats.warnings,
-    )
+    return replace(stats, stderr=stderr, correlation=correlation)

@@ -65,7 +65,9 @@ from autocircuit.web import export, job
 #: carries all six scores plus the one the ranking used.
 #: 6 (2026-08-16): ``discover_candidate`` hands back the fit behind one results row, so the
 #: screen that ran the search can plot what it found instead of only tabulating it.
-BRIDGE_VERSION = 6
+#: 7 (2026-08-16): every results row carries ``relative_error``, the RMS |dZ|/|Z| that the Fit
+#: screen already showed -- the one fit-quality number that does not move with the weighting.
+BRIDGE_VERSION = 7
 
 __all__ = ["BRIDGE_VERSION", "handle"]
 
@@ -263,10 +265,10 @@ def _op_fit(payload: dict[str, Any]) -> dict[str, Any]:
         margin_decades=float(payload.get("margin_decades", 3.0)),
         time_limit=None if time_limit is None else float(time_limit),
     )
-    return _fit_payload(result, spectrum)
+    return _fit_payload(result)
 
 
-def _fit_payload(result: FitResult, spectrum: Spectrum) -> dict[str, Any]:
+def _fit_payload(result: FitResult) -> dict[str, Any]:
     """One fit, in the shape every screen that plots a model curve reads.
 
     The residual vector is real parts then imaginary parts, which is a detail of the objective
@@ -280,11 +282,11 @@ def _fit_payload(result: FitResult, spectrum: Spectrum) -> dict[str, Any]:
     half = result.residuals.size // 2
     return {
         "fit": result.to_wire(),
-        "relative_error": encode_float(result.relative_error(spectrum)),
+        "relative_error": encode_float(result.relative_error),
         "residual_real": encode_array(result.residuals[:half]),
         "residual_imag": encode_array(result.residuals[half:]),
         "warnings": list(result.warnings),
-        "summary": result.summary(spectrum),
+        "summary": result.summary(),
     }
 
 
@@ -417,12 +419,13 @@ def _op_discover_candidate(payload: dict[str, Any]) -> dict[str, Any]:
     Answered lazily, one row at a time, rather than folded into ``refit_task``: the whole
     shortlist crosses the wire during a search and almost none of it is ever looked at.
 
-    The spectrum is the job's own -- the data the search actually ran against, which is not
-    necessarily the one the user has selected by the time they read the answer.
+    Every number in the answer -- the RMS relative error included -- was computed against the
+    job's own spectrum, the data the search actually ran against, which is not necessarily the
+    one the user has selected by the time they read the answer.
     """
     running = job.current(str(payload["job"]))
     candidate = running.candidate(payload.get("circuit"))
-    return _fit_payload(candidate.result, running.spectrum)
+    return _fit_payload(candidate.result)
 
 
 def _op_discover_cancel(payload: dict[str, Any]) -> dict[str, Any]:

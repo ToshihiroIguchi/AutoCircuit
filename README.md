@@ -81,12 +81,12 @@ L1.L             5.06163e-10      5.15e-12     1.0%  H
 SKINF1.A         2.12652e-05      1.28e-06     6.0%  ohm*s^n
 SKINF1.n             0.49672       0.00321     0.6%  -
 
-chi^2 (reduced) : 9.07659e-05
+chi^2 (reduced) : 9.07659e-05   (modulus weighting)
+RMS |dZ|/|Z|    : 1.3234%
 AIC       -1316.72   AICc      -1316.28   BIC       -1301.94
 CAIC      -1296.94   HQC       -1310.71   WAIC       -1315.8
 WAIC effective parameters: 5.58 of 5   (Laplace approximation)
 Data points     : 71   Free parameters: 5
-RMS relative |Z| error : 1.3234%
 
 Warnings:
   - SKINF1.A and SKINF1.n are -0.9983 correlated: they are not independently

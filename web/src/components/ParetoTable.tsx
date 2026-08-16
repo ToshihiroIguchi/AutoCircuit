@@ -8,10 +8,18 @@
 // criterion ran) is the minimum of a penalty term, which routinely lands on a circuit carrying a
 // parameter whose standard error exceeds its own value. Showing only one of them would have it
 // read as the other.
+//
+// It carries two accuracy columns for the same reason. chi² (reduced) is built from the
+// *weighted* residuals, so what counts as a good value depends on the weighting the search ran
+// under and a reader cannot judge it without knowing that. RMS |ΔZ|/|Z| is the distance between
+// the fitted and the measured point on the Nyquist plane over the radius of the measured one --
+// a percentage that means the same thing under every weighting, and the same quantity the Fit
+// screen reports, so a row here and a manual fit there can be compared at all. Neither replaces
+// the score: both fall as elements are added, which is what the score's penalty is for.
 
 import type { CandidateRowWire } from "../core/types";
 import { decodeFloat } from "../core/wire";
-import { formatNumber } from "../utils/format";
+import { formatNumber, formatPercent } from "../utils/format";
 
 export interface ParetoTableProps {
   title: string;
@@ -51,7 +59,12 @@ export function ParetoTable({
               <th className="num">Elements</th>
               <th className="num">Params</th>
               <th className="num">{scoreLabel}</th>
-              <th className="num">chi² (reduced)</th>
+              <th className="num" title="Weighted sum of squared residuals per degree of freedom. Its scale depends on the weighting the search ran under.">
+                chi² (reduced)
+              </th>
+              <th className="num" title="Root-mean-square |Z_model − Z_data| / |Z_data|. The complex deviation, not a disagreement in magnitude — and the only fit-quality number here that does not move with the weighting.">
+                RMS |ΔZ|/|Z|
+              </th>
               <th className="num">Complexity</th>
               <th>Unresolved</th>
             </tr>
@@ -97,6 +110,7 @@ export function ParetoTable({
                   <td className="num">{row.n_params}</td>
                   <td className="num">{formatNumber(decodeFloat(row.score), 6)}</td>
                   <td className="num">{formatNumber(decodeFloat(row.chi2_reduced), 5)}</td>
+                  <td className="num">{formatPercent(decodeFloat(row.relative_error), 3)}</td>
                   <td className="num">{formatNumber(decodeFloat(row.complexity), 3)}</td>
                   <td className="pareto-table__unresolved">
                     {row.unresolved.length === 0 ? "" : row.unresolved.join(", ")}

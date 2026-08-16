@@ -1736,10 +1736,17 @@ body {
 
 /* ---- pareto table ---- */
 
+/* Eight columns, one of which holds a list of parameter names: on a narrow viewport the table
+   takes the horizontal scroll rather than handing it to the page body. */
+.pareto-table {
+  overflow-x: auto;
+}
+
 .pareto-table__table {
   width: 100%;
   border-collapse: collapse;
   font-size: 12px;
+  min-width: 640px;
 }
 
 .pareto-table__table th,

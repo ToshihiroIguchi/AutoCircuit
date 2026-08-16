@@ -81,7 +81,7 @@ def run_accuracy() -> None:
             worst = max(abs(got[k] - v) / abs(v) for k, v in expected.items())
             print(
                 f"  {label:<26}n={circuit.n_params}  worst={worst:7.2%}  "
-                f"rel|Z|={result.relative_error(data):7.3%}  t={elapsed:5.2f}s"
+                f"rel|Z|={result.relative_error:7.3%}  t={elapsed:5.2f}s"
             )
 
 

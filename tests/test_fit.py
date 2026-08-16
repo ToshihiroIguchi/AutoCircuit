@@ -7,6 +7,8 @@ is required to recover parameters that span fifteen orders of magnitude.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 
@@ -106,7 +108,7 @@ def test_recovers_parameters_from_noise_free_data(
     got = _canonical_params(circuit, result.values)
     for name, value in expected.items():
         assert got[name] == pytest.approx(value, rel=1e-3), f"{label}: {name}"
-    assert result.relative_error(data) < 1e-6
+    assert result.relative_error < 1e-6
 
 
 @pytest.mark.parametrize(
@@ -122,7 +124,7 @@ def test_recovers_parameters_from_noisy_data(
     data = simulate(circuit, log_frequencies(f_min, f_max, 10), truth, noise=0.01, seed=11)
     result = fit(circuit, data, seed=0)
 
-    assert result.relative_error(data) < 0.03
+    assert result.relative_error < 0.03
     expected = _canonical_params(circuit, truth)
     got = _canonical_params(circuit, result.values)
     stderr = dict(zip(circuit.param_names, result.statistics.stderr, strict=True))
@@ -161,6 +163,30 @@ def test_fixed_parameters_are_held_exactly() -> None:
     assert result.params["L1.L"] == 5e-10
     assert result.statistics.n_params == 2
     assert result.params["C1.C"] == pytest.approx(1e-6, rel=0.02)
+
+
+def test_fixing_a_parameter_keeps_every_criterion() -> None:
+    """A held parameter must not silently delete four of the six scores.
+
+    ``_expand_statistics`` re-indexes the two per-parameter arrays onto the full parameter list,
+    and it used to rebuild the whole ``Statistics`` field by field to do it -- so CAIC, HQC,
+    WAIC, its effective parameter count and the Jacobian rank came back NaN (and rank 0) from
+    any fit that fixed something, while AIC, AICc and BIC beside them were fine. A criterion
+    menu offering six entries of which four are blank under ``--fix`` is exactly the shape of
+    failure this project keeps meeting: the report still looks healthy.
+    """
+    circuit = Circuit.parse("C1-R1-L1")
+    truth = {"C1.C": 1e-6, "R1.R": 1e-2, "L1.L": 5e-10}
+    data = simulate(circuit, log_frequencies(1e2, 1e9, 10), truth, noise=0.005, seed=3)
+    stats = fit(circuit, data, fixed={"L1.L": 5e-10}, seed=0).statistics
+
+    for name in ("aic", "aicc", "bic", "caic", "hqc", "waic", "p_waic"):
+        assert math.isfinite(getattr(stats, name)), name
+    assert stats.rank == 2
+    # The two arrays are the ones that really are re-indexed: the held parameter gets a zero
+    # standard error and a unit row of the correlation matrix.
+    assert stats.stderr.shape == (3,)
+    assert stats.stderr[circuit.param_names.index("L1.L")] == 0.0
 
 
 def test_fixing_every_parameter_is_rejected() -> None:
@@ -259,6 +285,57 @@ def test_modulus_weighting_beats_unit_weighting_on_a_wide_dynamic_range() -> Non
     assert modulus_error < unit_error
 
 
+def test_relative_error_is_the_objective_the_fit_minimised() -> None:
+    """Under modulus weighting the reported RMS is ``sqrt(SSR / n_points)``, exactly.
+
+    This is the reason the number is worth putting on a Pareto row rather than being a second,
+    prettier opinion about fit quality. The weighted residual under ``modulus`` is
+    ``(Z_model - Z_data) / |Z_data|`` split into its real and imaginary halves, so the sum of
+    its squares over both halves *is* the sum of ``|dZ|^2 / |Z|^2`` -- and the reported RMS is
+    that sum per frequency point, square-rooted. Same quantity as chi-squared, read in a unit a
+    person can judge, which is exactly why it must not be computed by an independent route that
+    could drift away from the objective.
+
+    Note the denominator: ``n_points``, not ``n_data``. ``chi2_reduced`` divides the same sum by
+    ``2 * n_points - k``, so the two differ by more than a square root and neither is derivable
+    from the other without the parameter count.
+    """
+    circuit = Circuit.parse("R1-p(R2,C1)")
+    truth = {"R1.R": 12.0, "R2.R": 500.0, "C1.C": 2e-6}
+    data = simulate(circuit, log_frequencies(1e-1, 1e6, 8), truth, noise=0.02, seed=4)
+    result = fit(circuit, data, weighting="modulus", seed=0)
+
+    ssr = float(np.dot(result.residuals, result.residuals))
+    assert result.statistics.ssr == pytest.approx(ssr, rel=1e-12)
+    assert result.relative_error == pytest.approx(math.sqrt(ssr / data.n), rel=1e-12)
+
+
+def test_relative_error_is_the_one_number_a_change_of_weighting_leaves_alone() -> None:
+    """Two weightings, one spectrum: chi-squared is incomparable, the RMS is comparable.
+
+    ``chi2_reduced`` is built from the weighted residuals, so ``unit`` weighting on a spectrum
+    spanning five decades of |Z| reports a value orders of magnitude away from ``modulus``'s on
+    the *same data* -- it is measured in the weighting's own units. The RMS relative error is
+    measured in the data's, so the two fits can be put side by side, which is what the Pareto
+    table and the Fit screen need in order to show the same column.
+    """
+    circuit = Circuit.parse("C1-R1-L1")
+    truth = {"C1.C": 1e-6, "R1.R": 1e-2, "L1.L": 5e-10}
+    data = simulate(circuit, log_frequencies(1e2, 1e9, 10), truth, noise=0.01, seed=5)
+
+    modulus = fit(circuit, data, weighting="modulus", seed=0)
+    unit = fit(circuit, data, weighting="unit", seed=0)
+
+    # Four orders of magnitude apart (7.9e-5 against 6.0), and neither is "worse": they are
+    # sums over residuals divided by different things. A reader cannot rank them.
+    assert unit.statistics.chi2_reduced / modulus.statistics.chi2_reduced > 1e4
+    # On the scale that survives the change, both are readable and they rank as expected:
+    # 1.2% against 19%, because modulus weighting is what minimises exactly this.
+    assert modulus.relative_error == pytest.approx(0.0124, abs=5e-3)
+    assert unit.relative_error == pytest.approx(0.193, abs=5e-2)
+    assert modulus.relative_error < unit.relative_error
+
+
 def test_result_serialises_to_json_friendly_types() -> None:
     import json
 
@@ -276,7 +353,7 @@ def test_summary_mentions_every_parameter() -> None:
     circuit = Circuit.parse("C1-R1-L1")
     truth = {"C1.C": 1e-6, "R1.R": 1e-2, "L1.L": 5e-10}
     data = simulate(circuit, log_frequencies(1e2, 1e9, 10), truth, seed=0)
-    text = fit(circuit, data, seed=0).summary(data)
+    text = fit(circuit, data, seed=0).summary()
     for name in circuit.param_names:
         assert name in text
     assert "chi^2" in text

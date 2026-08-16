@@ -254,6 +254,9 @@ def test_fit_result_round_trips_exactly_through_the_wire(
     assert back.success == result.success
     assert back.message == result.message
     assert back.n_restarts == result.n_restarts
+    # Bit-for-bit, like every other float here: it is a *reported* number now rather than one
+    # the far side could recompute, since the far side does not have the spectrum.
+    assert repr(back.relative_error) == repr(result.relative_error)
     assert back.restart_spread == result.restart_spread
     assert back.fixed == result.fixed
     assert repr(back.elapsed_s) == repr(result.elapsed_s)
@@ -271,7 +274,7 @@ def test_fit_result_round_trips_exactly_through_the_wire(
     assert back_stats.rank == stats.rank
     assert back_stats.warnings == stats.warnings
 
-    assert back.summary(data) == result.summary(data)
+    assert back.summary() == result.summary()
     assert back.to_dict() == result.to_dict()
 
 

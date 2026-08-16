@@ -1108,3 +1108,64 @@ had to be bumped to 5 — which is the test doing its job.
 `test_discover.py::test_time_limit_stops_the_search` failed at **65 s inside the full run and
 passed at 37 s in isolation a minute later**, which is the third occurrence of the thermal
 pattern §4 describes. Do not widen that bound. `tests/test_criteria.py` is new: 20 tests, 15 s.
+
+## 18. What a Pareto row says about fit quality
+
+The front carried a score and `chi2_reduced` and nothing a reader could judge on sight. Both are
+computed from the **weighted** residuals, so their scale is the weighting's, not the data's: on
+`web/public/samples/maxwell-wagner.csv` a two-element `p(R1,C1)` reports `chi2_red 0.237` against
+the four-element truth's `9.01e-05`. Nothing in "0.237" says that model is 68% away from the
+measurement. The Fit screen had the number that does -- `RMS |dZ|/|Z|` -- and the search did not,
+so a row and a manual fit could not be compared at all.
+
+- **`FitResult.relative_error` is now a stored field, not a method taking a spectrum.** It has to
+  be: a Pareto row crosses a worker boundary as a `Candidate`, and by the time the table is drawn
+  the spectrum is not there. Storing it also removes the way the method could be misused -- it
+  accepted *any* spectrum, including one the result was not fitted to. `core/fit.relative_error()`
+  stays as the module function, because the browser's pre-fit preview still computes it from a
+  curve that has no `FitResult` (see section 10).
+- **It is the objective, read in a different unit, and there is a test that says so.** Under
+  modulus weighting the weighted residual is `(Z_model - Z_data)/|Z_data|` split into halves, so
+  `sum of squares == sum of |dZ|^2/|Z|^2` and the reported RMS is exactly `sqrt(SSR / n_points)`
+  (`test_relative_error_is_the_objective_the_fit_minimised`). Note the denominator: `chi2_reduced`
+  divides the same sum by `2*n_points - k`, so neither is derivable from the other without the
+  parameter count, and the two columns are not a number and its square root.
+- **It is the only fit-quality number a change of weighting leaves alone.** [measured] `C1-R1-L1`
+  against a five-decade spectrum: `chi2_reduced` is `7.87e-05` under modulus and `5.99` under unit,
+  four orders of magnitude apart on the *same data* and neither one "worse" -- they are sums over
+  different divisors. The RMS is 1.24% and 19.3%, which ranks them the way a person would.
+- **It is not a ranking and must not read as one.** It falls monotonically with element count, so
+  the bottom row of the front is always the best-fitting one and routinely not the recommendation.
+  That is what the score's penalty and the parsimony rule exist for; `to_csv` therefore writes it
+  as a fraction rather than a pre-multiplied percentage, and the column sits beside `chi2_reduced`
+  rather than replacing it.
+- **The old label named the wrong quantity.** `FitResult.summary()` said `RMS relative |Z| error`,
+  which reads as a disagreement in magnitude. The numerator is the complex deviation -- the
+  distance between two points on the Nyquist plane -- so the line now says `RMS |dZ|/|Z|`.
+- **`FitResult.summary()` and `DiscoveryResult.summary()` no longer take a spectrum.** It was only
+  ever used for this one line. `DiscoveryResult.summary()` consequently always prints the
+  recommended model's detail, where before it printed it only when a caller happened to pass the
+  data; every caller in the CLI and the bridge did.
+
+[measured, CLI and browser, same file and seed] The front agrees digit for digit across the two:
+`68.467% / 59.901% / 1.326%`. The four exact reparameterisations of the truth all report `1.326%`,
+which is the column behaving correctly -- it invents no distinction where the data has none.
+
+`BRIDGE_VERSION` is **7** and `fit.WIRE_VERSION` is **3**.
+
+### 18.1 A bug found on the way, in `_expand_statistics`
+
+Fixing a parameter silently deleted four of the six criteria. `_expand_statistics` re-indexes the
+two per-parameter arrays onto the full parameter list, and it rebuilt the whole `Statistics`
+field by field to do it -- so a rebuild written before CAIC, HQC and WAIC existed carried AIC,
+AICc and BIC across and left the rest at their NaN defaults, with `rank` at 0. Any fit under
+`--fix` reported a criterion menu with four blanks in it and no indication why. It is
+`dataclasses.replace` now, which cannot drop a field added later.
+
+### 18.2 State of the suite
+
+[measured] `python -m pytest -q`: **723 passed, 19 skipped** in 427 s, five of them new here.
+An intermediate run of the same suite failed `test_discover.py::test_time_limit_stops_the_search`
+at 65 s and it **passed in isolation at 39 s a minute later** -- the fourth occurrence of the
+thermal pattern section 4 describes, and again not a bound to widen. `npm run check` and
+`npm run smoke` both pass.

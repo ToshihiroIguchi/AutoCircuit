@@ -729,9 +729,9 @@ def test_fit_matches_direct_fit_call_bit_for_bit() -> None:
     assert response["ok"] is True
     result = response["result"]
     np.testing.assert_array_equal(decode_array(result["fit"]["values"]), expected.values)
-    assert result["summary"] == expected.summary(spectrum)
+    assert result["summary"] == expected.summary()
     assert result["warnings"] == list(expected.warnings)
-    assert decode_float(result["relative_error"]) == expected.relative_error(spectrum)
+    assert decode_float(result["relative_error"]) == expected.relative_error
 
 
 # =================================================================================================
@@ -943,7 +943,7 @@ def test_bridge_version_is_bumped_for_the_new_operations() -> None:
     """Pins the value rather than just its presence: a worker checks this at start-up and a
     stale cached bundle must fail loudly instead of answering with the old protocol.
     """
-    assert BRIDGE_VERSION == 6
+    assert BRIDGE_VERSION == 7
 
 
 def test_every_response_above_parses_as_json_and_re_dumps_without_allow_nan() -> None:

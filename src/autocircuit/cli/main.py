@@ -157,7 +157,7 @@ def cmd_fit(args: argparse.Namespace) -> int:
         maxiter=args.maxiter,
         time_limit=args.time_limit,
     )
-    print(result.summary(spectrum))
+    print(result.summary())
     _write_outputs(args, spectrum, circuit, result)
     return 0 if result.success else 1
 
@@ -271,7 +271,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
         time_limit=args.time_limit,
         seeds=args.seed_circuit or None,
     )
-    print(result.summary(spectrum, limit=args.top))
+    print(result.summary(limit=args.top))
 
     # DRT is printed beside the search, never fed into it. Raising the enumeration floor on a
     # DRT relaxation count would save under 1% of the screen and cost the completeness claim

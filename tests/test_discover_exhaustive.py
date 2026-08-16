@@ -9,6 +9,8 @@ it drops to a smaller number (never a false one) when a budget cuts the run shor
 
 from __future__ import annotations
 
+import csv
+import io
 import math
 from dataclasses import replace
 
@@ -38,7 +40,10 @@ from autocircuit.core.enumerate import (
     count_topologies,
     enumerate_topologies,
 )
+from autocircuit.core.fit import relative_error
 from autocircuit.core.simulate import log_frequencies, simulate
+from autocircuit.core.wire import decode_float
+from autocircuit.web.job import candidate_row
 
 SEMICIRCLE = {"R1.R": 20.0, "R2.R": 1e3, "C1.C": 1e-8}
 
@@ -104,6 +109,56 @@ def test_exhaustive_mode_reports_the_true_topology_and_its_equivalent() -> None:
     assert twin in result.equivalents_of(truth)
     assert result.recommended is not None
     assert result.recommended.circuit.n_params == 3
+
+
+def test_the_front_reports_a_fit_quality_a_reader_can_judge() -> None:
+    """Every report surface carries the RMS relative error, and it is the one from the data.
+
+    The front's score and chi-squared are both built from the *weighted* residuals, so neither
+    can be read without knowing which weighting ran; a reader who wants to know how close the
+    curve is has no column to look at. This adds the one that answers that -- the same quantity
+    the Fit screen shows under a manual fit, so the two can be compared -- and pins it to
+    ``relative_error(z_model, spectrum)`` rather than to anything re-derived, on the text
+    summary, in the CSV and on the wire row, which are three places it could drift apart.
+    """
+    spectrum = _semicircle(points=10)
+    result = discover(
+        spectrum, pool=("R", "C"), mode="exhaustive", exhaustive_limit=3, seed=0
+    )
+    best = result.pareto[0]
+    assert best.relative_error == relative_error(best.result.z_model, spectrum)
+    assert 0.0 < best.relative_error < 1.0
+
+    text = result.summary()
+    assert "RMS|dZ/Z|" in text
+    assert f"{best.relative_error:.3%}" in text
+
+    rows = {row["circuit"]: row for row in csv.DictReader(io.StringIO(result.to_csv()))}
+    # A fraction in the file, not a percentage: a spreadsheet formats its own.
+    assert float(rows[best.circuit.to_string()]["relative_error"]) == pytest.approx(
+        best.relative_error, rel=1e-9
+    )
+    assert decode_float(candidate_row(best)["relative_error"]) == best.relative_error
+
+
+def test_a_better_fit_quality_is_not_a_better_model() -> None:
+    """The new column must not be readable as a ranking, and the front is where that shows.
+
+    RMS relative error falls monotonically as elements are added -- a larger model can always
+    reproduce a smaller one -- so the last row of the front is the best-fitting one and is
+    routinely *not* the recommendation. That is the whole reason the score carries a parameter
+    penalty and the recommendation is a parsimony rule; if the two ever agreed by construction
+    this column would be a leaderboard.
+    """
+    result = discover(
+        _semicircle(points=10), pool=("R", "C"), mode="exhaustive", exhaustive_limit=4, seed=0
+    )
+    front = result.pareto
+    assert len(front) > 1
+    # Simplest first, so accuracy improves down the table by construction.
+    assert front[-1].relative_error < front[0].relative_error
+    assert result.recommended is not None
+    assert result.recommended.relative_error >= min(c.relative_error for c in front)
 
 
 def test_completeness_is_lowered_rather_than_faked_when_the_budget_bites() -> None:
