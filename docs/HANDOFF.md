@@ -967,8 +967,9 @@ front page.
 ## 17. Seven model-selection criteria, and six UI questions
 
 `docs/METRICS_AND_UX_PLAN.md` is the record. Seven items were raised together; one of them
-changes what every report in this project ranks by, three are a few lines each, one was already
-implemented, and one is a measurement that came out the opposite way to the obvious design.
+changes what every report in this project ranks by, three are a few lines each, one turned out to
+be implemented already, and **one shipped as nothing but a measurement** -- both versions of the
+cold-start fix were built and both were measured to be no improvement (§17.5).
 
 ### 17.1 The criteria
 
@@ -1046,33 +1047,41 @@ selection above the table with the *same* `CircuitCanvas` the Fit screen edits, 
 disagree with the editable one, and `npm run schematic` checks the geometry once. It asks the
 bridge to parse the string, because no JavaScript here parses a circuit.
 
-### 17.5 Cold start: what is slow, and the measurement that inverted the fix
+### 17.5 Cold start: measured twice, changed nothing, and that is the result
 
 `web/dist` is 41 MB and **17 of them are the numpy and scipy wheels, which `loadPackage` cannot
 ask for until `loadPyodide()` has resolved** — and that call first fetches the 9.6 MB wasm and
-the 7.1 MB stdlib. So 41% of the bytes were sitting behind a barrier they do not depend on.
-[measured, deployed site, fresh Edge profile, two runs] **15.24 s and 13.52 s to a ready worker,
-with the packages stage 7.84 s and 4.39 s of that.**
+the 7.1 MB stdlib. So 41% of the bytes sit behind a barrier they do not depend on. That is a real
+observation and the obvious fix from it is wrong twice over. **Nothing about the cold start ships
+from this session; what ships is the reason not to try it again.**
 
-**The obvious fix does not work, and it is worse than doing nothing.** A `<link rel="preload"
-as="fetch">` in `index.html` is fetched by the *document*, and a document's preload cache does
-not serve a **Web Worker's** fetch. [measured] Chrome downloaded all 17 MB a second time and
-logged "preloaded … but not used" for both wheels. The prefetch therefore lives in
-`bridge.worker.ts`, in the same context as the fetch it feeds: it reads `pyodide/wheels.json`
-(written by `build-assets.mjs`, because the names carry version numbers), starts both fetches
-before `loadPyodide`, and patches `self.fetch` to answer `loadPackage` from them — matching by
-file name, since the URL `loadPackage` builds need not be character-for-character the one this
-built. A failed prefetch resolves to null and falls back to the network. [measured] Each wheel is
-then requested **exactly once**.
+- **A document's preload cache does not serve a Web Worker's fetch.** [measured] A
+  `<link rel="preload" as="fetch">` in `index.html` left `loadPackage` unsatisfied: Chrome
+  downloaded all 17 MB a second time and logged "preloaded … but not used" for both wheels. No
+  attribute fixes that; the document and the worker are different fetch contexts.
+- **Doing it inside the worker works, and makes the total worse.** [measured, deployed site,
+  fresh Edge profile per run] Prefetching in `bridge.worker.ts` and answering `loadPackage` from
+  the result took the packages stage from **7.84 / 4.39 s to 1.67 / 1.80 / 2.75 / 1.66 s** — and
+  the total to a ready worker went from **15.24 / 13.52 s to 22.27 / 16.56 / 15.75 / 30.60 s**,
+  every reading at or above the worst one without it. The load is **bandwidth-bound**, so the
+  wheels do not overlap the boot, they compete with it: the wasm the boot blocks on arrives
+  later. The time moved between stages and a little was lost.
 
-Two things not done, both written down rather than left as an impression:
+**The methodological point is the one to keep: the stage breakdown said this was a large win and
+the total said it was a loss.** Do not accept a per-stage improvement as a cold-start
+improvement, and do not measure this on `localhost`, where the transfer is ~100 ms and there is
+nothing to overlap.
 
-- **Deferring scipy** is the largest remaining lever — 14 MB of the 17, and the Data screen does
-  not need it. `core/elements.py` imports `scipy.special` at module scope and `core/fit.py`
-  imports `scipy.optimize`, so `from autocircuit.web import handle` pulls scipy in before any
-  operation runs. It would mean lazy imports in three core modules and a bridge that can answer
-  some operations and not others, which the front end would have to model — trading the "one
-  handle, no decisions" property that made the browser agree with the CLI digit for digit.
+What follows from it: **reordering transfers cannot help a bandwidth-bound load; only sending
+fewer bytes before the page is usable can.** So the two items below are unchanged in status, and
+the first is now the only lever left worth its disruption.
+
+- **Deferring scipy** — 14 MB of the 17, and the Data screen does not need it.
+  `core/elements.py` imports `scipy.special` at module scope and `core/fit.py` imports
+  `scipy.optimize`, so `from autocircuit.web import handle` pulls scipy in before any operation
+  runs. It would mean lazy imports in three core modules and a bridge that can answer some
+  operations and not others, which the front end would have to model — trading the "one handle,
+  no decisions" property that made the browser agree with the CLI digit for digit.
 - **A service worker** is still refused, for §6's reason.
 
 ### 17.6 Dragging an element onto the circuit was already implemented

@@ -39,11 +39,6 @@ const PUBLIC = join(WEB, "public");
 // whether the step needs to run.
 const SOURCE_ARCHIVE = join(WEB, ".build", "autocircuit-source.zip");
 const PYODIDE_OUT = join(PUBLIC, "pyodide");
-// Which wheel files were vendored. index.html reads this before anything else runs and preloads
-// them; the names carry version numbers, so nothing can hard-code them and a hand-written tag
-// would silently stop matching at the next Pyodide bump -- which would mean 17 MB fetched twice
-// rather than once early. See index.html and docs/METRICS_AND_UX_PLAN.md section 1.
-const WHEEL_MANIFEST = join(PYODIDE_OUT, "wheels.json");
 const PYODIDE_PKG = join(WEB, "node_modules", "pyodide");
 const SAMPLES_OUT = join(PUBLIC, "samples");
 const PYTHONPATH = join(REPO, "src");
@@ -87,14 +82,10 @@ async function copyRuntime() {
 async function copyWheels() {
   const lock = JSON.parse(await readFile(join(PYODIDE_PKG, "pyodide-lock.json"), "utf8"));
   const version = JSON.parse(await readFile(join(PYODIDE_PKG, "package.json"), "utf8")).version;
-  const vendored = [];
   for (const name of WHEELS) {
     const entry = lock.packages[name];
     if (!entry) throw new Error(`pyodide-lock.json has no package ${name}`);
     const target = join(PYODIDE_OUT, entry.file_name);
-    // The names carry version numbers, so nothing outside this loop can know them. They are
-    // written to WHEEL_MANIFEST below, which index.html preloads from.
-    vendored.push(entry.file_name);
     if (await exists(target)) continue;
 
     // The npm package ships the runtime but not the wheels, except that running Pyodide under
@@ -121,7 +112,6 @@ async function copyWheels() {
     if (!response.ok) throw new Error(`${url} -> HTTP ${response.status}`);
     await pipeline(Readable.fromWeb(response.body), createWriteStream(target));
   }
-  await writeFile(WHEEL_MANIFEST, `${JSON.stringify(vendored, null, 2)}\n`, "utf8");
 }
 
 // Generates the example datasets by running the project's own `simulate` CLI -- the same

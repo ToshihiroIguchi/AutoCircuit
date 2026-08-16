@@ -38,68 +38,27 @@ async function download(url: string): Promise<Uint8Array> {
   return new Uint8Array(await response.arrayBuffer());
 }
 
-/**
- * Start fetching the numpy and scipy wheels now, and hand them to `loadPackage` later.
- *
- * They are 17 MB of the site's 41, and nothing about them depends on the interpreter existing --
- * but `loadPackage` cannot be called until `loadPyodide()` has resolved, and that call first
- * fetches the 9.6 MB wasm and the 7.1 MB stdlib. So without this they sit behind a barrier they
- * do not need, and the download begins only once the boot has finished
- * (docs/METRICS_AND_UX_PLAN.md section 1).
- *
- * [measured] The obvious version of this -- `<link rel="preload">` in index.html -- does not
- * work and is not merely useless: a document's preload cache does not serve a *worker's* fetch,
- * so Chrome fetched all 17 MB a second time and logged "preloaded ... but not used". Hence the
- * interception here, in the same context as the fetch it is feeding.
- *
- * Matching is by file name rather than by whole URL, because the string `loadPackage` builds
- * from `indexURL` need not be character-for-character what this function built. Anything that
- * goes wrong -- no manifest, a failed fetch -- falls back to the network, which is what would
- * have happened anyway. Returns a function that puts the real `fetch` back.
- */
-async function prefetchWheels(indexUrl: string): Promise<() => void> {
-  const base = indexUrl.endsWith("/") ? indexUrl : `${indexUrl}/`;
-  let names: string[];
-  try {
-    const response = await fetch(`${base}wheels.json`);
-    if (!response.ok) return () => {};
-    names = (await response.json()) as string[];
-  } catch {
-    return () => {};
-  }
-  if (names.length === 0) return () => {};
-
-  // Resolves to null rather than rejecting, so a failed prefetch costs a re-fetch and not a
-  // failed boot.
-  const pending = new Map<string, Promise<Response | null>>();
-  for (const name of names) {
-    pending.set(
-      name,
-      fetch(`${base}${name}`).then(
-        (response) => (response.ok ? response : null),
-        () => null,
-      ),
-    );
-  }
-
-  const original = self.fetch.bind(self);
-  self.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-    const url =
-      typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
-    for (const [name, promise] of pending) {
-      if (!url.endsWith(name)) continue;
-      pending.delete(name);
-      return promise.then((response) =>
-        response === null ? original(input, init) : response.clone(),
-      );
-    }
-    return original(input, init);
-  }) as typeof fetch;
-
-  return () => {
-    self.fetch = original;
-  };
-}
+// There is deliberately no prefetch of the numpy and scipy wheels here, and the reason is a
+// measurement rather than an oversight.
+//
+// The idea is obvious: they are 17 MB of the site's 41 and nothing about them depends on the
+// interpreter existing, yet `loadPackage` cannot be called until `loadPyodide()` has resolved --
+// and that call first fetches the 9.6 MB wasm and the 7.1 MB stdlib. Both forms of it were built
+// and both were measured against the deployed site with a fresh browser profile:
+//
+// * A `<link rel="preload" as="fetch">` in index.html does not satisfy the fetch at all. A
+//   document's preload cache does not serve a *Web Worker's* fetch, so Chrome downloaded all
+//   17 MB a second time and logged "preloaded ... but not used".
+// * Starting the fetches here, before `loadPyodide`, and answering `loadPackage` from them does
+//   work -- the packages stage fell from 7.84 / 4.39 s to 1.67 / 1.80 s -- **and the total got
+//   worse**: 22.3 / 16.6 / 15.8 / 30.6 s against 15.2 / 13.5 s before. The cold start over this
+//   link is bandwidth-bound, so the wheels do not overlap the boot, they compete with it: the
+//   wasm the boot blocks on arrives later, and the time moves from one stage to the other.
+//
+// So reordering the transfers cannot help; only sending fewer bytes before the page is usable
+// can, which is what section 1.4 of docs/METRICS_AND_UX_PLAN.md is about. Do not re-add this
+// without a measurement of the *total*, on a real network: the stage breakdown alone says the
+// flattering half.
 
 async function init(
   pyodideUrl: string,
@@ -118,9 +77,6 @@ async function init(
 
   status("booting", "Starting the Python runtime");
   const module = await import(/* @vite-ignore */ pyodideUrl);
-  // The wheels are wanted after the boot and depend on nothing in it, so the transfer starts
-  // here and overlaps it; see prefetchWheels.
-  const restoreFetch = await prefetchWheels(indexUrl);
   // Both archives are wanted the moment the wheels are in, and neither depends on the
   // interpreter existing, so they are asked for now and awaited later.
   const archive = download(archiveUrl);
@@ -134,11 +90,7 @@ async function init(
   timings.boot = since();
 
   status("packages", "Loading numpy and scipy");
-  try {
-    await pyodide.loadPackage(["numpy", "scipy"]);
-  } finally {
-    restoreFetch();
-  }
+  await pyodide.loadPackage(["numpy", "scipy"]);
   timings.packages = since();
 
   status("importing", "Loading AutoCircuit");

@@ -102,8 +102,11 @@ static-site Web UI running the same core via WASM (Pyodide).
    **Implemented; gates M1-M3 measured.** Its §2.3 is where WAIC had to be given a stated
    approximation rather than refused or faked, §2.4 is why an F-test is offered as a *test* and
    never as a score, §2.5 is what a criterion is not allowed to change (the recommendation), and
-   §1.5 is where the obvious cold-start fix was measured to be worse than nothing -- a document's
-   preload cache does not serve a Web Worker's fetch, so the browser downloaded 17 MB twice.
+   and §1.5 is where **both** versions of the obvious cold-start fix were built and neither
+   survived its own measurement: a document's preload cache does not serve a Web Worker's fetch
+   (17 MB downloaded twice), and doing it inside the worker cut the stage it targeted by 3-4x
+   while making the *total* worse, because the load is bandwidth-bound. The stage breakdown said
+   win and the total said loss; that is the part to remember.
 7. `docs/SCHEMATIC_PLAN.md` — how the Fit screen draws the circuit. **Implemented; gates S1–S4
    measured.** The picture is computed rather than laid out: `web/src/core/schematic.ts` turns the
    parsed tree into coordinates, which is what makes "every wire is axis-aligned", "no wire ends

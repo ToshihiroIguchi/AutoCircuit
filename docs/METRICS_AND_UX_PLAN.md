@@ -1,10 +1,11 @@
 # Model-selection criteria, and seven UI questions
 
-**Status: implemented. Gates M1, M2 and M3 measured; §1's timing half is answered from the
-deployed site rather than from localhost, for the reason `docs/HANDOFF.md` §14 gives.** What each
-gate returned is recorded beside it below and summarised in `docs/HANDOFF.md` §17. Two things in
-here were written as plans and came back different, and those are the parts worth reading: §1.3's
-preload does not work at all (§1.5), and §2.3's WAIC needed a cross-check that it now has.
+**Status: items 2-7 implemented, gates M1-M3 measured; item 1 was measured and then reverted.**
+What each gate returned is recorded beside it below and summarised in `docs/HANDOFF.md` §17. The
+parts worth reading are the two that came back different from how they were planned: **§1.5, where
+both versions of the cold-start fix were built and neither survived its own measurement**, and
+§2.3, where WAIC needed a stated approximation and a cross-check rather than a refusal or a
+plausible number.
 
 Written 2026-08-16, after `docs/WEB_UI_PLAN.md` and `docs/SCHEMATIC_PLAN.md`. Seven items were
 raised at once; three of them are one-line changes, one is already built, and one is a change to
@@ -86,26 +87,41 @@ in pairs, on the same machine state — §4 of `docs/HANDOFF.md` says this machi
   a cache between every visitor and a site that republishes on every push.
 - **Shrinking the favicon** (92 KB `.ico` + 59 KB `.png`). Real, and 0.4% of the problem.
 
-### 1.5 [measured] The preload above is wrong, and the fix moved into the worker
+### 1.5 [measured] Both versions of §1.3 were built, and neither is in the build
+
+**Nothing about the cold start was changed in the end**, and the two experiments that establish
+why are worth more than the change would have been.
 
 **A document's preload cache does not serve a Web Worker's fetch.** The wheels are fetched by
 `loadPackage` *inside* `bridge.worker.ts`, so the `<link rel="preload" as="fetch">` §1.3 proposed
-did not satisfy that fetch: Chrome downloaded all 17 MB a second time and logged "preloaded …
-but not used" for both. Measured before it was believed, which is the only reason it is not in
-the build.
+did not satisfy that fetch at all: Chrome downloaded all 17 MB a second time and logged
+"preloaded … but not used" for both. That is not a tuning failure — no attribute makes a
+document preload reachable from a worker.
 
-The overlap that change was after is real and is now done where the fetch is. `bridge.worker.ts`
-reads `pyodide/wheels.json` (written by `build-assets.mjs`, since the names carry version
-numbers), starts both fetches before `loadPyodide`, and patches `self.fetch` so `loadPackage` is
-answered from them. Matching is by file name rather than whole URL, because the string
-`loadPackage` builds from `indexURL` need not be character-for-character the one the prefetch
-built; a failed prefetch resolves to null and falls through to the network.
+**Moving the same idea into the worker works, and makes the total worse.** The second version
+read a build-written manifest of the wheel names, started both fetches before `loadPyodide`, and
+patched `self.fetch` so `loadPackage` was answered from them. Each wheel was then requested
+exactly once, and the stage it targeted collapsed. Measured from the deployed site with a fresh
+Edge profile each time:
 
-**M1's first clause passes:** each wheel is requested exactly once, in Chrome, on a fresh origin.
-**Its timing clause cannot be answered on localhost** — the transfer there is ~100 ms, so the
-overlap has nothing to overlap — and is therefore taken from the deployed site with a fresh Edge
-profile. [measured, before] 15.24 s and 13.52 s to a ready worker, of which the packages stage
-was 7.84 s and 4.39 s.
+| | boot | packages | total to a ready worker |
+|---|---|---|---|
+| before | 4.46 / 6.24 s | **7.84 / 4.39 s** | **15.24 / 13.52 s** |
+| with the worker prefetch | 17.60 / 12.09 / 9.98 / 26.20 s | **1.67 / 1.80 / 2.75 / 1.66 s** | **22.27 / 16.56 / 15.75 / 30.60 s** |
+
+The packages stage fell by 3–4×. Every reading of the *total* was at or above the worst reading
+without it. The cold start over this link is **bandwidth-bound**, so the wheels do not overlap
+the boot — they compete with it, and the wasm the boot blocks on arrives later. The time moved
+from one stage to another and a little was lost on the way.
+
+So it was reverted, and the reasoning is left in `bridge.worker.ts` and `index.html` where
+someone would otherwise have the same idea again. **Reordering transfers cannot help a
+bandwidth-bound load; only sending fewer bytes before the page is usable can** — which is what
+§1.4's deferred scipy is, and why it is the only remaining lever worth the disruption.
+
+One methodological note, because it is what nearly went wrong here: the stage breakdown said
+this change was a large win, and it was the *total* that said otherwise. Do not accept a
+per-stage improvement as a cold-start improvement.
 
 ---
 
