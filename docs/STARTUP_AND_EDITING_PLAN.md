@@ -346,8 +346,17 @@ was disabled until 5.3 s (warm) or 9.5 s (cold).
 ### E5 — nothing else moved.
 
 `npm run check` (type check + the schematic geometry suite), `npm run build`, `npm run smoke`,
-`ruff check` and `mypy` (31 source files) all pass. The Python suite is recorded in §7 with the run
-it came from, rather than as a number typed here.
+`ruff check` and `mypy` (31 source files) all pass. The Python suite is **742 passed, 19 skipped in
+351 s** — 19 more tests than before this phase, and the 19 skips are the ngspice round-trip, which
+does not run on this machine (`docs/HANDOFF.md` §4).
+
+An earlier full run of the same suite reported two failures, and both are worth naming because
+neither was a defect in the change: `test_web_bridge.py::test_bridge_version_is_bumped_for_the_new_operations`
+is the deliberate tripwire that pins `BRIDGE_VERSION` as a literal so a human has to acknowledge a
+bump, and it did exactly that; and `test_discover.py::test_time_limit_stops_the_search` is the
+load-sensitive clock assertion `docs/SCREEN_STATE_PLAN.md` §7 already records, which failed while
+this machine was also running a browser, a Vite preview and a Pyodide smoke run, and passes on its
+own and in the clean run above.
 
 ## 6. Corrections
 

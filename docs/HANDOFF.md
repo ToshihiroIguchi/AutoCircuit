@@ -1262,3 +1262,14 @@ pending row instead of a control that refuses. **[measured]** A Load clicked 45 
 paint is read at 1.29 s, as soon as stage A lands.
 
 `BRIDGE_VERSION` is **8**.
+
+### 19.5 State of the suite
+
+[measured] `python -m pytest tests -q`: **742 passed, 19 skipped** in 352 s, nineteen of them new
+here — eight on `move_subtree`, three on the bridge's `move` action, and eight in
+`tests/test_web_light.py`, which asks in a subprocess with `scipy` made unimportable whether the
+data path still imports. That last one is the only kind of test that can ask it: in the main
+process, twenty other tests have already imported scipy.
+
+`npm run check`, `npm run build` and `npm run smoke` all pass; the smoke run now drives both load
+stages in the order the worker does.
