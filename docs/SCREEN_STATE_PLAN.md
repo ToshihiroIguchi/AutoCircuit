@@ -307,6 +307,18 @@ have been, for less than 200 ms. The claim in §2 is left as the timeline it is,
 does not need the stronger version: a bar that silently changes its denominator is the defect,
 whether or not it flashes full on the way.
 
+**The deploy gate caught a version pin the local checks could not, and the pin was the wrong shape.**
+`BRIDGE_VERSION` 5 → 6 was changed in three places — `bridge.py`, `protocol.ts`, and the Python test
+that deliberately pins the literal — and missed a fourth: `web/scripts/smoke.mjs` asserted
+`bridge version is 5` against a hand-typed number. Nothing local runs that script (`npm run check` is
+the type check and the schematic geometry; the smoke run is its own command), so the first thing to
+notice was the Pages workflow, which failed the publish rather than shipping a mismatch. **The gate
+did its job.** But a fourth hand-typed copy of one number is a thing to forget, so the check now
+reads the expected version out of `protocol.ts`: the question it exists to answer is whether the
+core being shipped answers the protocol the page being shipped speaks, which is what
+`bridge.worker.ts` refuses to run without. The Python test keeps its literal, because that one is a
+tripwire whose whole purpose is to make a human acknowledge the bump.
+
 **Monotonicity is now structural rather than measured.** G3 samples one run on one machine, which
 can only ever fail to find a violation. What actually rules them out is that each tier has its own
 counter and its own row, and a row is only ever drawn full when `stateOf` says its stage is

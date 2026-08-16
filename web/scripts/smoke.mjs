@@ -15,6 +15,22 @@ import { loadPyodide } from "pyodide";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PUBLIC = resolve(HERE, "..", "public");
 
+/**
+ * The protocol version *this bundle speaks*, read out of the front end's own constant.
+ *
+ * Not a third hand-typed number. The question this smoke run exists to answer is whether the core
+ * being shipped answers the protocol the page being shipped expects -- which is exactly what
+ * `bridge.worker.ts` refuses to run without. A literal here would be a fourth place to remember on
+ * every bump, and it was duly forgotten once: a pin reading 5 failed the deploy of a build whose
+ * Python and TypeScript already agreed on 6. A regex that stops matching fails the check loudly
+ * rather than passing it quietly.
+ */
+function bundleBridgeVersion() {
+  const source = readFileSync(resolve(HERE, "..", "src", "worker", "protocol.ts"), "utf8");
+  const found = source.match(/export const BRIDGE_VERSION = (\d+)/);
+  return found === null ? null : Number(found[1]);
+}
+
 // A four-point spectrum is enough to exercise the reader, the sniffer and the wire format.
 // Lin-KK needs more than that to say anything, so the validation check below uses a longer one
 // generated in Python from the same simulate() the CLI uses.
@@ -66,7 +82,12 @@ const ask = (request) => JSON.parse(handle(JSON.stringify(request)));
 console.log("version");
 const version = ask({ op: "version" });
 check("version answers", version.ok === true, JSON.stringify(version));
-check("bridge version is 5", version.result?.bridge === 5);
+const expectedBridge = bundleBridgeVersion();
+check(
+  `the core answers the bridge version this bundle speaks (${expectedBridge})`,
+  expectedBridge !== null && version.result?.bridge === expectedBridge,
+  `core says ${version.result?.bridge}, protocol.ts says ${expectedBridge}`,
+);
 check(
   "the model-selection menu comes from the core's own registry",
   JSON.stringify((version.result?.criteria ?? []).map((c) => c.name)) ===
