@@ -3,8 +3,15 @@
 
 import type { WireArray, WireComplexArray, WireFloat } from "./wire";
 
-/** How an edit addresses the circuit: a structural action at one position in the tree. */
-export type EditAction = "series" | "parallel" | "replace" | "remove";
+/**
+ * How an edit addresses the circuit: a structural action at one position in the tree.
+ *
+ * `move` names two positions rather than one -- it is the only edit that does -- because what a
+ * target's path becomes once the source has been torn out is not something the caller can work
+ * out, and working it out in TypeScript would be the second implementation of the tree
+ * operations this front end refuses to have (`docs/STARTUP_AND_EDITING_PLAN.md` section 2.2).
+ */
+export type EditAction = "series" | "parallel" | "replace" | "remove" | "move";
 
 /** One measured or simulated spectrum, as `Spectrum.to_wire()` writes it. */
 export interface SpectrumWire {
@@ -294,6 +301,18 @@ export interface ReportWire {
   pool: string[];
   mode: string;
   skeleton: string | null;
+  /**
+   * What every reported row was refitted under.
+   *
+   * The Fit screen adopts these three when a row is handed to it, because the hand-off's promise
+   * -- that refitting there re-runs the same global search and lands in the same place -- holds
+   * only while the settings match (`docs/STARTUP_AND_EDITING_PLAN.md` section 1). They come from
+   * the search rather than from what this page asked for, and `refit_restarts` has no copy here
+   * at all: it is the job's own default.
+   */
+  weighting: string;
+  seed: number;
+  refit_restarts: number;
   refit_progress: [refitted: number, shortlisted: number] | null;
   stopped: boolean;
   completeness: string;
@@ -417,17 +436,28 @@ export interface ExportArtifactWire {
   content: string;
 }
 
-/** What build the worker is running; checked at start-up against what this bundle expects. */
+/**
+ * What build the worker is running; checked at start-up against what this bundle expects.
+ *
+ * Everything here is answerable by the first load stage, which is numpy only -- the handshake
+ * that guards against a stale bundle, the two wire versions of the data path, the readers and
+ * the criteria menu. The fitter's own versions arrive later, in `RuntimeWire`
+ * (`docs/STARTUP_AND_EDITING_PLAN.md` section 3.2).
+ */
 export interface VersionsWire {
   bridge: number;
-  fit: number;
   spectrum: number;
   validate: number;
-  drt: number;
   formats: string[];
   /** The model-selection menu, from the registry in the running build rather than from here. */
   criteria: CriterionWire[];
   default_criterion: string;
+}
+
+/** What the second load stage adds: the versions of the parts that need scipy. */
+export interface RuntimeWire {
+  fit: number;
+  drt: number;
 }
 
 /** A spectrum the user has loaded, with the bookkeeping the UI adds around it. */

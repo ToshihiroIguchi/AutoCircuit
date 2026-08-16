@@ -27,8 +27,8 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from .fit import Weighting, weight_vectors
 from .spectrum import Spectrum
+from .weighting import Weighting, weight_vectors
 from .wire import encode_array, encode_complex_array, encode_float
 
 Float = NDArray[np.float64]
@@ -191,7 +191,7 @@ def lin_kk(
             at high frequency (most real components do).
         add_capacitance: Include a series capacitance, needed for blocking / capacitive data.
         weighting: Weighting used in the linear least squares; see
-            :func:`autocircuit.core.fit.weight_vectors`.
+            :func:`autocircuit.core.weighting.weight_vectors`.
         residual_limit: Residual magnitude (relative to |Z|) that passes unconditionally.
 
     Returns:

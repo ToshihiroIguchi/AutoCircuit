@@ -12,9 +12,16 @@
 //   public/pyodide/python_stdlib.zip  the stdlib Pyodide boots from, with a .pyc beside every
 //                                     .py. zipimport prefers the .pyc, so the boot stops
 //                                     compiling 559 modules. 2.5 MB -> 7.1 MB.
-//   public/pyodide-bytecode.zip       a __pycache__ overlay for numpy and scipy, unpacked into
-//                                     site-packages after the wheels are installed.
+//   public/pyodide-bytecode-numpy.zip a __pycache__ overlay for numpy, unpacked into
+//   public/pyodide-bytecode-scipy.zip site-packages after the matching wheel is installed.
 //   public/autocircuit-src.zip        rewritten with this package's own __pycache__ folded in.
+//
+// Two overlays rather than one, because the page installs the two wheels at different times: the
+// Data screen comes up on numpy and scipy follows behind it
+// (`docs/STARTUP_AND_EDITING_PLAN.md` section 3). [measured] The single overlay could not simply
+// be unpacked early and left to wait for its wheel -- laying scipy's __pycache__ into
+// site-packages *before* `loadPackage("scipy")` gives `ImportError: cannot import name
+// 'loggamma' from 'scipy.special' (unknown location)`. Each overlay goes on after its own wheel.
 //
 // The bytecode is compiled *inside Pyodide*, because a .pyc is only valid for the interpreter
 // that wrote it and this machine's Python is not the one the browser runs -- 3.13 here, 3.14
@@ -33,12 +40,15 @@
 //                              simply run, which is the kind of wrong that is never noticed.
 //   package archive CHECKED:   same reasoning, and it is 29 modules to hash rather than 576.
 import { createHash } from "node:crypto";
-import { readFile, stat, writeFile } from "node:fs/promises";
+import { readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { loadPyodide } from "pyodide";
 
 // Bumping this invalidates every stamp, for when the recipe below changes rather than its input.
-const RECIPE_VERSION = 1;
+// 2: one overlay became two, split at the load stage each belongs to.
+// 3: the split is taken between two imports rather than by top-level package, because the first
+//    import no longer reaches scipy at all -- which had quietly left the scipy overlay empty.
+const RECIPE_VERSION = 3;
 
 const STAMP = ".bytecode-stamp";
 
@@ -70,13 +80,22 @@ async function stampOf(pyodidePkg, sourceArchive) {
 export async function precompile(publicDir, pyodidePkg, sourceArchive) {
   const pyodideOut = join(publicDir, "pyodide");
   const stdlibOut = join(pyodideOut, "python_stdlib.zip");
-  const overlayOut = join(publicDir, "pyodide-bytecode.zip");
+  const numpyOut = join(publicDir, "pyodide-bytecode-numpy.zip");
+  const scipyOut = join(publicDir, "pyodide-bytecode-scipy.zip");
   const archiveOut = join(publicDir, "autocircuit-src.zip");
   const stampPath = join(publicDir, STAMP);
 
+  // public/ is not checked in and is not emptied between builds, and `vite build` copies whatever
+  // is in it into dist/. A tree that predates the split would therefore publish the 5.8 MB
+  // single overlay that nothing fetches any more.
+  await rm(join(publicDir, "pyodide-bytecode.zip"), { force: true });
+
   const stamp = await stampOf(pyodidePkg, sourceArchive);
   const built =
-    (await exists(stdlibOut)) && (await exists(overlayOut)) && (await exists(archiveOut));
+    (await exists(stdlibOut)) &&
+    (await exists(numpyOut)) &&
+    (await exists(scipyOut)) &&
+    (await exists(archiveOut));
   const previous = (await exists(stampPath)) ? await readFile(stampPath, "utf8") : "";
   if (built && previous === stamp) {
     console.log("bytecode is up to date");
@@ -102,13 +121,18 @@ export async function precompile(publicDir, pyodidePkg, sourceArchive) {
     extractDir: "/autocircuit-src",
   });
 
-  // `import autocircuit.web` is the whole import set the page pays for: a read, a fit and a
-  // validate through the bridge add five modules to the 969 it already pulled in, so there is
-  // nothing to gain from driving a request here.
+  // `import autocircuit.web` and then `autocircuit.web.bridge` is the whole import set the page
+  // pays for, in the two instalments the page pays it in: a read, a fit and a validate through
+  // the bridge add five modules to the 969 those two pulled in, so there is nothing to gain from
+  // driving a request here.
   const compile = pyodide.runPython(`
 import io, os, py_compile, sys, zipfile
 
 sys.path.insert(0, "/autocircuit-src")
+# Two imports, and the snapshot between them is what splits the overlays. The first is the data
+# path -- what the browser's first stage imports -- and the second is everything else. Splitting
+# by *when* a module was imported rather than by which wheel it belongs to is what keeps stage A
+# from carrying bytecode only the fitter will ever use.
 from autocircuit.web import handle  # noqa: F401  -- imported for its side effect on sys.modules
 
 UNCHECKED = py_compile.PycInvalidationMode.UNCHECKED_HASH
@@ -159,23 +183,40 @@ for dirpath, dirs, files in os.walk("/build-stdlib"):
 stdlib = zip_bytes(entries)
 
 # -- numpy and scipy --------------------------------------------------------------------------
-# Only what the import actually touched. Compiling all of scipy would be ~1000 modules against
-# the ~500 a session imports, and the overlay is downloaded on every cold visit; anything not
-# in it still imports from source.
-imported = set()
-for module in list(sys.modules.values()):
-    path = getattr(module, "__file__", None)
-    if path and path.endswith(".py") and path.startswith(SITE):
-        imported.add(path)
-overlay = zip_bytes(
-    [
-        (cached, os.path.relpath(cached, SITE))
-        for cached in (
-            py_compile.compile(source, doraise=True, invalidation_mode=CHECKED)
-            for source in sorted(imported)
-        )
-    ]
-)
+# Only what the imports actually touched. Compiling all of scipy would be ~1000 modules against
+# the ~500 a session imports, and an overlay is downloaded on every cold visit; anything not in
+# one still imports from source.
+#
+# Two archives, one per load stage, because the browser installs the wheels at different times
+# and an overlay laid down before its wheel breaks the import (see the header).
+def installed_sources():
+    """Every site-packages source file imported so far."""
+    return {
+        path
+        for path in (getattr(module, "__file__", None) for module in list(sys.modules.values()))
+        if path and path.endswith(".py") and path.startswith(SITE)
+    }
+
+
+def overlay_of(sources):
+    """The __pycache__ archive for a set of source files, as paths relative to site-packages."""
+    return zip_bytes(
+        [
+            (cached, os.path.relpath(cached, SITE))
+            for cached in (
+                py_compile.compile(source, doraise=True, invalidation_mode=CHECKED)
+                for source in sorted(sources)
+            )
+        ]
+    )
+
+
+numpy_sources = installed_sources()
+import autocircuit.web.bridge  # noqa: F401  -- the rest of the bridge, which is what needs scipy
+
+scipy_sources = installed_sources() - numpy_sources
+numpy_overlay = overlay_of(numpy_sources)
+scipy_overlay = overlay_of(scipy_sources)
 
 # -- this package -----------------------------------------------------------------------------
 # Written into the archive the browser fetches, beside the sources it was compiled from, so the
@@ -188,18 +229,21 @@ package = zip_bytes(
         for name in files
     ]
 )
-(stdlib, overlay, package, len(imported))
+(stdlib, numpy_overlay, scipy_overlay, package, len(numpy_sources), len(scipy_sources))
 `);
 
-  const [stdlib, overlay, packageZip, imported] = compile.toJs();
+  const [stdlib, numpyOverlay, scipyOverlay, packageZip, numpyCount, scipyCount] = compile.toJs();
   compile.destroy();
   await writeFile(stdlibOut, Buffer.from(stdlib));
-  await writeFile(overlayOut, Buffer.from(overlay));
+  await writeFile(numpyOut, Buffer.from(numpyOverlay));
+  await writeFile(scipyOut, Buffer.from(scipyOverlay));
   await writeFile(archiveOut, Buffer.from(packageZip));
   await writeFile(stampPath, stamp, "utf8");
   const mb = (bytes) => `${(bytes.length / 1e6).toFixed(1)} MB`;
   console.log(
     `bytecode: stdlib ${mb(pristine)} -> ${mb(stdlib)}, ` +
-      `overlay ${mb(overlay)} (${imported} modules), package ${mb(packageZip)}`,
+      `numpy overlay ${mb(numpyOverlay)} (${numpyCount} modules), ` +
+      `scipy overlay ${mb(scipyOverlay)} (${scipyCount} modules), ` +
+      `package ${mb(packageZip)}`,
   );
 }

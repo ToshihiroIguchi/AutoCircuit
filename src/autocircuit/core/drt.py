@@ -368,7 +368,7 @@ def drt(
             slope of the data, which is what tells you whether there is one.
         series_capacitance: Include a ``1/(jwC)`` term, needed for blocking data. ``None``
             decides from the low-frequency slope.
-        weighting: Residual weighting, as in :func:`autocircuit.core.fit.weight_vectors`.
+        weighting: Residual weighting, as in :func:`autocircuit.core.weighting.weight_vectors`.
         lam: Fix the regularisation strength instead of selecting it. Dimensionless, in the
             units of :data:`LAMBDA_GRID`.
         prominence: Peak prominence threshold, as a fraction of each peak's own height.

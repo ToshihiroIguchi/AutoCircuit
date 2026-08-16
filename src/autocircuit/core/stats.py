@@ -8,7 +8,6 @@ from typing import Any, Literal, NamedTuple
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy.special import betainc
 
 from .wire import decode_array, decode_float, encode_array, encode_float
 
@@ -102,7 +101,14 @@ def f_test(
     ``scipy.stats``: ``P(F > f) = I_{d2/(d2 + d1 f)}(d2/2, d1/2)``. ``scipy.special`` is already
     imported by :mod:`autocircuit.core.elements`, and ``scipy.stats`` is a second heavy import
     on a page whose start-up cost is measured in seconds (docs/METRICS_AND_UX_PLAN.md section 1).
+
+    That import happens *here* rather than at module scope, which is the one thing in this file
+    that is about the browser rather than about statistics: this module also carries the
+    criteria menu, which the web front end asks for before scipy has finished loading
+    (``docs/STARTUP_AND_EDITING_PLAN.md`` section 3.2). Everything else here is numpy.
     """
+    from scipy.special import betainc
+
     df1 = k_complex - k_simple
     df2 = n_data - k_complex
     if df1 <= 0 or df2 <= 0:

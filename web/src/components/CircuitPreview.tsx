@@ -66,10 +66,13 @@ export function CircuitPreview({ client, ready, circuit }: CircuitPreviewProps) 
           tree={parsed.tree}
           selectedPath={null}
           armedCode={null}
+          armedMove={null}
           busy={false}
           readOnly
           onSelect={() => {}}
+          onArmMove={() => {}}
           onInsert={() => {}}
+          onMove={() => {}}
           onRemove={() => {}}
         />
       )}

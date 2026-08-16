@@ -74,8 +74,13 @@ export interface DiscoverScreenProps {
    * numbers over would make a screen that says "these do not seed the fit" look as though they
    * did (docs/METRICS_AND_UX_PLAN.md section 6), and it would install one row of a front the
    * data cannot rank into a screen whose whole framing is *you asserted this circuit*
-   * (docs/SCREEN_STATE_PLAN.md section 3). The data selection travels with it, though: `App`
-   * re-selects the spectrum this search ran against.
+   * (docs/SCREEN_STATE_PLAN.md section 3).
+   *
+   * Two things do travel with it, and both are what makes the sentence above true rather than
+   * exceptions to it: the **data selection**, so the refit is against the spectrum the search
+   * ran on, and the **weighting, seed and restart count** the search refitted under, so "lands
+   * in the same place" is not a claim about a differently-configured fit
+   * (docs/STARTUP_AND_EDITING_PLAN.md section 1). `App` does both.
    */
   onFitCircuit: (circuit: string) => void;
 }
@@ -253,8 +258,10 @@ export function DiscoverScreen({
                 <span className="discover-report__handoff-note">
                   Takes the topology to the Fit screen, not the fitted values: this fitter uses
                   no starting guess, so refitting there re-runs the same global search and lands
-                  in the same place. Go there to <em>change</em> the circuit — the search's own
-                  fit of it is plotted below.
+                  in the same place. It takes the settings this search refitted under —{" "}
+                  {report.weighting} weighting, seed {report.seed}, {report.refit_restarts}{" "}
+                  restarts — because that promise is only true while they match. Go there to{" "}
+                  <em>change</em> the circuit — the search's own fit of it is plotted below.
                 </span>
               </div>
             )}

@@ -119,7 +119,20 @@ static-site Web UI running the same core via WASM (Pyodide).
    it, which is why Discover now plots. §8 records where a "before" measurement was
    over-claimed at a 200 ms sampling interval and was left as the timeline it is rather than
    restated.
-8. `docs/SCHEMATIC_PLAN.md` — how the Fit screen draws the circuit. **Implemented; gates S1–S4
+8. `docs/STARTUP_AND_EDITING_PLAN.md` — three questions the deployed site raised, and the three
+   different kinds of answer they got. **Implemented; gates E1–E5 measured.** Its §1 is the one to
+   read before touching the Discover→Fit hand-off: carrying the *topology and not the fit* is
+   right and stays, but the sentence it prints ("refitting there lands in the same place") was
+   false whenever the search had been run at a weighting or seed the Fit screen did not share —
+   measured as the same topology coming back with a capacitance 2.6× different — so the settings
+   now travel with the topology. §2.2 is why *moving* an element is one Python operation
+   (`move_subtree`) rather than a remove and an insert the browser re-derives a path for. §3 is
+   the staged load: **scipy is 18.3 MB of the 41 MB a first visit fetched and nothing on the Data
+   screen uses it**, so the page comes up on numpy and fetches the fitter behind it — which is
+   *not* the prefetch `METRICS_AND_UX_PLAN` §1.5 rejected, because nothing is fetched earlier than
+   before, only later. §6 is where splitting the bytecode overlay the obvious way produced a
+   22-byte file that broke nothing and would have cost every visitor a recompile.
+9. `docs/SCHEMATIC_PLAN.md` — how the Fit screen draws the circuit. **Implemented; gates S1–S4
    measured.** The picture is computed rather than laid out: `web/src/core/schematic.ts` turns the
    parsed tree into coordinates, which is what makes "every wire is axis-aligned", "no wire ends
    in mid-air" and "a junction dot exactly where three or more wires meet" assertions rather than

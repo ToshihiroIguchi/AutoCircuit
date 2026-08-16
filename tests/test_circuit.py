@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from numpy.testing import assert_allclose
 
-from autocircuit.core.circuit import Circuit, CircuitError, remove_subtree, simplify
+from autocircuit.core.circuit import Circuit, CircuitError, move_subtree, remove_subtree, simplify
 from autocircuit.core.dsl import CircuitSyntaxError
 from autocircuit.core.spectrum import Spectrum
 
@@ -277,6 +277,63 @@ def test_remove_subtree_running_past_a_leaf_raises() -> None:
     circuit = Circuit.parse("R1-C1")
     with pytest.raises(CircuitError):
         remove_subtree(circuit.root, (0, 0))
+
+
+# =============================================================================================
+# move_subtree
+# =============================================================================================
+
+
+def test_move_subtree_reorders_a_series_element() -> None:
+    circuit = Circuit.parse("R1-C1-L1")
+    result = Circuit(move_subtree(circuit.root, (0,), (2,), "series"))
+    assert result.to_string() == "C1-L1-R1"
+
+
+def test_move_subtree_moves_an_element_into_parallel_with_another() -> None:
+    circuit = Circuit.parse("R1-C1-L1")
+    result = Circuit(move_subtree(circuit.root, (1,), (2,), "parallel"))
+    assert result.to_string() == "R1-p(L1,C1)"
+
+
+def test_move_subtree_out_of_a_two_branch_parallel_block_collapses_it_into_the_survivor() -> None:
+    # Moving R2 out of p(R2,C2) leaves only C2 there, which collapses into the surrounding
+    # series connection exactly as remove_subtree already does on its own.
+    circuit = Circuit.parse("C1-R1-p(R2,C2)")
+    result = Circuit(move_subtree(circuit.root, (2, 0), (0,), "series"))
+    assert result.to_string() == "C1-R2-R1-C2"
+
+
+def test_move_subtree_preserves_the_moved_element_label() -> None:
+    circuit = Circuit.parse("R1-C1-L1")
+    result = Circuit(move_subtree(circuit.root, (0,), (2,), "series"))
+    assert "R1.R" in result.param_names
+    assert "C1.C" in result.param_names
+    assert "L1.L" in result.param_names
+
+
+def test_move_subtree_with_source_equal_to_target_is_a_no_op() -> None:
+    circuit = Circuit.parse("R1-C1-L1")
+    result = Circuit(move_subtree(circuit.root, (1,), (1,), "series"))
+    assert result.to_string() == "R1-C1-L1"
+
+
+def test_move_subtree_into_the_parallel_block_the_element_is_already_in_is_a_no_op() -> None:
+    circuit = Circuit.parse("R2-p(R1,C1)")
+    result = Circuit(move_subtree(circuit.root, (1, 0), (1,), "parallel"))
+    assert result == Circuit.parse("R2-p(R1,C1)")
+
+
+def test_move_subtree_of_the_root_raises() -> None:
+    circuit = Circuit.parse("R1-C1")
+    with pytest.raises(CircuitError):
+        move_subtree(circuit.root, (), (1,), "series")
+
+
+def test_move_subtree_with_a_source_path_running_past_a_leaf_raises() -> None:
+    circuit = Circuit.parse("R1-C1")
+    with pytest.raises(CircuitError):
+        move_subtree(circuit.root, (0, 0), (1,), "series")
 
 
 # =============================================================================================

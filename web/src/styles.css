@@ -134,6 +134,16 @@ body {
   color: var(--status-critical);
 }
 
+/* The second load stage. Quieter than the first: the page is usable by then, and this line is
+   about a tab that is not yet. */
+.status-bar--second {
+  color: var(--text-muted);
+}
+
+.status-bar--second .status-bar__spinner {
+  border-top-color: var(--text-muted);
+}
+
 .status-bar__spinner {
   width: 10px;
   height: 10px;
@@ -250,10 +260,6 @@ body {
 .drop-zone--active {
   border-color: var(--series-1);
   background: var(--surface-2);
-}
-
-.drop-zone--disabled {
-  opacity: 0.6;
 }
 
 .drop-zone__hint {
@@ -412,6 +418,35 @@ body {
   .sample-panel__command {
     margin-left: 0;
   }
+}
+
+/* ---- files being read ---- */
+/* Including ones chosen before the runtime was up: the buttons are live from the first paint and
+   the wait is stated here rather than enforced by a disabled control. */
+
+.pending-files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pending-file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  background: var(--status-neutral-bg);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.pending-file__name {
+  font-family: var(--font-mono);
+  font-weight: 600;
 }
 
 /* ---- file errors ---- */
@@ -1060,6 +1095,32 @@ body {
 .cc-el__tool--remove:hover:not(:disabled) {
   border-color: var(--status-critical);
   color: var(--status-critical);
+}
+
+/* An element armed to move: the tool stays lit, and the element itself is dimmed to say it is
+   about to be somewhere else. */
+.cc-el__tool--armed {
+  border-color: var(--series-1);
+  background: var(--row-selected-bg);
+  color: var(--series-1);
+}
+
+.cc-el--moving .cc-el__tools {
+  opacity: 1;
+}
+
+.cc-el--moving .cc-el__pick {
+  box-shadow: inset 0 0 0 1px var(--series-1);
+}
+
+/* An element on the canvas is a drag source as well as a drop target. `grab` says so before the
+   drag starts, which is the only affordance a drag has. */
+.cc:not(.cc--read-only) .cc-el__pick {
+  cursor: grab;
+}
+
+.cc:not(.cc--read-only) .cc-el__pick:active {
+  cursor: grabbing;
 }
 
 .cc-el__tool:disabled {

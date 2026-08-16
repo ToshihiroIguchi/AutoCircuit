@@ -4,14 +4,20 @@
 // Pyodide is imported from a URL the main thread computed, not from the `pyodide` npm package:
 // the distribution loads its own Emscripten glue and its wasm relative to `indexURL`, which a
 // bundler cannot rewrite, so it is served from public/ as-is and imported at run time.
+//
+// The load runs in two stages, and which stage a request needs is decided in Python rather than
+// here: stage A brings up the interpreter, numpy and the data path, stage B adds scipy and the
+// fitter. See `init` and `loadFitting` below, and `docs/STARTUP_AND_EDITING_PLAN.md` section 3.
 
 import {
   BRIDGE_VERSION,
+  type LoadStage,
   type LoadTimings,
+  type RuntimeTimings,
   type WorkerRequest,
   type WorkerResponse,
 } from "./protocol";
-import type { VersionsWire } from "../core/types";
+import type { RuntimeWire, VersionsWire } from "../core/types";
 
 declare const self: DedicatedWorkerGlobalScope;
 
@@ -22,12 +28,25 @@ type Pyodide = any;
 let pyodide: Pyodide | null = null;
 let handle: ((request: string) => string) | null = null;
 let uploads = 0;
+/**
+ * The second stage, once it has been started.
+ *
+ * A request the light bridge cannot serve is not refused and not raced: it waits on this. That
+ * is what lets the main thread send whatever it likes without tracking which side of the scipy
+ * line an operation is on -- the one place that knows is `autocircuit.web.light`, in Python, and
+ * the set below is only a *scheduling* hint. Getting it wrong costs a wait, never a wrong
+ * answer: an operation wrongly called light still reaches the same dispatch.
+ */
+let fitting: Promise<void> | null = null;
+
+/** The operations stage A can already answer; everything else waits for stage B. */
+const LIGHT_OPERATIONS = new Set(["version", "read", "trim", "validate"]);
 
 function post(message: WorkerResponse): void {
   self.postMessage(message);
 }
 
-function status(stage: "booting" | "packages" | "importing" | "ready", detail: string): void {
+function status(stage: LoadStage, detail: string): void {
   post({ kind: "status", stage, detail });
 }
 
@@ -56,15 +75,42 @@ async function download(url: string): Promise<Uint8Array> {
 //   wasm the boot blocks on arrives later, and the time moves from one stage to the other.
 //
 // So reordering the transfers cannot help; only sending fewer bytes before the page is usable
-// can, which is what section 1.4 of docs/METRICS_AND_UX_PLAN.md is about. Do not re-add this
-// without a measurement of the *total*, on a real network: the stage breakdown alone says the
-// flattering half.
+// can, which is what section 1.4 of docs/METRICS_AND_UX_PLAN.md is about -- and it is what the
+// two stages below do. Nothing is fetched *earlier* than before: scipy and its bytecode, 18.3 MB
+// of the 41, are fetched **later**, once the page can already read a file, so they compete with
+// a visitor reading their data rather than with the wasm the boot blocks on. Do not fold this
+// back into one stage, and do not re-add a prefetch without a measurement of the *total*, on a
+// real network: the stage breakdown alone says the flattering half.
 
+/** Where the wheels are installed, which is where an overlay is unpacked. */
+function sitePackages(): string {
+  return pyodide.runPython(`
+import sys
+next(p for p in sys.path if p.endswith("site-packages"))
+`);
+}
+
+/**
+ * Fetch one bytecode overlay, or null if it is not there.
+ *
+ * An overlay is `__pycache__` folders holding a .pyc for every module of a wheel this page
+ * imports, compiled by the build (`web/scripts/precompile.mjs`); without it every visitor
+ * compiles them again. It is an optimisation, so its absence is caught here rather than left to
+ * reject a load that would otherwise have succeeded.
+ */
+function overlay(url: string): Promise<Uint8Array | null> {
+  return download(url).catch((error: unknown) => {
+    console.warn(`AutoCircuit: no bytecode overlay, importing from source (${String(error)})`);
+    return null;
+  });
+}
+
+/** Stage A: the interpreter, numpy, and the part of the bridge that reads and validates data. */
 async function init(
   pyodideUrl: string,
   indexUrl: string,
   archiveUrl: string,
-  bytecodeUrl: string,
+  numpyBytecodeUrl: string,
 ): Promise<{ versions: VersionsWire; timings: LoadTimings }> {
   const timings: LoadTimings = { boot: 0, packages: 0, unpack: 0, importing: 0 };
   let mark = performance.now();
@@ -77,33 +123,21 @@ async function init(
 
   status("booting", "Starting the Python runtime");
   const module = await import(/* @vite-ignore */ pyodideUrl);
-  // Both archives are wanted the moment the wheels are in, and neither depends on the
-  // interpreter existing, so they are asked for now and awaited later.
+  // Both archives are wanted the moment the wheel is in, and neither depends on the interpreter
+  // existing, so they are asked for now and awaited later.
   const archive = download(archiveUrl);
-  // The overlay below is an optimisation, so its absence is caught here rather than left to
-  // reject an init that would otherwise have succeeded.
-  const bytecode = download(bytecodeUrl).catch((error: unknown) => {
-    console.warn(`AutoCircuit: no bytecode overlay, importing from source (${String(error)})`);
-    return null;
-  });
+  const bytecode = overlay(numpyBytecodeUrl);
   pyodide = await module.loadPyodide({ indexURL: indexUrl });
   timings.boot = since();
 
-  status("packages", "Loading numpy and scipy");
-  await pyodide.loadPackage(["numpy", "scipy"]);
+  status("numpy", "Loading numpy");
+  await pyodide.loadPackage(["numpy"]);
   timings.packages = since();
 
   status("importing", "Loading AutoCircuit");
-  // The bytecode overlay goes on top of the installed wheels: `__pycache__` folders holding a
-  // .pyc for every numpy and scipy module this page imports, compiled by the build (see
-  // `web/scripts/precompile.mjs`). Without it every visitor compiles them again.
-  const overlay = await bytecode;
-  if (overlay !== null) {
-    const site: string = pyodide.runPython(`
-import sys
-next(p for p in sys.path if p.endswith("site-packages"))
-`);
-    pyodide.unpackArchive(overlay, "zip", { extractDir: site });
+  const numpyOverlay = await bytecode;
+  if (numpyOverlay !== null) {
+    pyodide.unpackArchive(numpyOverlay, "zip", { extractDir: sitePackages() });
   }
   pyodide.unpackArchive(await archive, "zip", { extractDir: "/autocircuit-src" });
   timings.unpack = since();
@@ -127,13 +161,64 @@ from autocircuit.web import handle
         `version ${versions.bridge}. Reload the page to pick up the matching build.`,
     );
   }
-  status("ready", "Ready");
+  status("data", "Ready to read data");
   return { versions, timings };
+}
+
+/**
+ * Stage B: scipy, and the rest of the bridge.
+ *
+ * Started by the worker the moment stage A lands rather than waited for by anyone -- the page is
+ * usable in the meantime, and a visitor who walks straight to the Fit screen finds this already
+ * running. The import is driven by an ordinary `runtime` request, so the first thing to exercise
+ * the fitter's import path is the same channel every later fit uses.
+ */
+async function loadFitting(scipyBytecodeUrl: string): Promise<void> {
+  let mark = performance.now();
+  const since = (): number => {
+    const now = performance.now();
+    const elapsed = now - mark;
+    mark = now;
+    return elapsed;
+  };
+  const timings: RuntimeTimings = { packages: 0, unpack: 0, importing: 0 };
+
+  status("scipy", "Loading scipy");
+  const bytecode = overlay(scipyBytecodeUrl);
+  await pyodide.loadPackage(["scipy"]);
+  timings.packages = since();
+
+  // After the wheel, never before it. [measured] Laying scipy's __pycache__ into site-packages
+  // ahead of `loadPackage("scipy")` leaves the package unimportable -- "cannot import name
+  // 'loggamma' from 'scipy.special' (unknown location)" -- which is why the build writes two
+  // overlays rather than one (`docs/STARTUP_AND_EDITING_PLAN.md` section 0).
+  const scipyOverlay = await bytecode;
+  if (scipyOverlay !== null) {
+    pyodide.unpackArchive(scipyOverlay, "zip", { extractDir: sitePackages() });
+  }
+  timings.unpack = since();
+
+  status("fitting", "Loading the fitter");
+  const answer = JSON.parse(call(JSON.stringify({ op: "runtime" })));
+  if (!answer.ok) throw new Error(answer.error.message);
+  timings.importing = since();
+  status("ready", "Ready");
+  post({ kind: "runtime", runtime: answer.result as RuntimeWire, timings });
 }
 
 function call(request: string): string {
   if (handle === null) throw new Error("the worker has not finished loading");
   return handle(request);
+}
+
+/** Which stage an incoming request needs, read off the operation it names. */
+function needsFitting(request: string): boolean {
+  try {
+    return !LIGHT_OPERATIONS.has(JSON.parse(request).op);
+  } catch {
+    // Malformed JSON is an error response the bridge writes, not something to decide here.
+    return false;
+  }
 }
 
 function upload(name: string, bytes: ArrayBuffer): string {
@@ -157,15 +242,25 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
           message.pyodideUrl,
           message.indexUrl,
           message.archiveUrl,
-          message.bytecodeUrl,
+          message.numpyBytecodeUrl,
         );
         post({ kind: "init", id: message.id, versions: loaded.versions, timings: loaded.timings });
+        // Not awaited: the page is usable now, and this is what makes it more so. A failure
+        // here leaves the Data screen working and says which half is broken.
+        fitting = loadFitting(message.scipyBytecodeUrl).catch((error: unknown) => {
+          post({ kind: "runtime-failed", message: String(error) });
+          throw error;
+        });
+        // Nothing awaits `fitting` until a request needs it, and an unhandled rejection would
+        // be reported as a worker error in the meantime.
+        fitting.catch(() => {});
         break;
       }
       case "upload":
         post({ kind: "upload", id: message.id, path: upload(message.name, message.bytes) });
         break;
       case "call":
+        if (needsFitting(message.request)) await fitting;
         post({ kind: "call", id: message.id, response: call(message.request) });
         break;
     }

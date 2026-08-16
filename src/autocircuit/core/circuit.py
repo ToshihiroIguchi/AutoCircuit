@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -384,6 +384,65 @@ def remove_subtree(node: Node, path: Sequence[int]) -> Node:
         raise CircuitError(f"path {tuple(path)!r} leaves its connection empty")
     rebuilt = series(*kept) if isinstance(parent, Series) else parallel(*kept)
     return replace_subtree(node, parent_path, rebuilt)
+
+
+def _find_by_identity(node: Node, target: Node) -> tuple[int, ...] | None:
+    """The path to ``target`` in ``node``, found by object identity rather than value equality.
+
+    Used by :func:`move_subtree` to relocate its marker after rebuilding the tree around it.
+    ``ElementNode`` compares by value, so two markers -- or a marker and an ordinary element with
+    the same (empty) code -- would be indistinguishable to ``==``; only ``is`` picks out the
+    exact object that was inserted.
+    """
+    if node is target:
+        return ()
+    if isinstance(node, ElementNode):
+        return None
+    for index, child in enumerate(node.children):
+        found = _find_by_identity(child, target)
+        if found is not None:
+            return (index, *found)
+    return None
+
+
+def move_subtree(
+    root: Node,
+    source: Sequence[int],
+    target: Sequence[int],
+    action: Literal["series", "parallel"],
+    position: Literal["before", "after"] = "after",
+) -> Node:
+    """Take the subtree at ``source`` out of ``root`` and connect it at ``target``.
+
+    ``target`` addresses a position in the ORIGINAL tree, not in whatever the tree becomes once
+    ``source`` is removed -- the caller cannot know that in advance, since a removal can shift
+    sibling indices or collapse a parallel block, which is exactly why this is one operation
+    rather than a `remove_subtree` followed by an insert at a re-derived path.
+
+    The trick is a marker. ``source`` is swapped out for a fresh, unique ``ElementNode`` before
+    ``target`` is touched at all, so every other path in the tree -- ``target`` included -- is
+    still valid once the swap has happened. The new connection is built at ``target`` with the
+    marker standing in for the moved subtree's old neighbour, and then the marker is found by
+    object identity (`is`, not `==`: two equal ``ElementNode``s are indistinguishable by value,
+    so a value search could remove the wrong one) and deleted via `remove_subtree`, which is what
+    actually closes the gap `source` left -- collapsing a two-branch parallel block into its
+    surviving branch by the same rule `remove_subtree` already applies on its own. The builders
+    (`series`/`parallel`/`replace_subtree`) keep every untouched child as the same object, so the
+    marker is always findable this way, however the tree around it was reshaped in between.
+    """
+    if not source:
+        raise CircuitError("cannot move the whole circuit")
+    moved = subtree_at(root, source)
+    marker = ElementNode("")
+    marked = replace_subtree(root, source, marker)
+    existing = subtree_at(marked, target)
+    pair = (moved, existing) if position == "before" else (existing, moved)
+    connected = series(*pair) if action == "series" else parallel(*pair)
+    placed = replace_subtree(marked, target, connected)
+    marker_path = _find_by_identity(placed, marker)
+    if marker_path is None:
+        raise CircuitError("move_subtree lost track of its own marker; this is a bug")
+    return remove_subtree(placed, marker_path)
 
 
 def canonical_form(node: Node) -> str:

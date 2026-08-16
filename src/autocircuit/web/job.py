@@ -672,6 +672,15 @@ def report_payload(job: DiscoveryJob) -> dict[str, Any]:
         "pool": list(result.pool),
         "mode": result.mode,
         "skeleton": result.skeleton,
+        # What every reported row was refitted under. The Fit screen adopts these when a row is
+        # handed to it, because the hand-off's promise -- that refitting there re-runs the same
+        # global search and lands in the same place -- is only true while the settings match
+        # (`docs/STARTUP_AND_EDITING_PLAN.md` section 1). They come from the job rather than
+        # from the browser's copy of what it asked for, and `refit_restarts` has no copy there
+        # at all: it is this module's own default.
+        "weighting": job.weighting,
+        "seed": job.seed,
+        "refit_restarts": job.final_restarts,
         "refit_progress": (
             None if result.refit_progress is None else list(result.refit_progress)
         ),

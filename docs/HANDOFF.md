@@ -1,10 +1,12 @@
-# Handoff — state of AutoCircuit as of 2026-08-15
+# Handoff — state of AutoCircuit as of 2026-08-16
 
 Written at the end of the session that built the backend, updated after discovery v2 steps
 1–5, again after the skeleton-constrained mode (all of `docs/PARTIAL_TOPOLOGY_PLAN.md`), and
 again after each step of `docs/WEB_UI_PLAN.md` (all seven now), again after the ngspice
-round-trip (§15), and again after taking both workflows off Node 20 (§16). Read this first, then
-`CLAUDE.md`, then the plan for whichever part you are touching.
+round-trip (§15), again after taking both workflows off Node 20 (§16), and again after the three
+questions the deployed site raised — what the Discover→Fit hand-off carries, moving an element that
+is already on the canvas, and a start-up that made a visitor wait for scipy before it would read a
+CSV (§19). Read this first, then `CLAUDE.md`, then the plan for whichever part you are touching.
 
 ## 1. Where things stand
 
@@ -1169,3 +1171,94 @@ An intermediate run of the same suite failed `test_discover.py::test_time_limit_
 at 65 s and it **passed in isolation at 39 s a minute later** -- the fourth occurrence of the
 thermal pattern section 4 describes, and again not a bound to widen. `npm run check` and
 `npm run smoke` both pass.
+
+## 19. Three questions from the deployed site: the hand-off, moving an element, and the start-up
+
+`docs/STARTUP_AND_EDITING_PLAN.md` is the whole of it, gates and corrections included. What a
+reader coming here later needs to know without opening it:
+
+### 19.1 The Discover -> Fit hand-off still carries the topology and not the fit
+
+That decision stands and nothing here reopens it (`docs/SCREEN_STATE_PLAN.md` section 3.B). What
+was wrong was its premise. The note under *Fit this circuit* promises that refitting there "re-runs
+the same global search and lands in the same place", and that is only true while the Fit screen's
+weighting, restart count and seed are the ones the search refitted under -- which the Discover
+screen lets the user change and which travelled nowhere.
+
+`discover_report` now carries `weighting`, `seed` and `refit_restarts`, taken from the job rather
+than from the browser's copy of what it asked for, and `App.fitCircuit` writes them into
+`FitState`. **[measured]** A search at `proportional` weighting and seed 3 recommends `C1-L1` at
+AIC -51.0323 / chi2_red 0.68841; the Fit screen after the hand-off reports the same digits. The
+same topology under the Fit screen's *old* defaults -- modulus, seed 0 -- reports AIC -306.097 and
+a capacitance 2.6x different. The score disagreeing was the visible half; the parameter value
+disagreeing is the half that mattered.
+
+### 19.2 An element already on the canvas can now be dragged somewhere else
+
+`core/circuit.move_subtree` and the bridge's `edit` action `move`. **The target path addresses the
+tree before anything moved**, which is the reason it is one operation: a caller cannot know what
+that path becomes once the source is torn out, and working it out in TypeScript would be the second
+implementation of the tree operations this front end refuses to have.
+
+It works by swapping the source for a unique marker node, building the new connection through the
+same `series`/`parallel` builders an insert uses, then finding the marker **by object identity**
+(`is`, not `==`: equal `ElementNode`s are indistinguishable by value) and deleting it through
+`remove_subtree`. Two edge cases fall out rather than being special-cased -- dropping an element on
+itself, and moving one into a new branch of the block it is already in, both return the circuit
+unchanged -- and the collapse rule for a two-branch parallel block is `remove_subtree`'s own.
+
+The moved element **keeps its label**, so a value the parameter table holds under `L1.L` still
+belongs to it afterwards. That is the difference from delete-and-reinsert, which renumbers.
+
+On the canvas: an element is a drag source under its own MIME type, every existing drop target
+takes both kinds, and there is a click path (a move tool arms the element, the next slot receives
+it) because dragging is unavailable from a keyboard. The two arms are mutually exclusive -- a slot
+does one thing when clicked.
+
+### 19.3 The load is two stages, and the first one is numpy only
+
+**scipy is 18.3 MB of the 41 MB a first visit fetched, and nothing on the Data screen uses it.**
+So: stage A boots Pyodide, installs numpy, unpacks the package archive and numpy's bytecode
+overlay, and imports the data path; stage B installs scipy, unpacks its overlay and imports the
+rest. Stage B starts on its own when stage A lands and nothing waits for it -- a request that needs
+the fitter waits *inside the worker*, so the main thread never has to know which side of the line
+an operation is on.
+
+Four things this required, and one it forbids:
+
+- `core/weighting.py` holds `Weighting` and `weight_vectors`, moved out of `fit.py` (which
+  re-exports them) because `validate.py` was importing the whole fitter for two numpy functions.
+- `core/stats.py` imports `scipy.special.betainc` inside the F-test rather than at module scope.
+- `autocircuit/__init__.py` and `core/__init__.py` re-export through PEP 562 `__getattr__`. A
+  package's `__init__` runs before any of its submodules, so eager re-exports meant
+  `import autocircuit.io` pulled in the element registry and with it `scipy.special`.
+- `web/light.py` holds `BRIDGE_VERSION`, the JSON envelope and the four operations that need no
+  scipy, and looks everything else up in `web/bridge.py`, importing it on first use. One `handle`,
+  one envelope, one dispatch, completed lazily.
+- **Do not fold the two stages back into one, and do not prefetch.** Nothing here is fetched
+  earlier than it used to be; scipy is fetched *later*. The prefetch that was measured and rejected
+  in `docs/METRICS_AND_UX_PLAN.md` section 1.5 moved bytes *earlier*, and the cold start is
+  bandwidth-bound, so it competed with the wasm the boot blocks on and made the total worse.
+
+`web/scripts/precompile.mjs` writes **two** overlays, `pyodide-bytecode-numpy.zip` and
+`pyodide-bytecode-scipy.zip`, and each goes on *after* its own wheel. [measured] Laying scipy's
+`__pycache__` into site-packages before `loadPackage("scipy")` leaves the package unimportable:
+`cannot import name 'loggamma' from 'scipy.special' (unknown location)`. The split is taken between
+the two imports rather than by top-level package -- see the plan's section 6 for why the obvious
+version of it silently produced a 22-byte scipy overlay.
+
+`Plot.tsx` imports Plotly with a dynamic `import()`, which takes the app bundle from 1.42 MB to
+284 kB (gzip 468 -> 88 kB); the chart library arrives with the first plot, which cannot happen
+before a spectrum has been read anyway.
+
+**[measured, Chromium, localhost, warm]** usable for data 5.27 s -> **1.48 / 1.53 s**; usable for
+fitting 5.27 s -> 4.94 / 5.07 s. Bytes before the page can read a file: 41.0 MB -> 22.1 MB.
+
+### 19.4 And the examples load from the first paint
+
+The drop zone and the sample buttons are never disabled now. `BridgeClient.readFile` already waited
+for the runtime; what was missing was the page saying so, so a file chosen early gets a named
+pending row instead of a control that refuses. **[measured]** A Load clicked 45 ms after the first
+paint is read at 1.29 s, as soon as stage A lands.
+
+`BRIDGE_VERSION` is **8**.

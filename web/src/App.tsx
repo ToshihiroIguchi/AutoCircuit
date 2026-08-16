@@ -38,6 +38,7 @@ import type {
   FitWire,
   LoadedSpectrum,
   ReportWire,
+  RuntimeWire,
   SpectrumWire,
   VersionsWire,
 } from "./core/types";
@@ -47,7 +48,7 @@ import { ThemeContext, useTheme } from "./core/theme";
 import { SearchPool } from "./worker/pool";
 import { StatusBar } from "./components/StatusBar";
 import { ThemeToggle } from "./components/ThemeToggle";
-import { DataScreen, type FileError } from "./screens/DataScreen";
+import { DataScreen, type FileError, type PendingFile } from "./screens/DataScreen";
 import {
   DiscoverScreen,
   defaultSearchSettings,
@@ -188,8 +189,14 @@ function errorMessage(error: unknown): string {
 export function App() {
   const [stage, setStage] = useState<LoadStage>("booting");
   const [detail, setDetail] = useState("Starting the Python runtime");
+  // Two readinesses, because the runtime arrives in two stages: `versions` is "the page can read
+  // data" and `runtime` is "the page can fit it" (docs/STARTUP_AND_EDITING_PLAN.md section 3).
+  // Nothing merges them into one flag -- the Data screen would then wait for scipy it never uses,
+  // which is the whole complaint the staging answers.
   const [versions, setVersions] = useState<VersionsWire | null>(null);
+  const [runtime, setRuntime] = useState<RuntimeWire | null>(null);
   const [bootError, setBootError] = useState<string | null>(null);
+  const [runtimeError, setRuntimeError] = useState<string | null>(null);
 
   const { choice: themeChoice, resolved: theme, setChoice: setTheme } = useTheme();
 
@@ -201,6 +208,8 @@ export function App() {
   const [spectra, setSpectra] = useState<LoadedSpectrum[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [fileErrors, setFileErrors] = useState<FileError[]>([]);
+  /** Files being read, including ones chosen before the runtime was up. See `loadFile`. */
+  const [pending, setPending] = useState<PendingFile[]>([]);
   const [dragActive, setDragActive] = useState(false);
   // The element catalogue: what the loaded core was built with, so it cannot change while the
   // page is open. Fetched once here rather than by each of the two screens that need it -- the
@@ -227,7 +236,10 @@ export function App() {
     });
   }
   const client = clientRef.current;
-  const ready = versions !== null;
+  /** The data path is up: read, trim, validate, plot. */
+  const dataReady = versions !== null;
+  /** The fitter is up too: everything else. */
+  const ready = runtime !== null;
 
   useEffect(() => {
     client
@@ -239,10 +251,20 @@ export function App() {
         // line about which model won is exactly the class of failure this project keeps
         // finding (docs/HANDOFF.md section 3).
         setSettings((prev) => ({ ...prev, criterion: answer.default_criterion }));
+      })
+      .catch((err: unknown) => setBootError(errorMessage(err)));
+    // The second stage is a separate chain, so a failure to install scipy leaves the Data screen
+    // working and says which half is broken rather than blanking the page. The catalogue is
+    // fetched here because it is a scipy-side answer: the element registry imports the fitter's
+    // special functions.
+    client
+      .full()
+      .then((answer) => {
+        setRuntime(answer);
         return client.elements();
       })
       .then(setCatalogue)
-      .catch((err: unknown) => setBootError(errorMessage(err)));
+      .catch((err: unknown) => setRuntimeError(errorMessage(err)));
   }, [client]);
 
   // Keeps the selected row valid: picks the first spectrum on the initial load and whenever the
@@ -284,6 +306,12 @@ export function App() {
 
   const loadFile = useCallback(
     async (file: File) => {
+      // Named here rather than counted, because what this row exists to say is *which* file is
+      // waiting. A file chosen before the runtime is up is not refused: `readFile` waits for the
+      // first load stage inside the client, so the only thing missing was the page saying so
+      // (docs/STARTUP_AND_EDITING_PLAN.md section 3.4).
+      const ticket = nextId();
+      setPending((prev) => [...prev, { id: ticket, name: file.name }]);
       try {
         const wires = await client.readFile(file);
         const multiple = wires.length > 1;
@@ -300,6 +328,8 @@ export function App() {
         for (const entry of entries) void runValidation(entry.id, entry.current);
       } catch (err) {
         setFileErrors((prev) => [...prev, { id: nextId(), name: file.name, message: errorMessage(err) }]);
+      } finally {
+        setPending((prev) => prev.filter((entry) => entry.id !== ticket));
       }
     },
     [client, runValidation],
@@ -381,7 +411,9 @@ export function App() {
       depth = 0;
       setDragActive(false);
       const files = event.dataTransfer?.files;
-      if (!ready || files === undefined || files.length === 0) return;
+      // Not gated on the runtime being up: a file dropped during the load is held and read when
+      // the reader exists, and the Data screen names it while it waits.
+      if (files === undefined || files.length === 0) return;
       // A file dropped from another screen is still a load, so it goes where the loading is
       // reported -- otherwise the reader's verdict on it would land on a page nobody is looking
       // at.
@@ -398,7 +430,7 @@ export function App() {
       window.removeEventListener("dragleave", onDragLeave);
       window.removeEventListener("drop", onDrop);
     };
-  }, [ready, handleFiles]);
+  }, [handleFiles]);
 
   // One pool for the whole page, and it is not built until something asks for it: four more
   // Pyodide workers, each ~1.5 s and its own copy of numpy and scipy, would tax every visitor who
@@ -633,20 +665,36 @@ export function App() {
   /**
    * The Discover screen's hand-off: take a topology to the Fit screen and go there.
    *
-   * The topology and the data selection, and nothing else. Why the fitted values do not travel is
-   * `DiscoverScreenProps.onFitCircuit` and `docs/SCREEN_STATE_PLAN.md` section 3; why the *data*
-   * does is the other half of the same argument. A search ran against one spectrum, and handing
-   * its topology to a Fit screen pointed at a different one would fit a model to data the search
-   * never saw while the button that did it said "Fit this circuit".
+   * The topology, the data selection and the settings the search refitted under -- and *not* the
+   * fitted values. Why the values do not travel is `DiscoverScreenProps.onFitCircuit` and
+   * `docs/SCREEN_STATE_PLAN.md` section 3; why the *data* does is the other half of the same
+   * argument. A search ran against one spectrum, and handing its topology to a Fit screen pointed
+   * at a different one would fit a model to data the search never saw while the button that did
+   * it said "Fit this circuit".
+   *
+   * The settings travel for the same reason, and their absence was a defect rather than a
+   * decision (`docs/STARTUP_AND_EDITING_PLAN.md` section 1). The hand-off's whole claim is that
+   * refitting here re-runs the same global search and lands in the same place -- which is true of
+   * the weighting, seed and restart count the search used, and false of any others. They come off
+   * the report, so they are what the search *did* rather than what this page asked it to do.
    */
   const fitCircuit = useCallback(
     (text: string) => {
       setCircuit(text);
       const searched = search?.spectrumId;
       if (searched !== undefined && spectra.some((s) => s.id === searched)) setSelectedId(searched);
+      const report = search?.report;
+      if (report !== null && report !== undefined) {
+        setFitState((previous) => ({
+          ...previous,
+          weighting: report.weighting,
+          seed: report.seed,
+          restarts: report.refit_restarts,
+        }));
+      }
       setScreen("fit");
     },
-    [search?.spectrumId, spectra],
+    [search?.spectrumId, search?.report, spectra],
   );
 
   const selected = useMemo(() => spectra.find((s) => s.id === selectedId) ?? null, [spectra, selectedId]);
@@ -658,7 +706,14 @@ export function App() {
     <div className="app">
       <header className="app-header">
         <h1>AutoCircuit</h1>
-        <StatusBar stage={stage} detail={detail} versions={versions} bootError={bootError} />
+        <StatusBar
+          stage={stage}
+          detail={detail}
+          dataReady={dataReady}
+          ready={ready}
+          bootError={bootError}
+          runtimeError={runtimeError}
+        />
         <ThemeToggle choice={themeChoice} onChoice={setTheme} />
       </header>
 
@@ -682,13 +737,14 @@ export function App() {
       <ThemeContext.Provider value={theme}>
         {screen === "data" ? (
           <DataScreen
-            ready={ready}
+            dataReady={dataReady}
             dragActive={dragActive}
             formats={versions?.formats ?? []}
             spectra={spectra}
             selected={selected}
             selectedId={selectedId}
             fileErrors={fileErrors}
+            pending={pending}
             onFiles={handleFiles}
             onSelect={setSelectedId}
             onRemove={removeSpectrum}

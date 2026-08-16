@@ -138,6 +138,9 @@ export function FitScreen({
   const [describe, setDescribe] = useState<CircuitWire | null>(null);
   const [circuitError, setCircuitError] = useState<string | null>(null);
   const [armedCode, setArmedCode] = useState<string | null>(null);
+  // Which element is armed to be moved, if any. Draft state, like `armedCode`: it is half of a
+  // gesture, and losing it on a tab switch is the behaviour half a gesture should have.
+  const [armedMove, setArmedMove] = useState<number[] | null>(null);
   const [selectedLabel, setSelectedLabel] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewWire | null>(null);
   const [editing, setEditing] = useState(false);
@@ -362,7 +365,14 @@ export function FitScreen({
       <RuntimeNotice ready={ready} />
       <div className="fit-screen__build">
         {catalogue !== null && (
-          <ElementPalette catalogue={catalogue} armedCode={armedCode} onArm={setArmedCode} />
+          <ElementPalette
+            catalogue={catalogue}
+            armedCode={armedCode}
+            onArm={(code) => {
+              setArmedCode(code);
+              if (code !== null) setArmedMove(null);
+            }}
+          />
         )}
 
         <section className="circuit-panel">
@@ -374,11 +384,29 @@ export function FitScreen({
               tree={describe.tree}
               selectedPath={selectedPath}
               armedCode={armedCode}
+              armedMove={armedMove}
               busy={editing || fitting}
               onSelect={(path) => setSelectedLabel(labelAtPath(describe.tree, path))}
+              // The two arms are exclusive: a slot does one thing when it is clicked, so arming
+              // an element to move disarms the palette and vice versa.
+              onArmMove={(path) => {
+                setArmedMove(path);
+                if (path !== null) setArmedCode(null);
+              }}
               onInsert={(path, action, position, code) =>
                 void applyEdit({ circuit: describe.circuit, path, action, position, code })
               }
+              onMove={(from, to, connect, position) => {
+                setArmedMove(null);
+                void applyEdit({
+                  circuit: describe.circuit,
+                  path: from,
+                  action: "move",
+                  to,
+                  connect,
+                  position,
+                });
+              }}
               onRemove={(path) =>
                 void applyEdit({ circuit: describe.circuit, path, action: "remove" })
               }

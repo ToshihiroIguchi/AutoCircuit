@@ -54,32 +54,44 @@ function check(name, condition, detail = "") {
 
 const started = Date.now();
 const pyodide = await loadPyodide({ indexURL: join(PUBLIC, "pyodide"), stdout: () => {} });
-await pyodide.loadPackage(["numpy", "scipy"]);
-// The bytecode overlay, exactly as the worker applies it. A .pyc the interpreter rejects is a
-// slow page rather than a broken one, but a .pyc it accepts and should not have is the kind of
-// thing that only shows up as a wrong answer, so the whole run below happens on top of it.
-const site = pyodide.runPython(`
+
+const site = () =>
+  pyodide.runPython(`
 import sys
 next(p for p in sys.path if p.endswith("site-packages"))
 `);
-pyodide.unpackArchive(new Uint8Array(readFileSync(join(PUBLIC, "pyodide-bytecode.zip"))), "zip", {
-  extractDir: site,
-});
 // Wrapped: unpackArchive rejects a Node Buffer with "Unknown typed array type 'Buffer'".
-pyodide.unpackArchive(new Uint8Array(readFileSync(join(PUBLIC, "autocircuit-src.zip"))), "zip", {
-  extractDir: "/autocircuit-src",
-});
+const unpack = (file, dir) =>
+  pyodide.unpackArchive(new Uint8Array(readFileSync(join(PUBLIC, file))), "zip", {
+    extractDir: dir,
+  });
+
+// -- stage A, exactly as the worker runs it: numpy, and no scipy anywhere ------------------------
+//
+// The staging is the thing this half checks, and it can only be checked by *not* loading scipy:
+// the Data screen comes up on numpy alone (docs/STARTUP_AND_EDITING_PLAN.md section 3), which is
+// a property of an import graph that one convenient `from .fit import ...` would quietly undo.
+// The bytecode overlays go on in the same order and at the same points, because that order is
+// itself load-bearing -- scipy's laid down before its wheel leaves scipy unimportable.
+await pyodide.loadPackage(["numpy"]);
+unpack("pyodide-bytecode-numpy.zip", site());
+unpack("autocircuit-src.zip", "/autocircuit-src");
 pyodide.runPython(`
 import sys
 sys.path.insert(0, "/autocircuit-src")
 from autocircuit.web import handle
 `);
 const handle = pyodide.globals.get("handle");
-console.log(`loaded in ${((Date.now() - started) / 1000).toFixed(1)} s`);
+const stageA = (Date.now() - started) / 1000;
+console.log(`data runtime loaded in ${stageA.toFixed(1)} s`);
 
 const ask = (request) => JSON.parse(handle(JSON.stringify(request)));
 
-console.log("version");
+console.log("the data runtime, before scipy");
+check(
+  "scipy really is absent",
+  pyodide.runPython("'scipy' in sys.modules") === false,
+);
 const version = ask({ op: "version" });
 check("version answers", version.ok === true, JSON.stringify(version));
 const expectedBridge = bundleBridgeVersion();
@@ -100,6 +112,41 @@ check(
   JSON.stringify(version.result?.formats) ===
     JSON.stringify(["generic_csv", "keysight", "touchstone", "zview"]),
   JSON.stringify(version.result?.formats),
+);
+pyodide.FS.mkdirTree("/uploads/0");
+pyodide.FS.writeFile("/uploads/0/early.csv", new TextEncoder().encode(CSV));
+const early = ask({ op: "read", path: "/uploads/0/early.csv" });
+check("a file can be read before scipy exists", early.ok === true, JSON.stringify(early.error));
+const earlySpectrum = early.result?.spectra?.[0];
+check(
+  "and trimmed",
+  ask({ op: "trim", spectrum: earlySpectrum, f_min: 1000, f_max: 10000 }).ok === true,
+);
+const notYet = ask({ op: "elements" });
+check(
+  "a fitting operation says which package is missing rather than hanging or 404-ing",
+  notYet.ok === false && /scipy/.test(notYet.error?.message ?? ""),
+  JSON.stringify(notYet.error),
+);
+check("and scipy was not dragged in by trying", pyodide.runPython("'scipy' in sys.modules") === false);
+
+// -- stage B: scipy, its overlay, and the rest of the bridge --------------------------------------
+const beforeScipy = Date.now();
+await pyodide.loadPackage(["scipy"]);
+// The bytecode overlay, exactly as the worker applies it and where. A .pyc the interpreter rejects
+// is a slow page rather than a broken one, but a .pyc it accepts and should not have is the kind
+// of thing that only shows up as a wrong answer, so the whole run below happens on top of it.
+unpack("pyodide-bytecode-scipy.zip", site());
+const runtime = ask({ op: "runtime" });
+check("runtime answers once scipy is in", runtime.ok === true, JSON.stringify(runtime.error));
+check(
+  "with the wire versions that belong to the fitter",
+  typeof runtime.result?.fit === "number" && typeof runtime.result?.drt === "number",
+  JSON.stringify(runtime.result),
+);
+console.log(
+  `model runtime loaded in ${((Date.now() - beforeScipy) / 1000).toFixed(1)} s ` +
+    `(${((Date.now() - started) / 1000).toFixed(1)} s in total)`,
 );
 
 console.log("read");
@@ -187,6 +234,44 @@ check(
   "deleting one branch of a pair collapses the block",
   collapsed.result?.circuit === "C1-R1-R2",
   JSON.stringify(collapsed),
+);
+// Dragging an element that is already in the circuit somewhere else. The target path addresses
+// the circuit *before* anything moved, which is the whole reason this is one operation.
+const moved = ask({
+  op: "edit",
+  circuit: "C1-R1-L1",
+  path: [2],
+  action: "move",
+  to: [0],
+  connect: "series",
+  position: "before",
+});
+check("an element can be moved to another position", moved.result?.circuit === "L1-C1-R1", JSON.stringify(moved));
+const movedParallel = ask({
+  op: "edit",
+  circuit: "C1-R1-L1",
+  path: [0],
+  action: "move",
+  to: [2],
+  connect: "parallel",
+  position: "after",
+});
+check(
+  "and into parallel with another, keeping its label",
+  movedParallel.result?.circuit === "R1-p(L1,C1)",
+  JSON.stringify(movedParallel),
+);
+check(
+  "moving an element onto itself is a no-op rather than an error",
+  ask({
+    op: "edit",
+    circuit: "C1-R1-L1",
+    path: [1],
+    action: "move",
+    to: [1],
+    connect: "series",
+    position: "after",
+  }).result?.circuit === "C1-R1-L1",
 );
 
 console.log("preview and fit");
@@ -277,6 +362,13 @@ check("nothing is claimed partial when nothing was cut short", report?.refit_pro
 check("it recommends a candidate", typeof report?.recommended === "string", JSON.stringify(report?.recommended));
 check("the Pareto front is not empty", (report?.pareto?.length ?? 0) > 0);
 check("it ran under the default criterion, since none was named", report?.criterion === "aic");
+check(
+  // `restarts: 1` above, not the default 5: the point of carrying this to the Fit screen is that
+  // it is what the search *did*, so the check is that it reports this run rather than a constant.
+  "and says what its rows were refitted under, which is what the Fit screen adopts",
+  report?.weighting === "modulus" && report?.seed === 0 && report?.refit_restarts === 1,
+  JSON.stringify([report?.weighting, report?.seed, report?.refit_restarts]),
+);
 check("and labels the column its scores are in", report?.score_label === "AIC", report?.score_label);
 check(
   "every row carries all six scores, not only the one that ranked it",

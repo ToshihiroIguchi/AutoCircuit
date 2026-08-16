@@ -17,13 +17,20 @@ import type {
   RefitStepWire,
   RefitTaskWire,
   ReportWire,
+  RuntimeWire,
   ScreenStepWire,
   SearchPlanWire,
   SpectrumWire,
   ValidationWire,
   VersionsWire,
 } from "../core/types";
-import type { LoadStage, LoadTimings, WorkerRequest, WorkerResponse } from "./protocol";
+import type {
+  LoadStage,
+  LoadTimings,
+  RuntimeTimings,
+  WorkerRequest,
+  WorkerResponse,
+} from "./protocol";
 
 /** A failure the Python side reported, as opposed to one the transport invented. */
 export class BridgeError extends Error {
@@ -57,6 +64,9 @@ export interface EditRequest {
   action: EditAction;
   code?: string;
   position?: "before" | "after";
+  /** Where a `move` puts what was at `path`, and how it joins what is already there. */
+  to?: number[];
+  connect?: "series" | "parallel";
 }
 
 /**
@@ -142,19 +152,31 @@ const seconds = (ms: number): string => `${(ms / 1000).toFixed(2)} s`;
  * measured here is worth more than any number this project could hard-code: it is the visitor's
  * own. One line per worker, at load only.
  */
-function report(
-  index: number,
-  timings: LoadTimings & { total: number },
-  versions: VersionsWire,
-): void {
+function report(index: number, timings: LoadTimings & { total: number }): void {
   const stages = [
     `boot ${seconds(timings.boot)}`,
-    `packages ${seconds(timings.packages)}`,
+    `numpy ${seconds(timings.packages)}`,
     `unpack ${seconds(timings.unpack)}`,
     `import ${seconds(timings.importing)}`,
   ].join(", ");
   const whole = index === 0 ? ` — ${seconds(timings.total)} since navigation` : "";
-  console.info(`AutoCircuit worker ${index} ready: ${stages}${whole}`);
+  console.info(`AutoCircuit worker ${index} ready to read data: ${stages}${whole}`);
+}
+
+/** The same for the second stage, so both halves of the cold start can be read off one console. */
+function reportRuntime(
+  index: number,
+  timings: RuntimeTimings & { total: number },
+  versions: VersionsWire,
+  runtime: RuntimeWire,
+): void {
+  const stages = [
+    `scipy ${seconds(timings.packages)}`,
+    `unpack ${seconds(timings.unpack)}`,
+    `import ${seconds(timings.importing)}`,
+  ].join(", ");
+  const whole = index === 0 ? ` — ${seconds(timings.total)} since navigation` : "";
+  console.info(`AutoCircuit worker ${index} ready to fit: ${stages}${whole}`);
   // The build numbers used to sit in the page header. They are a developer's diagnostic and
   // the diagnosis they support is already automatic and louder -- `bridge.worker.ts` refuses to
   // run against a core answering a different bridge version -- so they belong here, where
@@ -162,8 +184,8 @@ function report(
   // of the page on every screen forever (docs/METRICS_AND_UX_PLAN.md section 3).
   if (index === 0) {
     console.info(
-      `AutoCircuit build: bridge v${versions.bridge}, fit v${versions.fit}, ` +
-        `spectrum v${versions.spectrum}, validate v${versions.validate}, drt v${versions.drt}`,
+      `AutoCircuit build: bridge v${versions.bridge}, fit v${runtime.fit}, ` +
+        `spectrum v${versions.spectrum}, validate v${versions.validate}, drt v${runtime.drt}`,
     );
   }
 }
@@ -173,8 +195,22 @@ export class BridgeClient {
   private pending = new Map<number, Pending>();
   private nextId = 1;
   private readyPromise: Promise<VersionsWire> | null = null;
+  /**
+   * The second load stage, which the worker starts on its own once the first one lands.
+   *
+   * Held as a promise resolved from a broadcast rather than as a request, because nothing asks
+   * for it: `ready()` is "the page can read data", `full()` is "the page can fit", and a caller
+   * awaits whichever it needs (`docs/STARTUP_AND_EDITING_PLAN.md` section 3.3). A request that
+   * needs the fitter does not have to await `full()` -- the worker queues it behind the same
+   * stage -- so this exists for the UI, which has to know when to stop saying "still loading".
+   */
+  private fullPromise: Promise<RuntimeWire>;
+  private settleFull!: (runtime: RuntimeWire) => void;
+  private failFull!: (error: Error) => void;
   /** What the load cost, once it has finished; null while it is still going on. */
   private loadTimings: (LoadTimings & { total: number }) | null = null;
+  /** Kept only so the build line can be printed once both halves have answered. */
+  private versions: VersionsWire | null = null;
   // The element catalogue is the one answer that cannot change while the page is open: it is
   // the registry the loaded core was built with.
   private cataloguePromise: Promise<CatalogueWire> | null = null;
@@ -182,16 +218,30 @@ export class BridgeClient {
   private readonly index = clientsBuilt++;
 
   constructor(private onStatus: (stage: LoadStage, detail: string) => void = () => {}) {
+    this.fullPromise = new Promise<RuntimeWire>((resolve, reject) => {
+      this.settleFull = resolve;
+      this.failFull = reject;
+    });
+    // Nobody may be awaiting it when it fails -- a visitor who never leaves the Data screen --
+    // and an unobserved rejection is reported as an error the page did not make.
+    this.fullPromise.catch(() => {});
     this.worker = new Worker(new URL("./bridge.worker.ts", import.meta.url), { type: "module" });
     this.worker.onmessage = (event: MessageEvent<WorkerResponse>) => this.receive(event.data);
     this.worker.onerror = (event) => {
       const error = new Error(event.message || "the worker failed to start");
       for (const [, entry] of this.pending) entry.reject(error);
       this.pending.clear();
+      this.failFull(error);
     };
   }
 
-  /** Boot Pyodide and load the core. Safe to call repeatedly; the work happens once. */
+  /**
+   * Boot Pyodide and load the data half of the core. Safe to call repeatedly; the work happens
+   * once.
+   *
+   * Resolves when the worker can read, trim and validate a spectrum -- not when it can fit one.
+   * That is `full()`, and the worker is already working on it by then.
+   */
   ready(): Promise<VersionsWire> {
     if (this.readyPromise === null) {
       // The Pyodide distribution and the source archive are served beside the app, so they are
@@ -204,20 +254,35 @@ export class BridgeClient {
         pyodideUrl: new URL("pyodide/pyodide.mjs", base).href,
         indexUrl: new URL("pyodide/", base).href,
         archiveUrl: new URL("autocircuit-src.zip", base).href,
-        bytecodeUrl: new URL("pyodide-bytecode.zip", base).href,
+        numpyBytecodeUrl: new URL("pyodide-bytecode-numpy.zip", base).href,
+        scipyBytecodeUrl: new URL("pyodide-bytecode-scipy.zip", base).href,
       }).then((message) => {
         const { versions, timings } = message as { versions: VersionsWire; timings: LoadTimings };
         // `performance.now()` on this thread is measured from the navigation, so it is the whole
         // cold start and not just the worker's share of it -- which is what gate W3 asks about.
         this.loadTimings = { ...timings, total: performance.now() };
-        report(this.index, this.loadTimings, versions);
+        report(this.index, this.loadTimings);
+        this.versions = versions;
         return versions;
       });
     }
     return this.readyPromise;
   }
 
-  /** What this client's load cost, or null while it is still loading. */
+  /**
+   * Wait for the fitter: scipy installed and the rest of the bridge imported.
+   *
+   * Nothing has to call this to *use* the fitter -- a request that needs it waits inside the
+   * worker. It is what the UI waits on before it stops disabling the screens that fit, and what
+   * the search pool waits on before it counts a worker as up: a worker that cannot fit yet is
+   * not a worker that is ready.
+   */
+  full(): Promise<RuntimeWire> {
+    void this.ready();
+    return this.fullPromise;
+  }
+
+  /** What this client's first stage cost, or null while it is still loading. */
   timings(): (LoadTimings & { total: number }) | null {
     return this.loadTimings;
   }
@@ -490,6 +555,9 @@ export class BridgeClient {
     const stopped = new Error("the worker was terminated");
     for (const [, entry] of this.pending) entry.reject(stopped);
     this.pending.clear();
+    // A pool member terminated mid-load leaves whoever is waiting for its second stage waiting
+    // for a worker that no longer exists.
+    this.failFull(stopped);
   }
 
   private async call<T>(request: object): Promise<T> {
@@ -512,6 +580,20 @@ export class BridgeClient {
   private receive(message: WorkerResponse): void {
     if (message.kind === "status") {
       this.onStatus(message.stage, message.detail);
+      return;
+    }
+    // Two broadcasts rather than answers: the second load stage is started by the worker, so
+    // there is no request of this client's for it to reply to.
+    if (message.kind === "runtime") {
+      const timings = { ...message.timings, total: performance.now() };
+      if (this.versions !== null) {
+        reportRuntime(this.index, timings, this.versions, message.runtime);
+      }
+      this.settleFull(message.runtime);
+      return;
+    }
+    if (message.kind === "runtime-failed") {
+      this.failFull(new Error(message.message));
       return;
     }
     const entry = this.pending.get(message.id);

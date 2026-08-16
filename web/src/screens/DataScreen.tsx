@@ -17,8 +17,21 @@ export interface FileError {
   message: string;
 }
 
+/** A file being read. Named rather than counted: what it has to say is *which* file is waiting. */
+export interface PendingFile {
+  id: string;
+  name: string;
+}
+
 export interface DataScreenProps {
-  ready: boolean;
+  /**
+   * The first load stage has landed: the worker can read, trim and validate.
+   *
+   * This screen waits on that and not on the whole runtime, which is the point of staging the
+   * load -- nothing here uses scipy (`docs/STARTUP_AND_EDITING_PLAN.md` section 3). Nothing is
+   * *disabled* while it is false either: a file chosen now is read when the reader exists.
+   */
+  dataReady: boolean;
   dragActive: boolean;
   /** The reader names the loaded core offers; shown on the drop zone. */
   formats: string[];
@@ -26,6 +39,7 @@ export interface DataScreenProps {
   selected: LoadedSpectrum | null;
   selectedId: string | null;
   fileErrors: FileError[];
+  pending: PendingFile[];
   onFiles: (files: File[]) => void;
   onSelect: (id: string) => void;
   onRemove: (id: string) => void;
@@ -38,13 +52,27 @@ export function DataScreen(props: DataScreenProps) {
   return (
     <>
       <DropZone
-        disabled={!props.ready}
         dragActive={props.dragActive}
         formats={props.formats}
         onFiles={props.onFiles}
       />
 
-      <SamplePanel disabled={!props.ready} onFile={(file) => props.onFiles([file])} />
+      <SamplePanel onFile={(file) => props.onFiles([file])} />
+
+      {props.pending.length > 0 && (
+        <ul className="pending-files" role="status" aria-live="polite">
+          {props.pending.map((entry) => (
+            <li key={entry.id} className="pending-file">
+              <span className="pending-file__name">{entry.name}</span>
+              <span className="pending-file__message">
+                {props.dataReady
+                  ? "Reading…"
+                  : "Waiting for the Python runtime, then reading — you do not have to click again."}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
 
       {props.fileErrors.length > 0 && (
         <ul className="file-errors">

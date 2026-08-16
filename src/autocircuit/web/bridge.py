@@ -1,9 +1,17 @@
-"""One JSON-in, JSON-out entry point for the browser's Pyodide worker.
+"""Everything the browser can ask for once scipy is installed.
 
 The worker calls :func:`handle` and nothing else. Every request names an operation and carries
 its arguments; every response is either ``{"ok": true, "result": ...}`` or
-``{"ok": false, "error": ...}``. Three properties are worth stating because they are the reason
-this module exists rather than the worker running Python of its own:
+``{"ok": false, "error": ...}``.
+
+:func:`handle`, the envelope it writes and the four operations that need no scipy live in
+:mod:`autocircuit.web.light`, which imports this module the first time a request arrives for
+anything below. That is one dispatch completed in two pieces, not two bridges: the split is at
+the line the *browser's load* is split at (`docs/STARTUP_AND_EDITING_PLAN.md` section 3), and it
+is why ``from autocircuit.web import handle`` costs numpy rather than numpy and scipy.
+
+Three properties are worth stating because they are the reason this module exists rather than
+the worker running Python of its own:
 
 * **The failure mode of a bad file is a message, not a dead worker.** Reading whatever the user
   dropped is the one operation here guaranteed to meet input nobody anticipated, and a Pyodide
@@ -27,16 +35,14 @@ this module exists rather than the worker running Python of its own:
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import Any, cast
 
-from autocircuit import io
 from autocircuit.core.circuit import (
     Circuit,
     ElementNode,
     Node,
     Series,
+    move_subtree,
     parallel,
     remove_subtree,
     replace_subtree,
@@ -50,106 +56,25 @@ from autocircuit.core.drt import WIRE_VERSION as DRT_WIRE_VERSION
 from autocircuit.core.elements import DEFAULT_POOL, POOLS, REGISTRY
 from autocircuit.core.fit import WIRE_VERSION as FIT_WIRE_VERSION
 from autocircuit.core.fit import FitResult, Weighting, fit, relative_error, search_space
-from autocircuit.core.spectrum import WIRE_VERSION as SPECTRUM_WIRE_VERSION
 from autocircuit.core.spectrum import Spectrum
-from autocircuit.core.stats import CRITERIA, CRITERION_LABELS, CRITERION_NOTES, DEFAULT_CRITERION
-from autocircuit.core.validate import DEFAULT_MU_CRITERION, DEFAULT_RESIDUAL_LIMIT, lin_kk
-from autocircuit.core.validate import WIRE_VERSION as VALIDATE_WIRE_VERSION
+from autocircuit.core.stats import DEFAULT_CRITERION
 from autocircuit.core.wire import encode_array, encode_complex_array, encode_float
 from autocircuit.web import export, job
+from autocircuit.web.light import BRIDGE_VERSION, Operation, handle
 
-#: Version of the request/response protocol below. The worker checks it against its own build
-#: at start-up, so a stale cached bundle fails loudly rather than answering the wrong question.
-#:
-#: 5 (2026-08-16): a search carries a model-selection ``criterion``, and every results row
-#: carries all six scores plus the one the ranking used.
-#: 6 (2026-08-16): ``discover_candidate`` hands back the fit behind one results row, so the
-#: screen that ran the search can plot what it found instead of only tabulating it.
-#: 7 (2026-08-16): every results row carries ``relative_error``, the RMS |dZ|/|Z| that the Fit
-#: screen already showed -- the one fit-quality number that does not move with the weighting.
-BRIDGE_VERSION = 7
-
-__all__ = ["BRIDGE_VERSION", "handle"]
+__all__ = ["BRIDGE_VERSION", "OPERATIONS", "handle"]
 
 
-def handle(request: str) -> str:
-    """Answer one request. Never raises: a failure comes back as an error response."""
-    try:
-        payload = json.loads(request)
-        operation = payload["op"]
-        try:
-            run = _OPERATIONS[operation]
-        except KeyError:
-            raise ValueError(f"unknown operation {operation!r}") from None
-        result = run(payload)
-        return json.dumps({"ok": True, "op": operation, "result": result}, allow_nan=False)
-    except Exception as exc:  # noqa: BLE001 - the boundary; see the module docstring
-        return json.dumps(
-            {"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}},
-            allow_nan=False,
-        )
+def _op_runtime(payload: dict[str, Any]) -> dict[str, Any]:
+    """The versions of the parts that only exist once scipy is in.
 
-
-def _op_version(payload: dict[str, Any]) -> dict[str, Any]:
-    """What this build is, so the caller can refuse to talk to the wrong one.
-
-    ``criteria`` rides along because it is the same kind of fact as ``formats``: what the
-    *running core* offers, not a list the front end keeps its own copy of and has to be
-    remembered to update. It is here rather than on the catalogue so the menu exists from the
-    moment the worker is ready.
+    The rest of the build's identity -- the protocol version the handshake turns on, the reader
+    list, the criteria menu -- is answered by ``version`` in the first load stage
+    (`docs/STARTUP_AND_EDITING_PLAN.md` section 3.2). Asking this at all is how the front end
+    learns that the second stage has landed, so it is deliberately an operation and not a status
+    message: the answer arrives through the same channel the fits will.
     """
-    return {
-        "bridge": BRIDGE_VERSION,
-        "fit": FIT_WIRE_VERSION,
-        "spectrum": SPECTRUM_WIRE_VERSION,
-        "validate": VALIDATE_WIRE_VERSION,
-        "drt": DRT_WIRE_VERSION,
-        "formats": sorted(io.REGISTRY),
-        "criteria": [
-            {"name": name, "label": CRITERION_LABELS[name], "note": CRITERION_NOTES[name]}
-            for name in CRITERIA
-        ],
-        "default_criterion": DEFAULT_CRITERION,
-    }
-
-
-def _op_read(payload: dict[str, Any]) -> dict[str, Any]:
-    """Read a file the caller has already written into the filesystem.
-
-    The bytes are moved by whoever calls this -- ``FS.writeFile`` in the browser, an ordinary
-    file on disk under pytest -- and only the path crosses the wire. That is not squeamishness
-    about binary in JSON: it is what makes the browser use :func:`autocircuit.io.read_many`
-    against a real path, so format sniffing, the extension hints and the multi-sweep readers all
-    behave exactly as they do for the CLI instead of through a second entry point built for the
-    web.
-    """
-    path = Path(payload["path"])
-    hints = dict(payload.get("hints") or {})
-    spectra = io.read_many(path, format=payload.get("format"), **hints)
-    return {"spectra": [s.to_wire() for s in spectra]}
-
-
-def _op_trim(payload: dict[str, Any]) -> dict[str, Any]:
-    """Restrict a spectrum to a frequency window, inclusive of both ends."""
-    spectrum = Spectrum.from_wire(payload["spectrum"])
-    f_min = payload.get("f_min")
-    f_max = payload.get("f_max")
-    trimmed = spectrum.select(
-        None if f_min is None else float(f_min),
-        None if f_max is None else float(f_max),
-    )
-    return {"spectrum": trimmed.to_wire()}
-
-
-def _op_validate(payload: dict[str, Any]) -> dict[str, Any]:
-    """The Lin-KK verdict on a spectrum, with the residuals the panel plots."""
-    spectrum = Spectrum.from_wire(payload["spectrum"])
-    result = lin_kk(
-        spectrum,
-        mu_criterion=float(payload.get("mu_criterion", DEFAULT_MU_CRITERION)),
-        residual_limit=float(payload.get("residual_limit", DEFAULT_RESIDUAL_LIMIT)),
-    )
-    return {"validation": result.to_wire(spectrum)}
+    return {"fit": FIT_WIRE_VERSION, "drt": DRT_WIRE_VERSION}
 
 
 def _op_elements(payload: dict[str, Any]) -> dict[str, Any]:
@@ -190,6 +115,13 @@ def _op_edit(payload: dict[str, Any]) -> dict[str, Any]:
     rule the rest of this front end follows -- there is one implementation of the circuit
     grammar and one of the tree operations, both in Python, because a second one in JavaScript
     is a way for the browser to build a topology the CLI would read differently.
+
+    ``"move"`` relocates a subtree already in the circuit rather than adding a new element: it
+    reads ``to`` (the target path, validated with the same ``_path`` helper as ``path``) and
+    ``connect``/``position`` for how it joins what is already there, and does the remove-and-
+    reinsert as the single :func:`~autocircuit.core.circuit.move_subtree` operation, because
+    ``to`` addresses the circuit before anything has moved and a caller cannot predict what its
+    own path becomes once ``path`` is torn out.
     """
     circuit = Circuit.parse(payload["circuit"])
     root = circuit.root
@@ -210,6 +142,13 @@ def _op_edit(payload: dict[str, Any]) -> dict[str, Any]:
         pair = (added, target) if payload.get("position") == "before" else (target, added)
         connected = series(*pair) if action == "series" else parallel(*pair)
         new_root = replace_subtree(root, path, connected)
+    elif action == "move":
+        to = _path(payload.get("to", ()), root)
+        connect = payload.get("connect")
+        if connect not in ("series", "parallel"):
+            raise ValueError(f"unknown move connect {connect!r}; expected 'series' or 'parallel'")
+        position = payload.get("position", "after")
+        new_root = move_subtree(root, path, to, connect, position)
     else:
         raise ValueError(f"unknown edit action {action!r}")
 
@@ -670,11 +609,10 @@ def _bounds(raw: Any) -> dict[str, tuple[float, float]]:
     return out
 
 
-_OPERATIONS = {
-    "version": _op_version,
-    "read": _op_read,
-    "trim": _op_trim,
-    "validate": _op_validate,
+#: Everything that needs scipy. `autocircuit.web.light` holds the four that do not and looks the
+#: rest up here, so a caller still sees one flat set of operations.
+OPERATIONS: dict[str, Operation] = {
+    "runtime": _op_runtime,
     "elements": _op_elements,
     "circuit": _op_circuit,
     "edit": _op_edit,

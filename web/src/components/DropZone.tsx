@@ -6,20 +6,28 @@ import { useId } from "react";
 import type { ChangeEvent } from "react";
 
 export interface DropZoneProps {
-  disabled: boolean;
   dragActive: boolean;
   /**
    * Which readers the loaded core has, from its own registry.
    *
    * "What files can I drop here?" is a question asked *at* the drop zone, and it used to be
    * answered in the page header on every screen instead (docs/METRICS_AND_UX_PLAN.md section 3).
-   * Empty until the worker is ready, which is also when dropping starts working.
+   * Empty until the worker has answered, which is *not* when dropping starts working -- see
+   * below.
    */
   formats: string[];
   onFiles: (files: File[]) => void;
 }
 
-export function DropZone({ disabled, dragActive, formats, onFiles }: DropZoneProps) {
+/**
+ * The zone is never disabled, and that is the change rather than an oversight.
+ *
+ * It used to be, for the seconds the Python runtime takes to come up, which made the first thing
+ * a visitor met a control that refused them (`docs/STARTUP_AND_EDITING_PLAN.md` section 3.4). A
+ * file chosen now is held by `App` and read the moment the reader exists, and the page says so
+ * while it waits -- which is both truer and shorter than making them wait to click.
+ */
+export function DropZone({ dragActive, formats, onFiles }: DropZoneProps) {
   const inputId = useId();
 
   function handleChange(event: ChangeEvent<HTMLInputElement>): void {
@@ -29,21 +37,11 @@ export function DropZone({ disabled, dragActive, formats, onFiles }: DropZonePro
     event.target.value = "";
   }
 
-  const classes = [
-    "drop-zone",
-    dragActive ? "drop-zone--active" : "",
-    disabled ? "drop-zone--disabled" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
+  const classes = ["drop-zone", dragActive ? "drop-zone--active" : ""].filter(Boolean).join(" ");
 
   return (
     <div className={classes}>
-      <p className="drop-zone__hint">
-        {disabled
-          ? "Loading the Python runtime -- files can be dropped once it is ready."
-          : "Drag and drop impedance data files anywhere on this page."}
-      </p>
+      <p className="drop-zone__hint">Drag and drop impedance data files anywhere on this page.</p>
       {formats.length > 0 && (
         <p className="drop-zone__formats">Reads {formats.join(", ")} — the format is sniffed.</p>
       )}
@@ -54,7 +52,6 @@ export function DropZone({ disabled, dragActive, formats, onFiles }: DropZonePro
           className="file-button__input"
           type="file"
           multiple
-          disabled={disabled}
           onChange={handleChange}
         />
       </label>

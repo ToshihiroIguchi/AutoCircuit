@@ -23,7 +23,7 @@ from __future__ import annotations
 import math
 import time
 from dataclasses import dataclass, field, replace
-from typing import Any, Literal
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -33,6 +33,7 @@ from .circuit import Circuit
 from .elements import BoundsContext
 from .spectrum import Spectrum
 from .stats import Statistics, compute_statistics
+from .weighting import Weighting, weight_vectors
 from .wire import (
     decode_array,
     decode_complex_array,
@@ -46,8 +47,6 @@ from .wire import (
 
 Float = NDArray[np.float64]
 Complex = NDArray[np.complex128]
-
-Weighting = Literal["unit", "modulus", "proportional", "sigma"]
 
 #: Cost returned for parameter sets that make the model blow up; large but finite so the
 #: global optimizer can still rank two bad candidates against each other.
@@ -64,40 +63,11 @@ _RESTART_SPREAD_WARNING = 0.05
 #: 3 (2026-08-16) added ``relative_error``, the fit's RMS |dZ|/|Z| over the spectrum.
 WIRE_VERSION = 3
 
-
-def weight_vectors(
-    z: Complex, weighting: Weighting = "modulus", sigma: Float | None = None
-) -> tuple[Float, Float]:
-    """Return the (real, imaginary) residual weights for the chosen weighting scheme.
-
-    - ``unit``: ordinary least squares; dominated by the largest-|Z| points.
-    - ``modulus``: weight 1/|Z|; equivalent to minimising *relative* error and the right
-      default for spectra spanning several decades of magnitude (e.g. capacitors).
-    - ``proportional``: weight each component by its own magnitude; the classic CNLS choice
-      when the instrument error is proportional to each measured component.
-    - ``sigma``: user-supplied per-point standard deviations.
-    """
-    mag = np.abs(z)
-    if weighting == "unit":
-        ones = np.ones_like(mag)
-        return ones, ones
-    if weighting == "modulus":
-        floor = np.max(mag) * 1e-12
-        w = 1.0 / np.maximum(mag, floor)
-        return w, w
-    if weighting == "proportional":
-        floor = np.max(mag) * 1e-6
-        return 1.0 / np.maximum(np.abs(z.real), floor), 1.0 / np.maximum(np.abs(z.imag), floor)
-    if weighting == "sigma":
-        if sigma is None:
-            raise ValueError("weighting='sigma' requires the sigma argument")
-        s = np.asarray(sigma, dtype=np.float64)
-        if s.shape != mag.shape:
-            raise ValueError("sigma must have the same length as the spectrum")
-        if np.any(s <= 0):
-            raise ValueError("sigma must be strictly positive")
-        return 1.0 / s, 1.0 / s
-    raise ValueError(f"unknown weighting {weighting!r}")
+# `Weighting` and `weight_vectors` are imported above rather than defined here, and re-exported
+# so that every existing `from autocircuit.core.fit import ...` still works. They live in
+# `weighting.py` because they are pure numpy and `validate.py` needs them: importing the fitter
+# for two weight vectors drags `scipy.optimize` into the browser's data path, which loads before
+# scipy does (`docs/STARTUP_AND_EDITING_PLAN.md` section 3.2).
 
 
 def search_space(

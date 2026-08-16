@@ -48,10 +48,14 @@ export class SearchPool {
    *
    * Started together rather than one at a time: they are independent, and the browser overlaps
    * four downloads-and-boots far better than it does four in sequence.
+   *
+   * `full()` and not `ready()`: these workers exist to fit topologies, so a worker whose second
+   * load stage is still running is not one this pool may count. Reporting it as up would put a
+   * "4 / 4 workers ready" beside a screen that is about to sit still while scipy installs.
    */
   async ready(): Promise<void> {
     if (this.clients.length === this.size) {
-      await Promise.all(this.clients.map((client) => client.ready()));
+      await Promise.all(this.clients.map((client) => client.full()));
       return;
     }
     this.teardown();
@@ -59,7 +63,7 @@ export class SearchPool {
     this.clients = Array.from({ length: this.size }, () => new BridgeClient(noStatus));
     await Promise.all(
       this.clients.map((client) =>
-        client.ready().then(() => {
+        client.full().then(() => {
           up += 1;
           this.onStatus(up, this.size);
         }),

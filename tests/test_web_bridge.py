@@ -658,6 +658,39 @@ def test_edit_preserves_labels_of_elements_that_survive_it() -> None:
     assert "C1.C" in param_names
 
 
+def test_edit_move_matches_move_subtree_called_directly() -> None:
+    from autocircuit.core.circuit import move_subtree
+
+    text = "R1-C1-L1"
+    circuit = Circuit.parse(text)
+    expected = Circuit(move_subtree(circuit.root, (0,), (2,), "series")).to_string()
+
+    response = _call("edit", circuit=text, path=[0], action="move", to=[2], connect="series")
+    assert response["ok"] is True
+    assert response["result"]["circuit"] == expected
+
+
+def test_edit_move_into_parallel_with_another_element() -> None:
+    from autocircuit.core.circuit import move_subtree
+
+    text = "R1-C1-L1"
+    circuit = Circuit.parse(text)
+    expected = Circuit(move_subtree(circuit.root, (1,), (2,), "parallel")).to_string()
+
+    response = _call("edit", circuit=text, path=[1], action="move", to=[2], connect="parallel")
+    assert response["ok"] is True
+    assert response["result"]["circuit"] == expected
+
+
+def test_edit_move_with_an_unknown_connect_value_returns_an_error_response() -> None:
+    response = _call(
+        "edit", circuit="R1-C1-L1", path=[0], action="move", to=[2], connect="sideways"
+    )
+    assert response["ok"] is False
+    assert response["error"]["type"] == "ValueError"
+    assert "sideways" in response["error"]["message"]
+
+
 # =================================================================================================
 # 13. `preview` matches `circuit.impedance` at `search_space`'s start, bit for bit
 # =================================================================================================
@@ -943,7 +976,7 @@ def test_bridge_version_is_bumped_for_the_new_operations() -> None:
     """Pins the value rather than just its presence: a worker checks this at start-up and a
     stale cached bundle must fail loudly instead of answering with the old protocol.
     """
-    assert BRIDGE_VERSION == 7
+    assert BRIDGE_VERSION == 8
 
 
 def test_every_response_above_parses_as_json_and_re_dumps_without_allow_nan() -> None:

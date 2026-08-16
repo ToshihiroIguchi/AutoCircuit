@@ -10,11 +10,18 @@ import { useEffect, useState } from "react";
 import { fetchSample, loadSamples, type Sample } from "../core/samples";
 import { formatPercent, formatSiRange } from "../utils/format";
 
+/**
+ * The Load buttons are live from the first paint, not from the moment Python is up.
+ *
+ * They used to be disabled until the whole runtime had loaded, which is what "not even the
+ * example loads" was about (`docs/STARTUP_AND_EDITING_PLAN.md` section 3.4). The manifest and the
+ * CSV are a few kB from the same origin; the fetched file is handed to `App`, which holds it
+ * until the reader exists and names it in a pending row meanwhile. Clicking early now costs a
+ * wait that was going to happen anyway, instead of a second click.
+ */
 export function SamplePanel({
-  disabled,
   onFile,
 }: {
-  disabled: boolean;
   /** Handed the fetched file, which then takes the path a dropped one takes. */
   onFile: (file: File) => void;
 }) {
@@ -71,7 +78,7 @@ export function SamplePanel({
               <button
                 type="button"
                 className="sample-panel__load"
-                disabled={disabled || busy !== null}
+                disabled={busy !== null}
                 onClick={() => void load(sample)}
               >
                 {busy === sample.id ? "Loading…" : "Load"}
