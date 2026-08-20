@@ -119,10 +119,20 @@ ABANDON_FACTOR = 100.0
 #: those equivalents are precisely what the report exists to surface.
 PERFECT_COST = 1e-9
 
-#: Default number of candidates refitted at full budget, per mode. The exhaustive stage ranks
-#: thousands of topologies with one sloppy fit each, so it needs a wider shortlist than the
-#: genetic search, which has already refitted its survivors many times over.
-REFINE_DEFAULT = {"evolve": 8, "exhaustive": 30, "auto": 30}
+#: Default number of candidates refitted at full budget, per mode.
+#:
+#: One value for all three since both searches now shortlist by :func:`_quota_by_size`. The old
+#: split -- 8 for the genetic search against 30 for the exhaustive one -- was justified by the
+#: genetic search "having already refitted its survivors many times over", which stopped being
+#: true when it started reporting only refitted candidates
+#: (docs/EVOLVE_SEARCH_PLAN.md section 3.2).
+#:
+#: Note what this number does *not* do. The quota is ``max(MIN_REFINE_PER_SIZE, n_refine //
+#: sizes)``, and a genetic archive spans about seven element counts, so 8, 16 and 30 all reduce
+#: to the same quota of 5: below ``MIN_REFINE_PER_SIZE * sizes`` this constant has no effect at
+#: all, and the floor is the knob. That is arithmetic rather than a measurement, and it is
+#: recorded here so nobody sweeps this value looking for a difference that cannot appear.
+REFINE_DEFAULT = {"evolve": 30, "exhaustive": 30, "auto": 30}
 
 #: Every candidate within this factor of the best screening cost is refitted at full budget,
 #: on top of the ``n_refine`` best. A sloppy screen must not be able to drop a near-tie.
@@ -135,6 +145,21 @@ REFINE_CEILING_FACTOR = 2
 #: Floor on the per-element-count refit quota, so that a size class is never represented by one
 #: or two candidates just because the run happened to span many sizes.
 MIN_REFINE_PER_SIZE = 5
+
+#: How far past ``time_limit`` the genetic search's refit may run, as a multiple of it.
+#:
+#: ``time_limit`` has always governed the evolutionary loop and not the refit that follows it --
+#: the loop checks the clock between generations, so a run overshoots by up to one generation
+#: before the refit even starts. That was harmless while the refit was a fixed eight fits. It is
+#: not harmless now that the shortlist is a per-size quota: [measured] the refit of a
+#: seven-size archive is 35-70 full fits, and a run given 5 s spent 222 s in it.
+#:
+#: Bounding the refit at ``time_limit`` itself is the obvious fix and it is wrong, because the
+#: loop has usually already passed that mark: the deadline would be spent before the tier began
+#: and the run would report **nothing at all**, having done all of the work. So the refit gets
+#: its own share on top. The loop keeps the budget it was promised; the report gets half as much
+#: again to be worth reading.
+REFIT_HEADROOM = 1.5
 
 #: Tier-1 tasks handed to a worker process at a time. Large enough to amortise the ~1 s
 #: interpreter start-up on Windows, small enough that the early-abandon threshold keeps up.
@@ -1067,10 +1092,10 @@ def discover(
         search_restarts, search_popsize, search_maxiter: Reduced fitting budget used by the
             genetic search. Survivors are refitted properly at the end.
         final_restarts: Restart count for the final refit of the reported candidates.
-        n_refine: Refit budget for the full-budget second tier. In the exhaustive stage it is
-            a *total* that is split into a quota per element count, so that every complexity
-            reaches the Pareto front; see :func:`_shortlist`. :data:`REFINE_DEFAULT` holds the
-            per-mode default.
+        n_refine: Refit budget for the full-budget second tier. In **both** searches it is a
+            *total* that is split into a quota per element count, so that every complexity
+            reaches the Pareto front; see :func:`_quota_by_size`. :data:`REFINE_DEFAULT` holds
+            the default, and says why raising it below a threshold changes nothing.
         time_limit: Wall-clock budget in seconds; the search stops cleanly when exceeded.
         criterion: Which model-selection rule ranks the candidates, draws the Pareto front and
             ranks the tier-1 shortlist -- one of :data:`~autocircuit.core.stats.CRITERIA`,
@@ -1530,21 +1555,44 @@ def _evolve(
 
         trees = _next_generation(alive, rng, pool, max_elements, population, criterion)
 
+    # Only refitted candidates are reported, which is the rule SCREEN_POPSIZE states and the
+    # rule `_exhaustive` has always followed: every number that reaches the user comes from the
+    # full-budget refit. [measured, docs/EVOLVE_SEARCH_PLAN.md section 1.4] This search used to
+    # merge the unrefitted archive back in -- `_unique_best(refined + alive)` -- and 82% of the
+    # Pareto rows it reported then carried screening-grade chi-squareds, standard errors and
+    # therefore "free?" marks, with nothing in the report able to say which rows those were.
+    # The archive is not lost: it selects the shortlist, and `n_evaluated` still counts it.
     alive = _unique_best(scored, criterion)
-    alive.sort(key=lambda c: c.score(criterion))
-    refined = _refine(alive[:n_refine], spectrum, weighting, final_restarts, seed)
-    merged = _unique_best(refined + alive, criterion)
-    merged.sort(key=lambda c: c.score(criterion))
+    shortlist = _shortlist_candidates(alive, n_refine, criterion)
+    refined, attempted = _refine(
+        shortlist,
+        spectrum,
+        weighting,
+        final_restarts,
+        seed,
+        deadline=None if time_limit is None else started + time_limit * REFIT_HEADROOM,
+    )
+    # Tier 2 is authoritative even when it scores worse than the reduced fit did: a full-budget
+    # refit that lands in a different basin is the better estimate of that topology, and keeping
+    # whichever number happened to be smaller would be picking the fit by its answer.
+    refined = _unique_best(refined, criterion)
+    refined.sort(key=lambda c: c.score(criterion))
 
     return DiscoveryResult(
-        candidates=merged,
-        pareto=pareto_front(merged, criterion),
+        candidates=refined,
+        pareto=pareto_front(refined, criterion),
         n_evaluated=len(evaluator.cache),
         generations=generation + 1,
         elapsed_s=time.perf_counter() - started,
         pool=pool,
         mode="evolve",
         complete_up_to=None,
+        # Set only when the tier really was cut short. A finished refit that dropped a few
+        # unfittable topologies is not a partial report, and saying so would cry wolf on the
+        # one signal that means "these numbers are still moving".
+        refit_progress=(
+            None if attempted >= len(shortlist) else (len(refined), len(shortlist))
+        ),
         criterion=criterion,
     )
 
@@ -1739,52 +1787,130 @@ def _screening_score(
     return value if math.isfinite(value) else math.inf
 
 
+class Ranked[T](NamedTuple):
+    """One candidate for a full-budget refit, reduced to what the quota rule needs.
+
+    ``payload`` is whatever the caller wants back -- a topology string for the exhaustive
+    stage's screen, a :class:`Candidate` for the genetic search's archive.
+    """
+
+    n_elements: int
+    score: float
+    """Model-selection value, smaller better. Ranks *within* a size class."""
+    cost: float
+    """Weighted sum of squared residuals. Only the near-tie rule reads this."""
+    tiebreak: str
+    """Sorted on after score and cost, so that ties order the same way on every run.
+
+    Not decoration. Two topologies scoring *exactly* alike is the normal case here rather than a
+    rarity -- it is what an exact reparameterisation looks like, and surfacing those is what the
+    equivalence-class report exists for -- so which of them the quota keeps would otherwise
+    depend on the order the caller happened to build the list in.
+    """
+    payload: T
+
+
+def _quota_by_size[T](items: Sequence[Ranked[T]], n_refine: int) -> list[T]:
+    """Split ``n_refine`` into a per-element-count quota and take the best of each size.
+
+    **The quota is per element count, and that is not a detail.** [measured] Ranking the whole
+    pool by cost puts nothing but the largest circuits on the shortlist: raw residual always
+    improves with parameters, so on the capacitor reference every one of the 60 best-scoring
+    candidates had five elements and the four-element truth -- the circuit that generated the
+    data -- never reached tier 2 at all. Two corrections, both needed:
+
+    * rank *within* a size by an information criterion rather than raw cost, so an extra CPE has
+      to earn its two parameters even against its own size class;
+    * give every size its own quota, so the Pareto front has candidates at each complexity
+      instead of a cluster at the top.
+
+    Within a size the list is the score-best ``quota``, plus every candidate whose cost is
+    within :data:`REFINE_COST_FACTOR` of that size's best -- the near-tie rule, which is what
+    stops an exact equivalent from being dropped because a sloppy fit ranked it one place too
+    low. [measured] That rule needs a ceiling: at 1% noise a factor 10 in cost is only a factor
+    3.2 in relative error, so hundreds of candidates land inside it and refitting them all cost
+    half an hour per run while surfacing nothing new.
+
+    Shared by both searches on purpose. Gate G1 rests on this rule and gate EV2 on the genetic
+    search making the same kind of claim as the exhaustive one; a second copy of it is a second
+    thing that can drift (docs/EVOLVE_SEARCH_PLAN.md section 3.2).
+    """
+    by_size: dict[int, list[Ranked[T]]] = {}
+    for item in items:
+        by_size.setdefault(item.n_elements, []).append(item)
+    if not by_size:
+        return []
+
+    quota = max(MIN_REFINE_PER_SIZE, n_refine // len(by_size))
+    keep: list[T] = []
+    for group in by_size.values():
+        group.sort(key=lambda item: (item.score, item.cost, item.tiebreak))
+        best_cost = min(item.cost for item in group)
+        threshold = best_cost * REFINE_COST_FACTOR if best_cost > 0.0 else math.inf
+        near_ties = sum(1 for item in group if item.cost <= threshold)
+        take = min(max(quota, near_ties), quota * REFINE_CEILING_FACTOR)
+        keep.extend(item.payload for item in group[:take])
+    return keep
+
+
 def _shortlist(
     scored: Sequence[tuple[float, str]],
     n_refine: int,
     n_data: int,
     criterion: Criterion = DEFAULT_CRITERION,
 ) -> list[str]:
-    """The screened candidates worth a full-budget refit.
+    """The screened candidates worth a full-budget refit, as topology strings.
 
-    **The quota is per element count, and that is not a detail.** [measured] Ranking the whole
-    screen by cost puts nothing but the largest circuits on the shortlist: raw residual always
-    improves with parameters, so on the capacitor reference every one of the 60 best-scoring
-    candidates had five elements and the four-element truth -- the circuit that generated the
-    data -- never reached tier 2 at all. Two corrections, both needed:
-
-    * rank *within* a size by a screening information criterion rather than raw cost, so an
-      extra CPE has to earn its two parameters even against its own size class;
-    * give every size its own quota, so the Pareto front has candidates at each complexity
-      instead of a cluster at the top.
-
-    Within a size the list is the score-best ``quota``, plus every candidate whose cost is
-    within :data:`REFINE_COST_FACTOR` of that size's best -- the near-tie rule, which is what
-    stops an exact equivalent from being dropped because the sloppy screen ranked it one place
-    too low. [measured] That rule needs a ceiling: at 1% noise a factor 10 in cost is only a
-    factor 3.2 in relative error, so hundreds of candidates land inside it and refitting them
-    all cost half an hour per run while surfacing nothing new.
+    Tier 1's half of :func:`_quota_by_size`, which holds the rule and the reasons for it. All
+    this adds is what a *screen* has to rank by: the cost is a raw weighted SSR with no
+    covariance behind it, so the score is :func:`_screening_score` rather than a fitted
+    criterion.
     """
-    usable = [(cost, text) for cost, text in scored if math.isfinite(cost)]
-    if not usable:
-        return []
-
-    by_size: dict[int, list[tuple[float, float, str]]] = {}
-    for cost, text in usable:
+    ranked: list[Ranked[str]] = []
+    for cost, text in scored:
+        if not math.isfinite(cost):
+            continue
         circuit = Circuit.parse(text)
-        score = _screening_score(cost, circuit.n_params, n_data, criterion)
-        by_size.setdefault(len(circuit.leaves), []).append((score, cost, text))
+        ranked.append(
+            Ranked(
+                len(circuit.leaves),
+                _screening_score(cost, circuit.n_params, n_data, criterion),
+                cost,
+                text,
+                text,
+            )
+        )
+    return _quota_by_size(ranked, n_refine)
 
-    quota = max(MIN_REFINE_PER_SIZE, n_refine // len(by_size))
-    keep: list[str] = []
-    for group in by_size.values():
-        group.sort()
-        best_cost = min(cost for _, cost, _ in group)
-        threshold = best_cost * REFINE_COST_FACTOR if best_cost > 0.0 else math.inf
-        near_ties = sum(1 for _, cost, _ in group if cost <= threshold)
-        take = min(max(quota, near_ties), quota * REFINE_CEILING_FACTOR)
-        keep.extend(text for _, _, text in group[:take])
-    return keep
+
+def _shortlist_candidates(
+    alive: Sequence[Candidate], n_refine: int, criterion: Criterion = DEFAULT_CRITERION
+) -> list[Candidate]:
+    """The genetic search's archive reduced to what is worth a full-budget refit.
+
+    The same rule as :func:`_shortlist` and deliberately so, but the inputs are better: these
+    candidates were fitted, so the score is the chosen criterion computed from a real covariance
+    rather than the cost-only approximation a screen has to make, and the cost the near-tie rule
+    reads is the fit's own weighted SSR.
+
+    The budget behind those numbers is still the reduced search budget, which is exactly why
+    this selects rather than reports. What comes back gets refitted at full budget, and only
+    that is published -- see :func:`_evolve`.
+    """
+    return _quota_by_size(
+        [
+            Ranked(
+                len(candidate.circuit.leaves),
+                candidate.score(criterion),
+                candidate.result.statistics.ssr,
+                candidate.circuit.canonical_form(),
+                candidate,
+            )
+            for candidate in alive
+            if math.isfinite(candidate.score(criterion))
+        ],
+        n_refine,
+    )
 
 
 def _full_fit(
@@ -2268,10 +2394,32 @@ def _refine(
     weighting: Weighting,
     restarts: int,
     seed: int,
-) -> list[Candidate]:
-    """Refit the shortlist at full budget, since the search used a reduced one."""
+    deadline: float | None = None,
+) -> tuple[list[Candidate], int]:
+    """Refit the shortlist at full budget, since the search used a reduced one.
+
+    Returns the refitted candidates and **how many of the shortlist were attempted**, which is
+    not the same number: a topology that cannot be fitted at all is dropped rather than
+    reported, and that is an answer rather than an interruption. Only the second number can tell
+    a caller whether the tier finished.
+
+    ``deadline`` bounds this tier, which it has to now that the shortlist is a per-size quota
+    rather than a fixed eight: [measured] the refit of a seven-size archive is 35-70 full fits,
+    and a run given a 5 s budget spent 222 s in this function alone. See :data:`REFIT_HEADROOM`
+    for why the deadline is not simply ``time_limit``. What a stopped tier may then claim
+    already has an implementation -- :attr:`DiscoveryResult.refit_progress` and
+    :meth:`DiscoveryResult._with_refit_note` -- so this reports into that rather than inventing
+    a second way to say it.
+    """
     out: list[Candidate] = []
+    attempted = 0
     for candidate in candidates:
+        # The first is always attempted: a report with no rows in it cannot be read at all, and
+        # one full-budget fit is the least that can honestly be published. Everything after it
+        # answers to the clock.
+        if attempted and deadline is not None and time.perf_counter() > deadline:
+            break
+        attempted += 1
         try:
             result = fit(
                 candidate.circuit,
@@ -2284,4 +2432,4 @@ def _refine(
             continue
         if math.isfinite(result.statistics.aicc):
             out.append(Candidate(candidate.circuit, result, candidate.generation))
-    return out
+    return out, attempted

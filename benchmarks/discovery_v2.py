@@ -1,6 +1,6 @@
 """Does exhaustive-first discovery actually work, and what does it cost?
 
-Seven measurements, selected by the first command-line argument:
+Eight measurements, selected by the first command-line argument:
 
 ``gate``
     Acceptance gate **G1** of ``docs/DISCOVERY_V2_PLAN.md``: on each reference spectrum,
@@ -50,6 +50,19 @@ Seven measurements, selected by the first command-line argument:
     the mistake that cost gate G1 once already (ranking by raw cost looked fine on small cases
     and lost the truth on the real space).
 
+``evolve-gate``
+    Step 1 of ``docs/EVOLVE_SEARCH_PLAN.md``, and gate **EV1**'s baseline. The exhaustive stage
+    above is only tested up to five elements; above that ``mode="auto"`` falls back to
+    ``mode="evolve"`` -- the genetic search -- which had no quality gate at all before this one.
+    On three references sized 6-7 elements, deliberately beyond exhaustive reach, this reports
+    whether ``mode="evolve"`` finds the truth or an exact equivalent, whether it reaches the
+    Pareto front, whether it is the recommendation, how many distinct topologies were evaluated,
+    the wall-clock, and -- because section 1.4 of the plan found the genetic search's *reported*
+    numbers coming from the reduced screening budget rather than the full refit -- how many
+    Pareto rows carry that screening-grade provenance. This is a **baseline measurement**, not a
+    pass/fail gate: EV1's pass fraction and time budget get written from this run's numbers, not
+    assumed ahead of it.
+
 Run with the package on the path (it is not pip-installed on the dev machine)::
 
     $env:PYTHONPATH = "C:\\Users\\toshi\\python\\AutoCircuit\\src"
@@ -60,9 +73,13 @@ Run with the package on the path (it is not pip-installed on the dev machine)::
     python benchmarks/discovery_v2.py skeleton --workers 8 --compare
     python benchmarks/discovery_v2.py wrong-skeleton --workers 8
     python benchmarks/discovery_v2.py excluded --seeds 1 --workers 8
+    python benchmarks/discovery_v2.py evolve-gate --seeds 3
 
 ``gate`` and ``screen-rank`` are the slow ones: both fit every plausible topology up to five
 elements, several times over. Use ``--seeds 1`` and ``--limit 4`` for a sanity run.
+``evolve-gate`` is slow in a different way: it costs at least ``seeds x references x
+--time-limit``, since every seed on every reference runs a full genetic search up to the time
+limit -- use ``--seeds 1`` and a short ``--time-limit`` for a sanity run.
 """
 
 from __future__ import annotations
@@ -74,10 +91,14 @@ import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+import numpy as np
+
 from autocircuit.core.circuit import Circuit
 from autocircuit.core.discover import (
+    EQUIVALENCE_RTOL,
     MIN_REFINE_PER_SIZE,
     REFINE_DEFAULT,
+    Candidate,
     DiscoveryResult,
     ScreenBudget,
     # ``screen-rank`` measures the ranking the two-tier search actually performs, so it calls
@@ -185,6 +206,92 @@ REFERENCES = [
 ]
 
 
+#: References for ``evolve-gate`` only -- **do not append these to REFERENCES.** Every other
+#: mode in this file (``gate``, ``skeleton``, ``wrong-skeleton``, ``excluded``, ``filter``,
+#: ``screen``, ``screen-rank``) iterates ``REFERENCES`` and assumes the truth is reachable by
+#: the five-element exhaustive stage; ``gate`` in particular would fail by construction on a
+#: six-element truth, and the counts every one of those modes prints would silently change
+#: (they are the numbers ``docs/DISCOVERY_V2_PLAN.md`` records). These three are sized 6-7
+#: elements *on purpose* -- deliberately beyond exhaustive reach -- which is exactly what makes
+#: them the genetic search's job rather than the exhaustive stage's, per
+#: ``docs/EVOLVE_SEARCH_PLAN.md`` section 3.1. They stay in their own list so the two searches
+#: are never measured against a truth the other was never meant to find.
+LARGE_REFERENCES = [
+    Reference(
+        # [measured] Its three RC time constants are 1e-6, 1e-2 and 4e-2 s -- the last two only
+        # 0.6 decades apart -- so this is deliberately the hard case among the three, not an
+        # easy one dressed up as hard: fitting the truth to its own data leaves 0/6 parameters
+        # unresolved at 1% noise, worst per-block deviation 24.1% once the blocks are matched by
+        # value rather than by name. Three parallel RC blocks in series over-a-sum are a
+        # permutation symmetry (swapping any two blocks' labels is the same circuit), so a
+        # name-by-name comparison of recovered R1/C1 against generating R1/C1 is meaningless --
+        # only a value-matched comparison, as used for the deviation above, means anything.
+        "three-block Maxwell-Wagner",
+        "p(R1,C1)-p(R2,C2)-p(R3,C3)",
+        {"R1.R": 1e4, "C1.C": 1e-10, "R2.R": 5e5, "C2.C": 2e-8, "R3.R": 8e4, "C3.C": 5e-7},
+        ("R", "C", "L", "CPE"),
+        1e-2,
+        1e7,
+    ),
+    Reference(
+        "capacitor + interfacial block",
+        "C1-R1-L1-SKINF1-p(R2,CPE1)",
+        {
+            "C1.C": 1e-6,
+            "R1.R": 1e-2,
+            "L1.L": 5e-10,
+            "SKINF1.A": 2e-5,
+            "SKINF1.n": 0.5,
+            # [measured] At R2 = 5 kOhm the interfacial block swamps the capacitor's own
+            # response over the whole window: fitting the truth to its own 1% data left 3 of 8
+            # parameters -- the ESR R1.R and both skin-effect parameters -- with standard errors
+            # exceeding their own values, which would ask the search to find a circuit the data
+            # cannot confirm. At R2 = 5 Ohm it is 0/8 unresolved. The ESR remains the marginal
+            # parameter even there (fitted 0.0176 against a true 0.01, stderr/value 0.275) --
+            # the same 10 mOhm ESR effect docs/DISCOVERY_V2_PLAN.md's G1 already documents on
+            # the smaller capacitor reference -- so this reference is expected to pass
+            # ``reported`` while sometimes failing ``is_recommendation``, which is the parsimony
+            # rule choosing the simpler model, not the search failing to find the truth.
+            "R2.R": 5.0,
+            "CPE1.Q": 5e-6,
+            "CPE1.n": 0.8,
+        },
+        ("R", "C", "L", "CPE", "SKINF"),
+        1e2,
+        1e9,
+    ),
+    Reference(
+        "Randles + ESL + second block",
+        "R1-L1-p(CPE1,R2-Wo1)-p(R3,C1)",
+        {
+            "R1.R": 20.0,
+            "L1.L": 1e-7,
+            "CPE1.Q": 1e-5,
+            "CPE1.n": 0.85,
+            "R2.R": 200.0,
+            # WarburgOpen's parameters are ``R`` and ``tau``, not ``A`` -- ``A`` belongs to the
+            # infinite Warburg ``W``. Confirmed against Circuit.parse("Wo1").param_names.
+            "Wo1.R": 50.0,
+            "Wo1.tau": 1.0,
+            "R3.R": 40.0,
+            "C1.C": 2e-3,
+        },
+        ("R", "C", "L", "CPE", "W", "Wo"),
+        1e-2,
+        # [measured] At f_max = 1e5 the ESL's L/R corner sits at 3.18e7 Hz, so the inductance
+        # moves |Z| by only 0.3% at the very top of this window -- under the 1% noise floor --
+        # and fitting the known truth at full budget returned L1 off by +811% while reaching
+        # only 2.65% RMS against a 1.3% noise floor: unidentifiable, not merely imprecise.
+        # Widening to 1e7 puts omega*L/R = 0.314 at the top of the window and every parameter
+        # recovers within 4.0%, 0/9 unresolved. Three narrower alternatives were measured and
+        # rejected: f_max 1e6 (Wo1.tau off by 99.9%, 2 unresolved), L1 = 1e-6 with f_max 1e6
+        # (lands in a wrong basin, CPE1.Q off +628%), and L1 = 1e-5 with f_max 1e5 (2
+        # unresolved).
+        1e7,
+    ),
+]
+
+
 @dataclass(frozen=True)
 class Verdict:
     """What became of the true topology in one run.
@@ -218,6 +325,57 @@ def _truth_verdict(result: DiscoveryResult, reference: Reference) -> Verdict:
         truth is recommended or recommended in equivalents
     )
     return Verdict(True, on_front, is_recommendation, name)
+
+
+def _large_truth_verdict(result: DiscoveryResult, reference: Reference, data: Spectrum) -> Verdict:
+    """The truth-or-equivalent verdict for ``evolve-gate``, looked up by response, not by name.
+
+    ``_truth_verdict`` above finds the truth by canonical form and gives up if it is not in
+    ``result.candidates`` -- ``result.equivalents_of(truth)`` only ever compares *against* the
+    truth once the truth itself is a candidate. That is the right rule below five elements,
+    where the exhaustive stage enumerates every topology and "the truth was never proposed" is
+    itself a finding. It is the wrong rule here: at six and seven elements the genetic search
+    may legitimately land on an exact reparameterisation of the truth that it never happens to
+    write down in the truth's own canonical form, and calling that a failure would measure
+    the search's proposal distribution rather than what gate EV1 actually asks for -- "the truth
+    or an exact equivalent". So the truth is fitted once, independently, and every candidate is
+    compared to *its* response, using the same tolerance and the same comparison
+    (``max(|za - zb| / |zb|) <= EQUIVALENCE_RTOL``) that
+    ``autocircuit.core.discover._same_response`` applies between two candidates.
+
+    One asymmetry this creates is worth knowing before the before/after of step 2 is read. The
+    truth is matched **structurally**, by canonical form, so its detection does not depend on
+    how well it was fitted. An *equivalent* is matched **numerically**, so its detection does.
+    Those are not equally budget-sensitive: today ``_evolve`` reports rows fitted at the reduced
+    screening budget (section 1.4 of the plan), and after step 2 it will not. The effect is
+    smaller than it looks, because the two tiers differ in which basin the global stage lands in
+    rather than in the precision reached inside it -- both run the same ``least_squares`` polish
+    at ``xtol=ftol=1e-14`` -- so an equivalent that landed correctly matches far inside
+    ``EQUIVALENCE_RTOL`` either way, and one that did not is not a good fit of that topology to
+    begin with. It biases this count *down*, never up, which is the safe direction for a number
+    a pass bar will be written from.
+    """
+    truth_fit = fit(reference.circuit, data, seed=0)
+    z_truth = truth_fit.z_model
+    magnitude = np.abs(z_truth)
+    z_truth_safe = np.all(magnitude > 0.0)
+
+    def matches(candidate: Candidate) -> bool:
+        if candidate.circuit.canonical_form() == reference.canonical:
+            return True
+        if not z_truth_safe:
+            return False
+        z_model = candidate.result.z_model
+        if z_model.shape != z_truth.shape:
+            return False
+        return bool(np.max(np.abs(z_model - z_truth) / magnitude) <= EQUIVALENCE_RTOL)
+
+    reported = any(matches(c) for c in result.candidates)
+    on_front = any(matches(c) for c in result.pareto)
+    recommended = result.recommended
+    name = "-" if recommended is None else recommended.circuit.to_string()
+    is_recommendation = recommended is not None and matches(recommended)
+    return Verdict(reported, on_front, is_recommendation, name)
 
 
 def report_gate(seeds: int, limit: int, workers: int) -> None:
@@ -741,17 +899,111 @@ def report_screen_rank(
     )
 
 
+#: ``discover()``'s own default for ``final_restarts`` (the restart count of the full-budget
+#: refit). Not exported as a named constant by ``core/discover.py`` -- only carried as the
+#: parameter default on ``discover()`` and ``_evolve()`` -- so it is named here rather than
+#: written as a bare literal at the call site below.
+FINAL_RESTARTS_DEFAULT = 5
+
+
+def report_evolve_gate(seeds: int, time_limit: float) -> None:
+    """Baseline for gate EV1: does ``mode="evolve"`` recover a 6-7 element truth at all?
+
+    ``docs/EVOLVE_SEARCH_PLAN.md`` section 1.1 measured one instrumented run on the
+    three-block Maxwell-Wagner reference and found the truth was never evaluated in 349 s. This
+    is that measurement made systematic and repeatable -- three references sized deliberately
+    beyond the five-element exhaustive stage's reach (:data:`LARGE_REFERENCES`, kept apart from
+    :data:`REFERENCES` for the reason stated on that list), ten seeds each by default, with the
+    verdict computed by :func:`_large_truth_verdict` rather than :func:`_truth_verdict` because
+    at this size an exact reparameterisation of the truth is the expected outcome of a correct
+    search, not a bug in it.
+
+    This also reports the provenance defect section 1.4 of the plan measured directly: of the
+    reported Pareto rows, how many were fitted at ``search_restarts`` (the reduced screening
+    budget, default 1) rather than ``final_restarts`` (the full refit budget, default
+    :data:`FINAL_RESTARTS_DEFAULT`). ``_evolve`` mixes both kinds of row into ``pareto`` today
+    (only the top ``n_refine`` of ``alive`` get refined; the rest are merged in as-is), so a
+    nonzero count here is not a bug in this benchmark -- it is the bug step 2 of the plan exists
+    to fix, measured before the fix so the fix has something to be checked against.
+
+    ``mode="evolve"`` is single-process: ``discover()`` never passes ``workers`` through to
+    ``_evolve`` (only the exhaustive stage's tier-1 screen is parallelised), so this mode takes
+    no ``--workers`` option -- there is nothing for it to control.
+    """
+    print("=" * 92)
+    print('EV1 baseline: does mode="evolve" recover a 6-7 element truth, or an exact equivalent?')
+    print("=" * 92)
+    print(
+        "This is a BASELINE, not a pass/fail gate: EV1's pass fraction and time budget are\n"
+        "written from these numbers (docs/EVOLVE_SEARCH_PLAN.md section 3.1), not assumed before\n"
+        "the run. 'tier1 rows' counts Pareto rows fitted at the reduced screening budget rather\n"
+        "than the full refit -- the defect section 1.4 of the plan found in the report itself."
+    )
+    for reference in LARGE_REFERENCES:
+        print(f"\n{reference.label}: {reference.circuit}   pool {','.join(reference.pool)}")
+        passes = on_front = recommended_count = 0
+        elapsed_total = 0.0
+        evaluated_total = 0
+        tier1_total = 0
+        pareto_total = 0
+        for seed in range(seeds):
+            data = reference.spectrum(seed)
+            started = time.perf_counter()
+            result = discover(
+                data,
+                pool=reference.pool,
+                mode="evolve",
+                max_elements=7,
+                seed=seed,
+                time_limit=time_limit,
+            )
+            elapsed = time.perf_counter() - started
+            elapsed_total += elapsed
+            evaluated_total += result.n_evaluated
+            verdict = _large_truth_verdict(result, reference, data)
+            passes += int(verdict.reported)
+            on_front += int(verdict.on_front)
+            recommended_count += int(verdict.is_recommendation)
+            tier1_rows = sum(
+                1 for c in result.pareto if c.result.n_restarts < FINAL_RESTARTS_DEFAULT
+            )
+            tier1_total += tier1_rows
+            pareto_total += len(result.pareto)
+            best_error = min((c.relative_error for c in result.pareto), default=math.nan)
+            print(
+                f"  seed {seed}: {'PASS' if verdict.reported else 'FAIL'}"
+                f"  reported={verdict.reported} on-front={verdict.on_front}"
+                f" recommended={verdict.is_recommendation}"
+                f"  generations={result.generations}"
+                f"  evaluated={result.n_evaluated:,}"
+                f"  {elapsed / 60:.1f} min"
+                f"  tier1 rows: {tier1_rows}/{len(result.pareto)}"
+                f"  best err={best_error:.2%}"
+                f"  -> {verdict.recommendation}",
+                flush=True,
+            )
+        print(
+            f"  ==> EV1 baseline (truth reported): {passes}/{seeds};"
+            f" on the Pareto front: {on_front}/{seeds};"
+            f" it is the recommendation: {recommended_count}/{seeds};"
+            f" mean {elapsed_total / max(seeds, 1) / 60:.1f} min;"
+            f" mean topologies evaluated {evaluated_total / max(seeds, 1):,.0f};"
+            f" tier1 rows {tier1_total}/{pareto_total}"
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "what",
         choices=[
-            "gate", "skeleton", "wrong-skeleton", "excluded", "filter", "screen", "screen-rank"
+            "gate", "skeleton", "wrong-skeleton", "excluded", "filter", "screen", "screen-rank",
+            "evolve-gate",
         ],
     )
     parser.add_argument(
         "--seeds", type=int, default=10,
-        help="seeds per reference (gate, skeleton, screen-rank)",
+        help="seeds per reference (gate, skeleton, screen-rank, evolve-gate)",
     )
     parser.add_argument(
         "--limit", type=int, default=5,
@@ -766,6 +1018,10 @@ def main() -> None:
         help="skeleton: also run each reference unconstrained, to record the speed-up",
     )
     parser.add_argument("--sample", type=int, default=60, help="topologies sampled (screen)")
+    parser.add_argument(
+        "--time-limit", type=float, default=300.0,
+        help="wall-clock budget in seconds for each individual run (evolve-gate)",
+    )
     parser.add_argument(
         "--only",
         help="run just the reference spectra whose label contains one of these comma-separated"
@@ -782,10 +1038,16 @@ def main() -> None:
 
     if args.only:
         wanted = [text.strip().lower() for text in args.only.split(",") if text.strip()]
+        # Filtered independently: ``REFERENCES`` and ``LARGE_REFERENCES`` are two different
+        # lists of labels for two different modes, so a match in one is not evidence about the
+        # other. Only raise when neither list has anything left -- a run of a mode that reads
+        # just one of the two lists must not be broken by the other list ending up empty.
         selected = [r for r in REFERENCES if any(w in r.label.lower() for w in wanted)]
-        if not selected:
+        selected_large = [r for r in LARGE_REFERENCES if any(w in r.label.lower() for w in wanted)]
+        if not selected and not selected_large:
             raise SystemExit(f"error: --only {args.only!r} matched no reference spectrum")
         REFERENCES[:] = selected
+        LARGE_REFERENCES[:] = selected_large
 
     if args.what == "gate":
         report_gate(args.seeds, args.limit, args.workers)
@@ -799,6 +1061,8 @@ def main() -> None:
         report_filter()
     elif args.what == "screen":
         report_screen(args.sample)
+    elif args.what == "evolve-gate":
+        report_evolve_gate(args.seeds, args.time_limit)
     else:
         budgets = [
             ScreenBudget(*(int(part) for part in text.split("x")))

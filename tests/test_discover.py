@@ -340,3 +340,79 @@ def test_time_limit_stops_the_search() -> None:
     # The limit governs the evolutionary loop; the final refit runs afterwards, so allow slack.
     assert elapsed < 60.0
     assert result.generations < 1000
+
+
+def test_every_reported_candidate_was_refitted_at_full_budget() -> None:
+    """Gate EV2 of ``docs/EVOLVE_SEARCH_PLAN.md``: the genetic search publishes tier-2 only.
+
+    ``_evolve`` used to merge its unrefitted archive back into the reported list, so a Pareto
+    row's chi-squared, standard errors and therefore its ``free?`` mark could come from the
+    reduced search budget while the report said nothing about it. [measured, section 1.4 of that
+    plan] 82% of the rows it reported on the three-block Maxwell-Wagner reference were of that
+    kind. The defect is invisible in the numbers, which is why this asserts on the returned
+    object rather than on anything a reader could be expected to notice.
+
+    ``n_restarts`` is the provenance marker: the search budget uses ``search_restarts`` and the
+    refit uses ``final_restarts``, so the two are distinguishable exactly when they differ --
+    which is why they are set apart here rather than left at the shared FAST value.
+    """
+    data = simulate(
+        "R1-p(R2,C1)",
+        log_frequencies(1e-1, 1e6, 8),
+        {"R1.R": 50.0, "R2.R": 1e3, "C1.C": 1e-8},
+        noise=0.01,
+        seed=0,
+    )
+    result = discover(
+        data,
+        pool=("R", "C"),
+        mode="evolve",
+        generations=6,
+        population=16,
+        max_elements=4,
+        search_restarts=1,
+        search_maxiter=30,
+        final_restarts=3,
+        seed=0,
+    )
+    assert result.candidates, "the search reported nothing at all"
+    assert all(c.result.n_restarts == 3 for c in result.candidates)
+    # The front is drawn from the candidates, so this cannot fail independently -- it is
+    # asserted anyway because the front is what a reader actually looks at.
+    assert all(c.result.n_restarts == 3 for c in result.pareto)
+    recommended = result.recommended
+    assert recommended is not None and recommended.result.n_restarts == 3
+    # The archive is still counted rather than discarded with the rows it no longer supplies.
+    # Not a strict inequality: on a pool this small the whole reachable space fits inside the
+    # per-size quota, so every topology evaluated is legitimately also refitted.
+    assert result.n_evaluated >= len(result.candidates)
+
+
+def test_the_genetic_shortlist_reaches_every_element_count() -> None:
+    """The per-size quota applies to the genetic search too, which is what EV2 rests on.
+
+    Reporting tier-2 only is worth nothing if the shortlist is chosen the way the plan's
+    section 5.1 records as wrong -- globally by score, which puts nothing but the largest
+    circuits on it. The Pareto front is the deliverable, and a front with one complexity on it
+    is not a trade-off curve.
+    """
+    data = simulate(
+        "R1-p(R2,C1)",
+        log_frequencies(1e-1, 1e6, 8),
+        {"R1.R": 50.0, "R2.R": 1e3, "C1.C": 1e-8},
+        noise=0.01,
+        seed=0,
+    )
+    result = discover(
+        data,
+        pool=("R", "C"),
+        mode="evolve",
+        generations=6,
+        population=16,
+        max_elements=4,
+        search_maxiter=30,
+        final_restarts=2,
+        seed=0,
+    )
+    sizes = {len(c.circuit.leaves) for c in result.candidates}
+    assert len(sizes) >= 3, f"only these element counts were refitted: {sorted(sizes)}"

@@ -143,6 +143,22 @@ static-site Web UI running the same core via WASM (Pyodide).
    placeholder to be improved on. §5 records the five mutants the geometry gate was shown to
    catch, one of which it did not catch until a check was added for it.
 
+10. `docs/EVOLVE_SEARCH_PLAN.md` — the genetic search, which is what `mode="auto"` falls back to
+   above five elements and the only part of discovery that had **no quality gate at all**.
+   **Steps 1–2 of 6 implemented; steps 3–6 planned.** Its §1 is four measurements saying the
+   fallback is worse than merely unmeasured — a six-element truth never evaluated in 349 s, an
+   archive that is never retired so selection pressure falls 8.2× over 12 generations, and
+   **82% of the reported Pareto rows carrying screening-grade numbers** in violation of the rule
+   `discover.py` states at its top. That last one is fixed (step 2, gate EV2) and §3.2.1 is the
+   part to read before touching the shortlist: extracting the per-size quota into
+   `_quota_by_size` silently dropped the tiebreak that decides between *exactly equal* scores —
+   which is what an exact reparameterisation looks like — and the whole suite passed with the
+   bug in place; only a byte-for-byte fingerprint of an exhaustive run caught it (gate EV5). Its
+   §1.5 records a suspicion that measurement demoted rather than confirmed, and §3.2 records a
+   parameter sweep the plan asked for that turned out to be **arithmetically incapable of
+   showing a difference**. G5 of `DISCOVERY_V2_PLAN.md` is withdrawn there, with the reason
+   beside it.
+
 Update these when decisions change.
 
 ## Stack and conventions

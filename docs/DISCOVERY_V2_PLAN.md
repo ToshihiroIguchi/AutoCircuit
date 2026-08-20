@@ -286,8 +286,13 @@ Acceptance gates (hard, in the benchmark script, not aspirations):
   on the harder cases the gate does not name — two blocks a single decade apart, and the
   two-block Maxwell-Wagner reference whose smaller block carries 2% of the total polarisation
   — but only after the peak criterion was rewritten; see §5.2.
-- **G5** — existing test suite stays green; `mode="evolve"` results unchanged for a fixed
-  seed.
+- **G5** — existing test suite stays green; ~~`mode="evolve"` results unchanged for a fixed
+  seed~~ — **the second clause is withdrawn, superseded by `docs/EVOLVE_SEARCH_PLAN.md`.**
+  It was written to stop this redesign from silently perturbing the genetic search while the
+  exhaustive stage was being built, and it did that job. It cannot also be the thing that
+  validates a deliberate change *to* the genetic search, which is what that plan's steps 2-5
+  are. Its replacement is EV5 there, which pins the **exhaustive** results bit-identical
+  instead — the direction the guarantee is actually needed in now. The first clause stands.
 
 ## 5. Work order
 

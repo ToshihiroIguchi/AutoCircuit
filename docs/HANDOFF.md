@@ -6,7 +6,9 @@ again after each step of `docs/WEB_UI_PLAN.md` (all seven now), again after the 
 round-trip (§15), again after taking both workflows off Node 20 (§16), and again after the three
 questions the deployed site raised — what the Discover→Fit hand-off carries, moving an element that
 is already on the canvas, and a start-up that made a visitor wait for scipy before it would read a
-CSV (§19). Read this first, then `CLAUDE.md`, then the plan for whichever part you are touching.
+CSV (§19), and again while giving the genetic search its first quality gate (§20 — **work in
+progress**, and the only section here that describes something unfinished).
+Read this first, then `CLAUDE.md`, then the plan for whichever part you are touching.
 
 ## 1. Where things stand
 
@@ -1299,3 +1301,71 @@ out of the worker): data at 16.12 s, the spectrum read at **16.16 s** and its **
 from an earlier day; today's link delivers roughly half the throughput it implies, so the two
 cannot be subtracted. What was measured in one sitting is what is claimed: 22.1 MB before the page
 works instead of 41.0 MB, and 24 s of measured transfer moved out of the way.
+
+## 20. The genetic search gets a gate — steps 1–2 of `docs/EVOLVE_SEARCH_PLAN.md`
+
+**This section describes work that is in progress.** Steps 1–2 of six are done and measured;
+3–6 are not started. Read the plan before continuing — the four measurements in its §1 are the
+reason the work exists and are not repeated here in full.
+
+### What was wrong
+
+`mode="auto"` is exhaustive to five elements and genetic above that. The exhaustive half has G1–G3
+behind it. The genetic half had **no quality gate at all** — G5 asked only that a fixed seed give
+the *same* answer, which is a regression test — so above five elements this project made no
+measured claim, and `auto` routes there exactly when the exhaustive front looks under-fitted.
+
+Worse, `_evolve` broke the rule `discover.py` states at its own top ("every number that reaches
+the user comes from the tier-2 refit"): it merged its unrefitted archive back into the report.
+[measured] **82% of the reported Pareto rows (23 of 28) carried screening-grade χ², standard
+errors and `free?` marks**, with nothing in the report able to say which. That is this
+repository's characteristic failure sitting inside the reporting path.
+
+### What is now true
+
+- `benchmarks/discovery_v2.py` has an eighth mode, `evolve-gate`, and a **separate**
+  `LARGE_REFERENCES` list of three 6–7 element truths. They are separate on purpose: every other
+  mode iterates `REFERENCES` and assumes a truth the five-element stage can reach.
+- `_evolve` reports **tier-2 only**, shortlisting through `_quota_by_size`, which both searches
+  now share. Gate EV2 passes: 0/5 tier-1 rows where it was 3/4, all 34 reported candidates at
+  full budget. The front *gained* a row the old top-8-by-score rule never refitted.
+- Gate EV5 passes: an exhaustive-mode fingerprint is **byte-identical** before and after.
+- G5 of `docs/DISCOVERY_V2_PLAN.md` is withdrawn, with the reason written beside it.
+
+### Three things not to re-derive
+
+1. **Extracting the quota rule dropped a tiebreak, and the suite did not notice.** The old
+   `_shortlist` sorted `(score, cost, text)` tuples whole; the extracted helper first sorted on
+   score alone. Ties are **not rare here** — an exact reparameterisation is exactly a tie — so
+   `Ranked` now carries an explicit `tiebreak`. All 744 tests passed with the bug in place. Only
+   the EV5 fingerprint caught it. Fingerprint the exhaustive path before touching the shortlist.
+2. **`time_limit` never governed the refit, and the obvious fix is wrong.** It bounds the
+   evolutionary loop only. Harmless at eight fits; under the per-size quota it is 35–70 full fits
+   and a 5 s budget spent **222 s** in the refit. Bounding the refit at `time_limit` itself makes
+   a run report **nothing at all** having done all the work, because the loop has usually already
+   passed that mark — which is what the EV1 baseline's own settings would have produced. Hence
+   `REFIT_HEADROOM = 1.5`, the first candidate always attempted, and `refit_progress` (which
+   existed for this and had no producer in the library until now).
+3. **`REFINE_DEFAULT["evolve"]` cannot be swept.** The quota is
+   `max(MIN_REFINE_PER_SIZE, n_refine // sizes)` and a genetic archive spans ~7 sizes, so 8, 16
+   and 30 all collapse to 5. The floor is the knob. The constant carries this note.
+
+### Where it stopped, and the environment quirk that stopped it
+
+**The EV1 baseline is incomplete: 4 of 9 runs.** Measured: three-block Maxwell-Wagner 3/3 seeds
+at 600 s (truth reported 1/3, on front 1/3, **recommendation 0/3**, 413–596 topologies,
+10.6–11.5 min), and capacitor + interfacial block seed 0 only (FAIL). **Randles is unmeasured.**
+Best relative error on every front was 1.24–1.34%, at the 1% noise floor — the search finds
+circuits that describe the data and they are not the truth. That is a search problem, not a
+fitting one.
+
+A controlled before/after at 120 s × 2 seeds says step 2 **cost nothing in recovery** (1/2 → 1/2
+reported, 1/2 → 1/2 recommended, 12/15 → 0/6 tier-1 rows, 3.3 → 3.0 min). The expectation that
+tier-2-only reporting would lower recovery, because the reported list is strictly smaller, did
+not materialise.
+
+**Environment quirk: two long-running background jobs were killed on this machine, the second
+producing no output at all.** Cause unknown. Foreground runs of ~6 min completed normally, so the
+remaining baseline should be run in foreground chunks under the tool timeout, not as one
+background job. EV1's pass bar is still unwritten and must be written from the completed
+baseline, not from the partial one.
