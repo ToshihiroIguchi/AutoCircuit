@@ -145,7 +145,7 @@ static-site Web UI running the same core via WASM (Pyodide).
 
 10. `docs/EVOLVE_SEARCH_PLAN.md` — the genetic search, which is what `mode="auto"` falls back to
    above five elements and the only part of discovery that had **no quality gate at all**.
-   **Steps 1–2 of 6 implemented; steps 3–6 planned.** Its §1 is four measurements saying the
+   **Steps 1–3 of 6 implemented; steps 4–6 planned.** Its §1 is four measurements saying the
    fallback is worse than merely unmeasured — a six-element truth never evaluated in 349 s, an
    archive that is never retired so selection pressure falls 8.2× over 12 generations, and
    **82% of the reported Pareto rows carrying screening-grade numbers** in violation of the rule
@@ -157,7 +157,16 @@ static-site Web UI running the same core via WASM (Pyodide).
    §1.5 records a suspicion that measurement demoted rather than confirmed, and §3.2 records a
    parameter sweep the plan asked for that turned out to be **arithmetically incapable of
    showing a difference**. G5 of `DISCOVERY_V2_PLAN.md` is withdrawn there, with the reason
-   beside it.
+   beside it. **EV1's bar is now written from a completed baseline of 1/9** — a *ratchet plus a
+   ceiling*, because a pass fraction cannot be invented out of one recovery in nine, and because
+   the exhaustive stage's 30/30 and the fallback's 1/9 must never be reported as one capability.
+   Step 3 (parameter inheritance) passes EV3 on both halves, and §3.3.1 is the part to read
+   before touching any tier-1 fit: the warm polish was running at the **publication** local
+   budget inside a *screen*, so two of ten polishes cost as much as the global search they
+   replaced, and the gate first read +39% at 120 s and +7% at 600 s because of it. The same
+   section records the other way a two-sided gate nearly went wrong — it was read as *failed* on
+   a count of one event against zero, and the response to a bar that cannot resolve its own
+   question is more seeds, never a reworded bar.
 
 Update these when decisions change.
 

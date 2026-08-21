@@ -23,7 +23,7 @@ from __future__ import annotations
 import math
 import time
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import Any, NamedTuple
 
 import numpy as np
 from numpy.typing import NDArray
@@ -128,6 +128,36 @@ def relative_error(z_model: Complex, spectrum: Spectrum) -> float:
     """
     rel = np.abs(z_model - spectrum.z) / np.abs(spectrum.z)
     return float(np.sqrt(np.mean(rel**2)))
+
+
+class LocalBudget(NamedTuple):
+    """Stopping rule for the trust-region local stage, of which there are exactly two.
+
+    Both were already in this module as bare literals in two different functions; naming them
+    is what lets a third caller ask for one rather than inventing a third set. The difference
+    between them is not accuracy but *who is asking*:
+
+    * :data:`PUBLISH_LOCAL` is what a reported fit gets. It runs to the point where the
+      parameters stop moving, because everything downstream -- the covariance, the standard
+      errors, the ``free?`` column -- is read off the Jacobian at that point.
+    * :data:`SCREEN_LOCAL` is what a tier-1 fit gets, whose only job is to rank. Ten times
+      looser and ten times fewer evaluations, and [measured] the difference matters much more
+      than that ratio suggests: on a badly conditioned seven-element topology started from a
+      poor guess, the publication budget took **16.6 s where the reduced global search it was
+      meant to replace took 14.9 s**. An unbounded refinement inside a screen is not a screen.
+    """
+
+    xtol: float
+    ftol: float
+    gtol: float
+    max_nfev: int
+
+
+#: The local stage of a reported fit; see :class:`LocalBudget`.
+PUBLISH_LOCAL = LocalBudget(xtol=1e-14, ftol=1e-14, gtol=1e-12, max_nfev=20000)
+
+#: The local stage of a ranking-only fit; see :class:`LocalBudget`.
+SCREEN_LOCAL = LocalBudget(xtol=1e-12, ftol=1e-12, gtol=1e-10, max_nfev=2000)
 
 
 @dataclass
@@ -504,6 +534,7 @@ def fit(
     workers: int = 1,
     margin_decades: float = 3.0,
     global_search: bool = True,
+    local: LocalBudget = PUBLISH_LOCAL,
     time_limit: float | None = None,
 ) -> FitResult:
     """Fit ``circuit`` to ``spectrum`` without requiring initial parameter values.
@@ -524,6 +555,9 @@ def fit(
         workers: Process count for the global stage; keep at 1 under Pyodide.
         margin_decades: Safety margin added to the data-derived bounds.
         global_search: Set False to skip the global stage (requires ``initial``).
+        local: Stopping rule for the trust-region stage. Leave at :data:`PUBLISH_LOCAL` for
+            anything whose numbers will be reported; :data:`SCREEN_LOCAL` is for fits that
+            only rank, and is what :func:`screen` uses. See :class:`LocalBudget`.
         time_limit: Wall-clock budget in seconds for the global stage, per restart.
 
     Returns:
@@ -568,18 +602,18 @@ def fit(
             assert x0_user is not None
             x_start = x0_user
         x_start = problem.canonicalize(x_start)
-        local = least_squares(
+        solution = least_squares(
             problem.residuals,
             x_start,
             bounds=(problem.lower_x, problem.upper_x),
             method="trf",
-            xtol=1e-14,
-            ftol=1e-14,
-            gtol=1e-12,
-            max_nfev=20000,
+            xtol=local.xtol,
+            ftol=local.ftol,
+            gtol=local.gtol,
+            max_nfev=local.max_nfev,
         )
-        solutions.append((float(np.dot(local.fun, local.fun)), local.x, local))
-        messages.append(local.message)
+        solutions.append((float(np.dot(solution.fun, solution.fun)), solution.x, solution))
+        messages.append(solution.message)
 
     solutions.sort(key=lambda item: item[0])
     best_cost, best_x, best = solutions[0]
@@ -670,10 +704,10 @@ def screen(
         problem.canonicalize(x),
         bounds=(problem.lower_x, problem.upper_x),
         method="trf",
-        xtol=1e-12,
-        ftol=1e-12,
-        gtol=1e-10,
-        max_nfev=2000,
+        xtol=SCREEN_LOCAL.xtol,
+        ftol=SCREEN_LOCAL.ftol,
+        gtol=SCREEN_LOCAL.gtol,
+        max_nfev=SCREEN_LOCAL.max_nfev,
     )
     polished = float(np.dot(local.fun, local.fun))
     return polished if math.isfinite(polished) else cost

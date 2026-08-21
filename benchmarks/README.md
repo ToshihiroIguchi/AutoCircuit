@@ -19,10 +19,26 @@ python benchmarks/discovery_v2.py screen-rank --workers 8   # slow: ~1 h
 python benchmarks/discovery_v2.py gate --workers 8      # slow: hours
 python benchmarks/discovery_v2.py skeleton --workers 8       # gate P1, ~20 min
 python benchmarks/discovery_v2.py wrong-skeleton --workers 8 # gate P2, ~20 min
+python benchmarks/discovery_v2.py evolve-gate --seeds 3 --time-limit 600   # gate EV1, ~2.5 h
+python benchmarks/discovery_v2.py evolve-gate --only Maxwell --seeds 10 --warm 0,inf     --time-limit 600                                          # gate EV3, ~3 h
 python benchmarks/pyodide/bench.py                      # CPython baseline for the web numbers
 ```
 
 `benchmarks/pyodide/` additionally needs Node; see its own README.
+
+`evolve-gate` is the slow one and it is budgeted in **wall-clock**, which changes how it must be
+run. Three rules, each of them a measurement that was lost before it was learned:
+
+- **One at a time.** This machine has 2 performance cores and 8 efficient ones, so a second
+  concurrent run lands on a much slower core and evaluates fewer topologies in its 600 s — and
+  reports that as a property of the search. [measured] The fast test subset went 4 s → 118 s
+  with two evolve runs going.
+- **Detach it, one invocation per reference.** A backgrounded shell command is killed after ten
+  minutes. `Start-Process ... -RedirectStandardOutput` survives; splitting by reference means a
+  machine restart costs one reference rather than the run.
+- **Compare arms with `--warm`, never against a number from another day.** `--warm 0,inf`
+  interleaves the arms seed by seed, which is the only way the comparison is not measuring the
+  machine. `--seed-start` resumes a chunked run.
 
 Re-run the relevant script after touching the optimizer, the element library or the
 discovery filters, and update the numbers below if they move.

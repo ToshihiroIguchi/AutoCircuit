@@ -334,7 +334,19 @@ recorded in the code as a comment and in `docs/IMPLEMENTATION_PLAN.md` marked **
 - **Long benchmarks must be launched detached.** A backgrounded shell command is killed after
   ten minutes, and the G1 gate takes about two hours. Use
   `Start-Process python -ArgumentList ... -RedirectStandardOutput <file> -PassThru` and watch
-  the file; set `$env:PYTHONPATH` first, the child inherits it.
+  the file; set `$env:PYTHONPATH` first, the child inherits it. Two long runs were lost to this
+  before the rule above was found again, and one of them produced no output at all, which reads
+  like a crash rather than a kill -- the run's own prints were still sitting in the pipe buffer.
+  A `print(..., flush=True)` per finished unit of work is what makes a detached run readable
+  while it runs; without it the log stays empty for the whole first reference.
+- **Two benchmarks at once is not free on this machine, and the reason is the CPU.** It is a
+  Core 7 150U -- **2 performance cores and 8 efficient ones**, 12 threads -- so the second and
+  third single-threaded run land on cores several times slower than the first. [measured] The
+  fast test subset, 4 s on a quiet machine, took **118 s** while two `mode="evolve"` benchmark
+  runs were going. This matters beyond convenience: every evolve measurement is budgeted in
+  *wall-clock*, so a run sharing the machine evaluates fewer topologies in its 600 s and
+  reports it as a property of the search. Run one at a time, and interleave the arms of a
+  comparison seed by seed rather than arm by arm.
 
 ## 5. Working agreements from this session
 
@@ -1302,10 +1314,10 @@ from an earlier day; today's link delivers roughly half the throughput it implie
 cannot be subtracted. What was measured in one sitting is what is claimed: 22.1 MB before the page
 works instead of 41.0 MB, and 24 s of measured transfer moved out of the way.
 
-## 20. The genetic search gets a gate — steps 1–2 of `docs/EVOLVE_SEARCH_PLAN.md`
+## 20. The genetic search gets a gate — steps 1–3 of `docs/EVOLVE_SEARCH_PLAN.md`
 
-**This section describes work that is in progress.** Steps 1–2 of six are done and measured;
-3–6 are not started. Read the plan before continuing — the four measurements in its §1 are the
+**This section describes work that is in progress.** Steps 1–3 of six are done and measured;
+4–6 are not started. Read the plan before continuing — the four measurements in its §1 are the
 reason the work exists and are not repeated here in full.
 
 ### What was wrong
@@ -1332,7 +1344,7 @@ repository's characteristic failure sitting inside the reporting path.
 - Gate EV5 passes: an exhaustive-mode fingerprint is **byte-identical** before and after.
 - G5 of `docs/DISCOVERY_V2_PLAN.md` is withdrawn, with the reason written beside it.
 
-### Three things not to re-derive
+### Three things not to re-derive, from step 2
 
 1. **Extracting the quota rule dropped a tiebreak, and the suite did not notice.** The old
    `_shortlist` sorted `(score, cost, text)` tuples whole; the extracted helper first sorted on
@@ -1350,22 +1362,73 @@ repository's characteristic failure sitting inside the reporting path.
    `max(MIN_REFINE_PER_SIZE, n_refine // sizes)` and a genetic archive spans ~7 sizes, so 8, 16
    and 30 all collapse to 5. The floor is the knob. The constant carries this note.
 
-### Where it stopped, and the environment quirk that stopped it
+### The EV1 baseline, completed, and the bar written from it
 
-**The EV1 baseline is incomplete: 4 of 9 runs.** Measured: three-block Maxwell-Wagner 3/3 seeds
-at 600 s (truth reported 1/3, on front 1/3, **recommendation 0/3**, 413–596 topologies,
-10.6–11.5 min), and capacitor + interfacial block seed 0 only (FAIL). **Randles is unmeasured.**
-Best relative error on every front was 1.24–1.34%, at the 1% noise floor — the search finds
-circuits that describe the data and they are not the truth. That is a search problem, not a
-fitting one.
+**9 runs, three references × three seeds, 600 s each: truth reported 1/9, on the front 1/9, the
+recommendation 0/9.** The full table is in §4 of the plan. Three things it settles: the best
+relative error on every front sits at or above the noise floor (so the search finds circuits
+that describe the data and they are not the truth — a search problem, not a fitting one); the
+failure is worst where the search is slowest (Randles managed **5–6 generations** of a
+population of 40, so what was measured there was mostly the random initial population); and
+§1.4's defect was systematic, 23 of 28 reported rows carrying screening-grade numbers before
+step 2 and 0 of 36 after it.
 
-A controlled before/after at 120 s × 2 seeds says step 2 **cost nothing in recovery** (1/2 → 1/2
-reported, 1/2 → 1/2 recommended, 12/15 → 0/6 tier-1 rows, 3.3 → 3.0 min). The expectation that
-tier-2-only reporting would lower recovery, because the reported list is strictly smaller, did
-not materialise.
+**EV1's bar is a ratchet plus a ceiling, because 1/9 cannot support a pass fraction.** No step
+may report fewer than 1/9 reported, 1/9 on-front, 0/9 recommended on the same references, seeds
+and budget; and 1/9 is also the largest claim this project may make for `mode="auto"` above five
+elements. The exhaustive stage passes G1 30/30 and the fallback recovers one truth in nine —
+those are never one capability.
 
-**Environment quirk: two long-running background jobs were killed on this machine, the second
-producing no output at all.** Cause unknown. Foreground runs of ~6 min completed normally, so the
-remaining baseline should be run in foreground chunks under the tool timeout, not as one
-background job. EV1's pass bar is still unwritten and must be written from the completed
-baseline, not from the partial one.
+### Step 3: the parent's parameters travel to the child
+
+`_inherited_values` carries a parent's fitted values onto a child by **structural** correspondence
+— per element code, leaves zipped in evaluation order — because `simplify` drops labels before
+anything is fitted. `_Evaluator` became two-stage (polish from the inherited values, global
+search only when there is nothing to inherit or the polish lands too far off the best cost at
+that complexity) and its cache became **best-wins**. `WARM_ACCEPT_FACTOR` is the knob;
+`warm_accept=0` restores the pre-step-3 search exactly and is the control arm.
+
+**EV3 passes both halves. [measured]** Maxwell-Wagner, 10 seeds, 600 s, arms interleaved:
+truth reported **3/10 → 6/10**, on-front 3/10 → 4/10, recommendation 2/10 → 4/10, topologies
+550 → 709 (up in 9/10), wall-clock 12.8 → **5.2 min**. On the ratchet's own 9-run set:
+reported 1/9 → 3/9, nothing fell, topologies 434 → 751 (**+117%, up in 9/9**). EV5 re-measured
+and **byte-identical**.
+
+### Four things not to re-derive, from step 3
+
+1. **The polish must run at the screening local budget, not the publication one.** `fit()`'s
+   trust-region stage is `xtol=ftol=1e-14, max_nfev=20000` because reported standard errors are
+   read off the Jacobian there; `screen()` has always used `1e-12 / 2000`. Routing the warm
+   polish through `fit()` gave it the publication budget, i.e. **an unbounded refinement inside
+   a screen**. [measured] Polish against the global search it replaces: 21% in the median, and
+   **16.6 s and 13.1 s** in two of ten cases against global searches of 14.9 s and 14.6 s. That
+   tail is invisible at 120 s and decisive at 600 s — the first EV3 read **+39% at 120 s and +7%
+   at 600 s** because of it. `LocalBudget`/`PUBLISH_LOCAL`/`SCREEN_LOCAL` in `fit.py` name the
+   two settings that were already there as duplicated literals.
+2. **`WARM_ACCEPT_FACTOR` has no useful middle setting.** [measured] 1.5, 3 and 10 all sit inside
+   the run-to-run spread and 1.5 is *below* the control: a strict factor pays for the polish and
+   runs the global search anyway. The knob is nearly binary; the default is `math.inf`.
+3. **A gate failed on a statistic with no resolving power has not been failed.** After the
+   polish fix, six paired runs still gave on-front 1/6 → 0/6 — one event against zero. Ten seeds
+   on the one reference that recovers anything reversed the sign on every count. The response to
+   "my bar cannot decide this" is more seeds, never a reworded bar.
+4. **The evolve budget is wall-clock, so a control must run beside its arm, never on another
+   day.** `warm_accept=0` is a behaviourally exact restoration of the old search, yet the
+   interleaved control does not reproduce §4's baseline row for row. Interleave seed by seed.
+
+### What step 3 exposed for step 4
+
+**All ten warm runs hit the 30-generation cap in 5.2 minutes**, leaving over half of a 600 s
+budget unspent: the search is no longer bounded by fitting time but by `generations`, a default
+nobody has measured. Step 4 changes what a generation *is*, so it would be measured against a
+search that stops early for an unrelated reason. Raise or measure the cap before EV4.
+
+### Environment
+
+Two long-running background jobs were lost before §4's rule was found again — **a backgrounded
+shell command is killed after ten minutes; detach with `Start-Process`** — and one produced no
+output because its prints were still buffered, hence `flush=True` per unit of work. A third run
+was lost to a machine restart 9 of 12 runs in, which is why long sweeps are now split one
+invocation per reference. And **two benchmarks at once is not free**: this is a Core 7 150U with
+2 performance cores, and the fast test subset went 4 s → 118 s while two evolve runs were going.
+Run one at a time.

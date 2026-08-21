@@ -98,6 +98,7 @@ from autocircuit.core.discover import (
     EQUIVALENCE_RTOL,
     MIN_REFINE_PER_SIZE,
     REFINE_DEFAULT,
+    WARM_ACCEPT_FACTOR,
     Candidate,
     DiscoveryResult,
     ScreenBudget,
@@ -906,7 +907,22 @@ def report_screen_rank(
 FINAL_RESTARTS_DEFAULT = 5
 
 
-def report_evolve_gate(seeds: int, time_limit: float) -> None:
+@dataclass
+class _ArmTally:
+    """Running totals for one ``warm_accept`` arm of ``evolve-gate``, across seeds."""
+
+    reported: int = 0
+    on_front: int = 0
+    recommended: int = 0
+    elapsed_s: float = 0.0
+    evaluated: int = 0
+    tier1: int = 0
+    pareto: int = 0
+
+
+def report_evolve_gate(
+    seeds: int, time_limit: float, seed_start: int = 0, warm: Sequence[float] = ()
+) -> None:
     """Baseline for gate EV1: does ``mode="evolve"`` recover a 6-7 element truth at all?
 
     ``docs/EVOLVE_SEARCH_PLAN.md`` section 1.1 measured one instrumented run on the
@@ -921,14 +937,23 @@ def report_evolve_gate(seeds: int, time_limit: float) -> None:
     This also reports the provenance defect section 1.4 of the plan measured directly: of the
     reported Pareto rows, how many were fitted at ``search_restarts`` (the reduced screening
     budget, default 1) rather than ``final_restarts`` (the full refit budget, default
-    :data:`FINAL_RESTARTS_DEFAULT`). ``_evolve`` mixes both kinds of row into ``pareto`` today
-    (only the top ``n_refine`` of ``alive`` get refined; the rest are merged in as-is), so a
-    nonzero count here is not a bug in this benchmark -- it is the bug step 2 of the plan exists
-    to fix, measured before the fix so the fix has something to be checked against.
+    :data:`FINAL_RESTARTS_DEFAULT`). It was 82% of the reported rows when this mode was written,
+    which is what step 2 of the plan then fixed; it is kept because the column is the only way
+    to see the defect at all -- the numbers themselves look identical either way -- so **a
+    nonzero count here now means the fix has come undone**, not that the benchmark is wrong.
 
     ``mode="evolve"`` is single-process: ``discover()`` never passes ``workers`` through to
     ``_evolve`` (only the exhaustive stage's tier-1 screen is parallelised), so this mode takes
     no ``--workers`` option -- there is nothing for it to control.
+
+    ``warm`` sweeps :data:`~autocircuit.core.discover.WARM_ACCEPT_FACTOR` -- one arm per value,
+    every arm on the same references, the same seeds and the same wall-clock budget, which is
+    what makes gate EV3 answerable. **EV3 is two-sided and both sides are on the same line**:
+    topologies evaluated has to go up *and* the recovery fraction must not go down. Reading
+    only the first is how ``docs/DISCOVERY_V2_PLAN.md`` section 3.3 nearly lost a truth to a
+    cheaper screen, and how ``docs/METRICS_AND_UX_PLAN.md`` section 1.5 made a stage 3-4x faster
+    while making the total worse. ``--warm 0`` is the control arm: zero switches parameter
+    inheritance off, so that arm is the search exactly as it was before step 3.
     """
     print("=" * 92)
     print('EV1 baseline: does mode="evolve" recover a 6-7 element truth, or an exact equivalent?')
@@ -939,57 +964,82 @@ def report_evolve_gate(seeds: int, time_limit: float) -> None:
         "the run. 'tier1 rows' counts Pareto rows fitted at the reduced screening budget rather\n"
         "than the full refit -- the defect section 1.4 of the plan found in the report itself."
     )
+    arms = tuple(warm) or (WARM_ACCEPT_FACTOR,)
+    if len(arms) > 1:
+        print()
+        print("Sweeping warm_accept: " + ", ".join(f"{arm:g}" for arm in arms) + ".")
+        print(
+            "Arm 0 is the control -- inheritance off, i.e. the search as it was before step 3."
+        )
+        print(
+            "The arms are interleaved seed by seed rather than run one after the other, because"
+        )
+        print(
+            "the budget here is wall-clock and [measured, docs/HANDOFF.md section 4] this"
+        )
+        print(
+            "machine's speed drifts by a factor of two within an hour. Running one arm for an"
+        )
+        print(
+            "hour and then the other would put that drift straight into 'topologies evaluated',"
+        )
+        print("which is the quantity EV3 compares.")
     for reference in LARGE_REFERENCES:
-        print(f"\n{reference.label}: {reference.circuit}   pool {','.join(reference.pool)}")
-        passes = on_front = recommended_count = 0
-        elapsed_total = 0.0
-        evaluated_total = 0
-        tier1_total = 0
-        pareto_total = 0
-        for seed in range(seeds):
+        print()
+        print(f"{reference.label}: {reference.circuit}   pool {','.join(reference.pool)}")
+        tallies = {arm: _ArmTally() for arm in arms}
+        for seed in range(seed_start, seed_start + seeds):
             data = reference.spectrum(seed)
-            started = time.perf_counter()
-            result = discover(
-                data,
-                pool=reference.pool,
-                mode="evolve",
-                max_elements=7,
-                seed=seed,
-                time_limit=time_limit,
-            )
-            elapsed = time.perf_counter() - started
-            elapsed_total += elapsed
-            evaluated_total += result.n_evaluated
-            verdict = _large_truth_verdict(result, reference, data)
-            passes += int(verdict.reported)
-            on_front += int(verdict.on_front)
-            recommended_count += int(verdict.is_recommendation)
-            tier1_rows = sum(
-                1 for c in result.pareto if c.result.n_restarts < FINAL_RESTARTS_DEFAULT
-            )
-            tier1_total += tier1_rows
-            pareto_total += len(result.pareto)
-            best_error = min((c.relative_error for c in result.pareto), default=math.nan)
+            for arm in arms:
+                started = time.perf_counter()
+                result = discover(
+                    data,
+                    pool=reference.pool,
+                    mode="evolve",
+                    max_elements=7,
+                    seed=seed,
+                    time_limit=time_limit,
+                    warm_accept=arm,
+                )
+                elapsed = time.perf_counter() - started
+                verdict = _large_truth_verdict(result, reference, data)
+                tier1_rows = sum(
+                    1 for c in result.pareto if c.result.n_restarts < FINAL_RESTARTS_DEFAULT
+                )
+                tally = tallies[arm]
+                tally.reported += int(verdict.reported)
+                tally.on_front += int(verdict.on_front)
+                tally.recommended += int(verdict.is_recommendation)
+                tally.elapsed_s += elapsed
+                tally.evaluated += result.n_evaluated
+                tally.tier1 += tier1_rows
+                tally.pareto += len(result.pareto)
+                best_error = min((c.relative_error for c in result.pareto), default=math.nan)
+                prefix = f"  seed {seed}" if len(arms) == 1 else f"  seed {seed} warm={arm:g}"
+                print(
+                    f"{prefix}: {'PASS' if verdict.reported else 'FAIL'}"
+                    f"  reported={verdict.reported} on-front={verdict.on_front}"
+                    f" recommended={verdict.is_recommendation}"
+                    f"  generations={result.generations}"
+                    f"  evaluated={result.n_evaluated:,}"
+                    f"  {elapsed / 60:.1f} min"
+                    f"  tier1 rows: {tier1_rows}/{len(result.pareto)}"
+                    f"  best err={best_error:.2%}"
+                    f"  -> {verdict.recommendation}",
+                    flush=True,
+                )
+        for arm in arms:
+            tally = tallies[arm]
+            arm_label = "" if len(arms) == 1 else f" [warm={arm:g}]"
             print(
-                f"  seed {seed}: {'PASS' if verdict.reported else 'FAIL'}"
-                f"  reported={verdict.reported} on-front={verdict.on_front}"
-                f" recommended={verdict.is_recommendation}"
-                f"  generations={result.generations}"
-                f"  evaluated={result.n_evaluated:,}"
-                f"  {elapsed / 60:.1f} min"
-                f"  tier1 rows: {tier1_rows}/{len(result.pareto)}"
-                f"  best err={best_error:.2%}"
-                f"  -> {verdict.recommendation}",
+                f"  ==> EV1 baseline{arm_label} (truth reported): {tally.reported}/{seeds};"
+                f" on the Pareto front: {tally.on_front}/{seeds};"
+                f" it is the recommendation: {tally.recommended}/{seeds};"
+                f" mean {tally.elapsed_s / max(seeds, 1) / 60:.1f} min;"
+                f" mean topologies evaluated {tally.evaluated / max(seeds, 1):,.0f};"
+                f" tier1 rows {tally.tier1}/{tally.pareto}",
                 flush=True,
             )
-        print(
-            f"  ==> EV1 baseline (truth reported): {passes}/{seeds};"
-            f" on the Pareto front: {on_front}/{seeds};"
-            f" it is the recommendation: {recommended_count}/{seeds};"
-            f" mean {elapsed_total / max(seeds, 1) / 60:.1f} min;"
-            f" mean topologies evaluated {evaluated_total / max(seeds, 1):,.0f};"
-            f" tier1 rows {tier1_total}/{pareto_total}"
-        )
 
 
 def main() -> None:
@@ -1021,6 +1071,19 @@ def main() -> None:
     parser.add_argument(
         "--time-limit", type=float, default=300.0,
         help="wall-clock budget in seconds for each individual run (evolve-gate)",
+    )
+    parser.add_argument(
+        "--warm",
+        default="",
+        help="evolve-gate: sweep the warm-start acceptance factor, e.g. '0,3,10'. One arm per"
+        " value, on the same references, seeds and budget (gate EV3); 0 switches parameter"
+        " inheritance off and is the control arm. Empty runs one arm at the library default.",
+    )
+    parser.add_argument(
+        "--seed-start", type=int, default=0,
+        help="first seed of the range (evolve-gate). A single evolve-gate run costs minutes, so"
+        " a baseline is normally taken in chunks -- '--seed-start 1 --seeds 2' is seeds 1 and 2"
+        " -- and the chunks are aggregated by hand.",
     )
     parser.add_argument(
         "--only",
@@ -1062,7 +1125,8 @@ def main() -> None:
     elif args.what == "screen":
         report_screen(args.sample)
     elif args.what == "evolve-gate":
-        report_evolve_gate(args.seeds, args.time_limit)
+        warm = [float(text) for text in args.warm.split(",") if text.strip()]
+        report_evolve_gate(args.seeds, args.time_limit, args.seed_start, warm)
     else:
         budgets = [
             ScreenBudget(*(int(part) for part in text.split("x")))

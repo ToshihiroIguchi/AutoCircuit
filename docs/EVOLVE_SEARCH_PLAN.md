@@ -1,7 +1,8 @@
 # The Genetic Search — Making the Fallback Answerable
 
-Status: steps 1-2 implemented (2026-08-20); steps 3-6 planned. §3.2.1 records what step 2
-needed that this plan did not specify, and §4 records EV1's baseline as far as it was measured.
+Status: steps 1-3 implemented (2026-08-22); steps 4-6 planned. §3.2.1 and §3.3.1 record what
+steps 2 and 3 needed that this plan did not specify; §4 carries EV1's completed baseline, the
+pass bar written from it, and EV3's verdict.
 Prerequisite reading: `docs/DISCOVERY_V2_PLAN.md` §1 and §3.3 (why enumeration took over from the
 genetic search, and the measurement that says a cheaper screen trades the answer for the clock).
 
@@ -274,6 +275,76 @@ evaluated **and** recovery not worse. A one-sided speed gate is how `DISCOVERY_V
 nearly lost the truth to a cheaper screen, and how `METRICS_AND_UX_PLAN.md` §1.5 got a stage
 3–4× faster while making the total worse.
 
+#### 3.3.1 What step 3 needed that this plan did not specify
+
+- **The polish inherited the *publication* local budget, and that alone decided the step.**
+  `fit()`'s trust-region stage runs at `xtol=ftol=1e-14, max_nfev=20000`, because everything
+  downstream of a reported fit -- the covariance, the standard errors, the `free?` column -- is
+  read off the Jacobian where the parameters stopped moving. A tier-1 polish has no such
+  obligation, and `screen()` already knew that: it has always used `1e-12 / 2000`. Going through
+  `fit()` gave the warm start the wrong one of the two, so **an unbounded refinement was running
+  inside a screen**. [measured] The cost is cheap in the median and catastrophic in the tail --
+  10 children of a seven-element parent, polish against the reduced global search it replaces:
+
+  | | median | tail |
+  |---|---:|---|
+  | polish | 0.037 s | **16.6 s**, **13.1 s** |
+  | global search | 0.175 s | 14.9 s, 14.6 s |
+  | polish as a fraction | **21%** | **111%**, **90%** |
+
+  Two of ten polishes cost as much as the search they were meant to save. That tail is rare
+  enough to be invisible in a two-minute run and decisive in a ten-minute one, which is exactly
+  the shape the first EV3 measurement had: **+39% topologies at 120 s and +7% at 600 s**, with
+  three of six pairs *slower*. The fix is not a new constant but the one that already existed:
+  `LocalBudget`, `PUBLISH_LOCAL` and `SCREEN_LOCAL` name the two settings this module already
+  had as duplicated literals, and the polish asks for the screening one. Tier 1's *global* path
+  deliberately keeps the budget it had -- changing it would move every number the control arm is
+  measured against, and a comparison whose control moved measures nothing.
+- **Where the rest of the saving goes, counted rather than assumed.** [measured, one 150 s run,
+  MW seed 1] 240 proposals, 74 cache hits (31%), 133 polishes, **73 accepted (55%)**, 84 global
+  searches. So **45% of polishes are paid on top of a global search that ran anyway** -- the
+  polish landed too far off the best cost at its complexity to be believed. With the polish
+  bounded, the same 150 s went from 166 to **220 distinct topologies (+33%)** and 6 to 8
+  generations, with the acceptance rate essentially unchanged (55% → 51%): the gain came from
+  the tail, exactly where the measurement above said it was.
+- **The sweep found only one arm that does anything, and it is the permissive one.** [measured]
+  Three-block Maxwell-Wagner, seeds 0 and 1, 120 s each, arms interleaved seed by seed:
+
+  | `warm_accept` | seed 0 | seed 1 | mean topologies | vs control | truth reported |
+  |---|---:|---:|---:|---:|---:|
+  | 0 (control, inheritance off) | 114 | 183 | 148 | — | 1/2 |
+  | 1.5 | 115 | 160 | 138 | −7% | 1/2 |
+  | 3 | 159 | 179 | 169 | +14% | 1/2 |
+  | 10 | 136 | 162 | 149 | +1% | 1/2 |
+  | ∞ (accept any polish once a yardstick exists) | 160 | 252 | 206 | **+39%** | 1/2 |
+
+  Only ∞ beats the control on **both** seeds (+40%, +38%); 1.5, 3 and 10 are inside the
+  run-to-run spread and 1.5 is below the control. The mechanism says why, and it is worth
+  stating because it is not what the plan assumed: the polish is a saving only when it lets the
+  global stage be *skipped*, so a strict factor pays for the polish **and** the global search on
+  almost every child. There is no gentle middle setting — the knob is nearly binary.
+- **Recovery did not move anywhere in the sweep** (1/2 in every arm, the same seed, and it was
+  the recommendation in every arm too). Two seeds on one reference is far too little to call
+  that "recovery is not worse"; it is what EV3's 600 s runs are for, and it is the reason the
+  default was not set from the sweep alone.
+- **The correspondence had to skip the elite, or the search would re-polish its own answers.**
+  The Pareto elite are re-proposed unchanged every generation with themselves as parent, so
+  `_inherited_values` returns exactly the values the cached fit already has. `_warm_start`
+  detects that case and returns nothing rather than paying for a polish that cannot move.
+- **A crossover child names one parent: the tree that was grafted *onto*, not the donor.** The
+  child is a modification of that tree, so it is the one most of the inherited values still
+  belong to. Inheriting from both would need a correspondence across two unrelated leaf orders,
+  which is a different feature and not one this measurement asks for.
+- **Two fits of one topology are compared by residual cost, not by `Candidate.score`.** They
+  share a topology, hence `k` and `n`, so every criterion is monotone in the cost — which lets
+  the evaluator keep the better of a polish and a global search without knowing which criterion
+  the run was asked for. Comparing by score would have made the cache's contents depend on
+  `criterion`, and the cache is a search structure, not a report.
+- **`warm_accept=0` is a supported setting, not a debug flag.** It is the control arm EV3 needs,
+  and it lets the before/after be measured in one interleaved run rather than by stashing
+  `discover.py` — which is how step 2's before/after had to be done, and which cannot interleave
+  arms at all.
+
 ### 3.4 Step 4 — bound the archive, and add islands
 
 For §1.2 and §1.3, in that order of importance.
@@ -311,26 +382,61 @@ Last, because they are tuning and the steps above are structure.
 ## 4. Gates
 
 - **EV1 — recovery above five elements.** On the three references of §3.1, `mode="evolve"`
-  reports the truth or an exact equivalent, over 10 seeds, within a stated wall-clock budget.
-  *The pass fraction and the budget are written from step 1's baseline run* (§3.1); until then
-  EV1 is a measurement, not a bar. Reported alongside: on-front and is-recommendation, which are
-  strictly harder and tracked separately, exactly as G1 does.
+  reports the truth or an exact equivalent within a stated wall-clock budget. Reported
+  alongside: on-front and is-recommendation, which are strictly harder and tracked separately,
+  exactly as G1 does. *The pass fraction and the budget are written from step 1's baseline run*
+  (§3.1), and the run is now complete.
 
-  **[measured, partial] The baseline ran 4 of its 9 runs before the machine stopped it, twice.**
-  Three-block Maxwell-Wagner, 3 seeds, 600 s each: truth reported **1/3**, on the front 1/3, the
-  recommendation **0/3**, 18–26 generations, 413–596 topologies, 10.6–11.5 min. Capacitor +
-  interfacial block, seed 0 only: FAIL, recommending `p(CPE1,R1)-C1-SKINF1-SKINF2`. Randles is
-  unmeasured. Two things the partial run already settles. The best relative error on every front
-  was 1.24–1.34%, i.e. **at the 1% noise floor** — the search finds circuits that describe the
-  data and they are not the truth, which is a search problem and not a fitting one. And §1.4's
-  defect was systematic rather than incidental: **23 of 28 reported front rows (82%)** carried
-  screening-grade numbers, against the 3/4 one run had suggested.
+  **[measured] The baseline: 9 runs, three references × three seeds, 600 s each, one at a time
+  on a quiet machine.**
 
-  **The bar cannot be written from a partial run**, and step 2 moved the quantity it measures:
-  reporting tier-2 only makes `reported` a claim about the *refitted* list, which is strictly
-  smaller than the archive the baseline counted over. That was a reason to expect step 2 to cost
-  recovery. **[measured] It does not.** Controlled before/after, same reference, same 2 seeds,
-  same 120 s budget, the only difference being `discover.py` stashed or current:
+  | reference | elem | truth reported | on the front | is the recommendation | topologies | min | best err |
+  |---|---:|---:|---:|---:|---:|---:|---:|
+  | three-block Maxwell-Wagner | 6 | **1/3** | 1/3 | 0/3 | 413–596 | 10.6–11.5 | 1.24–1.34% |
+  | capacitor + interfacial block | 6 | **0/3** | 0/3 | 0/3 | 443–479 | 15.1–15.2 | 1.26–1.32% |
+  | Randles + ESL + second block | 7 | **0/3** | 0/3 | 0/3 | 155–178 | 14.4–15.2 | 2.09–5.42% |
+  | **all three** | | **1/9** | **1/9** | **0/9** | | | |
+
+  Three things this settles, none of them comfortable.
+
+  *The best relative error on every front is at or above the noise floor.* 1.24–1.34% against a
+  1% floor on the six-element references — the search finds circuits that describe the data and
+  they are not the truth, which is a search problem and not a fitting one. On Randles it is
+  worse than that: 2.09%, 3.20% and 5.42% against a ~1.3% floor, so on the seven-element
+  reference the search does not even return a *good fit*, let alone the right topology.
+
+  *The failure is worst exactly where the search is slowest.* Randles evaluated 155–178
+  topologies in fifteen minutes — 5.4 s each, against 1.3 s on the six-element Maxwell-Wagner
+  — and got through **5–6 generations** of a population of 40. A genetic search that completes
+  six generations has barely started; what EV1 measures there is mostly the random initial
+  population. This is what step 3 aims at, and it is why the per-topology cost is the first
+  thing to attack rather than the operators.
+
+  *§1.4's defect was systematic rather than incidental*: **23 of 28 reported front rows (82%)**
+  carried screening-grade numbers in the pre-step-2 half of this baseline, against the 3/4 one
+  run had suggested. Every run since step 2 reports **0** such rows, over 36 further front rows.
+
+  **The bar EV1 gets, written from that.** A pass fraction of "the truth in *N* of 10 seeds"
+  cannot be written from a baseline of 1/9 without inventing *N*, and this project does not
+  invent thresholds — so EV1 is a **ratchet plus a ceiling**, both of them measured:
+
+  - *Ratchet.* On the same three references, the same seeds and the same 600 s budget, no step
+    of this plan may report fewer than **1/9 truth-reported, 1/9 on-front, 0/9 recommended**.
+    Steps 3–5 are changes to a search that is nearly blind here; the one thing they must not do
+    is make it blinder while looking faster.
+  - *Ceiling.* **1/9 is also the largest claim this project may make for `mode="auto"` above
+    five elements.** The exhaustive stage passes G1 30/30; the fallback it hands off to recovers
+    one truth in nine and recommends none. Those two numbers must never be reported as one
+    capability, and §6's clause — that the honest outcome may be for `auto` to report an
+    under-fitted exhaustive front rather than hand off at all — is now a live decision rather
+    than a hypothetical, to be taken with steps 3–5's measurements in hand.
+
+  Step 2 moved the quantity EV1 measures, which is why the two halves of the baseline are
+  comparable at all: reporting tier-2 only makes `reported` a claim about the *refitted* list,
+  which is strictly smaller than the archive the first runs counted over. That was a reason to
+  expect step 2 to cost recovery. **[measured] It does not.** Controlled before/after, same
+  reference, same 2 seeds, same 120 s budget, the only difference being `discover.py` stashed
+  or current:
 
   | | before step 2 | after step 2 |
   |---|---:|---:|
@@ -346,10 +452,14 @@ Last, because they are tuning and the steps above are structure.
   is the trade this step was for. Note also that the seed-1 hit is an **exact equivalent**
   (`p(C1,p(CPE1-R1,C2,R2)-R3)`) rather than the truth's own canonical form, which is the case
   §3.1 says `_truth_verdict` would have scored as a failure.
-- **EV5 — nothing else moved.** **[measured] PASSES.** An exhaustive-mode fingerprint (every
-  candidate's circuit, AICc and reduced χ² to 12 figures, the Pareto front, the equivalence
-  classes, the coverage sentence) is **byte-identical** before and after the refactor, captured
-  by running the same probe against the stashed and the current `discover.py`. This is what
+- **EV5 — nothing else moved.** **[measured] PASSES, re-measured after step 3.** An
+  exhaustive-mode fingerprint (every candidate's circuit, AICc, reduced χ² and relative error to
+  12 figures, the restart count, the Pareto front, the equivalence classes, the coverage
+  sentence and the recommendation, over three references) is **byte-identical** before and
+  after, captured by running the same probe against the stashed and the current sources. Step 3
+  touched `fit.py` as well as `discover.py` — `LocalBudget` names two settings that were
+  duplicated literals — so this run is what says the publication path's numbers did not move a
+  digit. This is what
   caught the lost tiebreak in §3.2.1; the test suite passed with that bug in place.
 - **EV2 — provenance.** Every candidate in `DiscoveryResult.candidates` and `.pareto` from
   `mode="evolve"` was refit at full budget. A test, not an inspection: it asserts on the
@@ -365,6 +475,64 @@ Last, because they are tuning and the steps above are structure.
 - **EV3 — the warm start pays, two-sided.** At equal wall-clock and equal seed, distinct
   topologies evaluated goes up, **and** EV1's recovery fraction does not go down. Either half
   alone fails the gate.
+
+  **[measured] PASSES, on both halves.** Three-block Maxwell-Wagner, **10 seeds**, 600 s each,
+  the two arms interleaved seed by seed, `warm_accept=0` being the search exactly as it was
+  before step 3:
+
+  | | warm off (control) | warm on |
+  |---|---:|---:|
+  | truth reported | 3/10 | **6/10** |
+  | on the Pareto front | 3/10 | **4/10** |
+  | it is the recommendation | 2/10 | **4/10** |
+  | mean topologies evaluated | 550 | **709** (up in **9/10** paired seeds, +32%) |
+  | mean wall-clock | 12.8 min | **5.2 min** |
+  | runs that hit the 30-generation cap | 2/10 | **10/10** |
+
+  The speed half is met on the whole set of six paired runs across all three references as well
+  (+89%, up in 6/6), where the gain is largest exactly where the search was worst: Randles went
+  161 → 627 and 270 → 849 topologies, +289% and +214%.
+
+  **Two things about how this gate was nearly misread, both worth more than the result.**
+
+  *The first measurement said it failed, and the reason was a defect rather than the idea.*
+  +7% topologies with three of six pairs *slower*, and on-front 1/6 → 0/6. §3.3.1 has the
+  cause: the polish was running at the publication local budget inside a screen, and its tail
+  cost as much as the global search it replaced. A one-sided reading would have shipped a
+  17-second polish as a speed-up; a "the idea does not work" reading would have deleted the
+  step. Both were wrong, and only measuring *why* separated them.
+
+  *The second measurement said it failed on a statistic that could not resolve it.* After the
+  fix, six paired runs still gave on-front 1/6 → 0/6 — and that is one event against zero,
+  across three references at two seeds each. The bar it violated is the ratchet written from
+  EV1's own 1/9 baseline, so the honest response was neither to declare a pass nor to rewrite
+  the bar, but to say that a bar built on single events cannot decide this and to run the seeds
+  that would. Ten seeds on the one reference that recovers anything reversed the sign on every
+  count. **A gate that fails on a statistic with no resolving power has not been failed; it has
+  not been measured.** Reaching for the seeds rather than for the wording is what separates that
+  from the failure `WEB_UI_PLAN.md` §2.5 records.
+
+  **The ratchet, checked on its own set.** EV1's bar is written over the baseline's three
+  references at seeds 0-2, so it is closed there rather than by extrapolation from the ten-seed
+  run. [measured] warm off → warm on: reported **1/9 → 3/9**, on-front **1/9 → 1/9**,
+  recommendation **1/9 → 1/9**, topologies **434 → 751 (up in 9/9 pairs, +117%)**, wall-clock
+  14.0 → 8.7 min. Nothing fell.
+
+  One thing that measurement makes plain, and which matters for every future comparison here:
+  **the interleaved control is not identical to the baseline in §4's table** — it recommends 1/9
+  where the baseline recommended 0/9, on the same code, because `warm_accept=0` is a
+  behaviourally exact restoration of the pre-step-3 search but the *budget is wall-clock*. Two
+  runs of the same search on the same seed evaluate different numbers of topologies depending on
+  what else the machine was doing. So a step is compared against a control run beside it, never
+  against a number recorded on another day; that is what the seed-by-seed interleaving is for,
+  and it is why the baseline in §4 is a description of the search rather than a fixed point to
+  diff against.
+
+  **What the pass exposes next.** All ten warm runs hit the **30-generation cap in 5.2 minutes**,
+  leaving more than half of a 600 s budget unspent — so the genetic search is no longer bounded
+  by fitting time but by `generations`, a default nobody has measured. Step 4 changes what a
+  generation *is* (bounded pool, islands), and it would be measured against a search that stops
+  early for an unrelated reason. Raise the cap, or measure it, before EV4.
 - **EV4 — diversity.** Per-generation cache-hit rate does not rise across a run, and the
   best-known candidate's probability of entering a tournament does not fall with generation
   number. EV1 must not regress.
@@ -379,7 +547,7 @@ Last, because they are tuning and the steps above are structure.
 |------|----------|------|-----------|--------|
 | 1 | 6–7 element references + `evolve-gate` benchmark mode; run it; write EV1's bar from the result | M | — | **done, baseline partial** — mode and references landed and measured; 4 of 9 runs completed before the machine stopped them twice (§4) |
 | 2 | tier-2-only reporting in `_evolve`; shared per-size quota helper; `REFINE_DEFAULT["evolve"]`; EV2 test; withdraw G5 in `DISCOVERY_V2_PLAN.md` | M | 1 | **done** — EV2 and EV5 both measured; see §3.2.1 |
-| 3 | structural parameter inheritance, two-stage evaluation, best-wins cache; sweep `WARM_ACCEPT_FACTOR`; EV3 | L | 2 | planned |
+| 3 | structural parameter inheritance, two-stage evaluation, best-wins cache; sweep `WARM_ACCEPT_FACTOR`; EV3 | L | 2 | **done** — EV3 passes both halves (§4); §3.3.1 records the polish budget that decided it, and the two readings that nearly got it wrong |
 | 4 | bounded selection pool, scaled tournament, islands with shared cache; EV4 | M | 3 | planned |
 | 5 | adaptive parsimony in selection only; mutation-weight sweep | M | 4 | planned |
 | 6 | docs: this file marked implemented with its corrections, `CLAUDE.md` "Start here" entry 10, `benchmarks/README.md`, `DISCOVERY_V2_PLAN.md` §4 G5 withdrawal note | S | 5 | planned |

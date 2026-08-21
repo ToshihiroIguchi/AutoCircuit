@@ -15,11 +15,21 @@ Exhaustive and auto mode have their own file, ``test_discover_exhaustive.py``.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 
 from autocircuit.core.circuit import Circuit, count_elements, simplify
+
+# Private, and deliberately so: parameter inheritance is an internal of the genetic search
+# (step 3 of docs/EVOLVE_SEARCH_PLAN.md), and the tests below assert its rules directly
+# because nothing a caller can see distinguishes a warm-started tier-1 fit from a cold one --
+# by design, since neither is ever published.
 from autocircuit.core.discover import (
     Candidate,
+    _Evaluator,
+    _fit_cost,
+    _inherited_values,
     crossover,
     discover,
     is_plausible,
@@ -27,7 +37,9 @@ from autocircuit.core.discover import (
     pareto_front,
     random_topology,
 )
+from autocircuit.core.fit import fit
 from autocircuit.core.simulate import log_frequencies, simulate
+from autocircuit.core.spectrum import Spectrum
 
 FAST = {
     "generations": 8,
@@ -416,3 +428,126 @@ def test_the_genetic_shortlist_reaches_every_element_count() -> None:
     )
     sizes = {len(c.circuit.leaves) for c in result.candidates}
     assert len(sizes) >= 3, f"only these element counts were refitted: {sorted(sizes)}"
+
+
+def _fitted(circuit: str, data: Spectrum) -> Candidate:
+    """One full-budget fit of ``circuit``, wrapped as a candidate to inherit from."""
+    result = fit(circuit, data, restarts=2, seed=0)
+    return Candidate(result.circuit, result, 0)
+
+
+def test_inherited_values_follow_the_structure_and_not_the_labels() -> None:
+    """Step 3 of ``docs/EVOLVE_SEARCH_PLAN.md``: a child starts from its parent's parameters.
+
+    The correspondence has to be structural. ``simplify`` drops every label before a child is
+    fitted, so the parent's ``R2`` and the child's ``R2`` are related by nothing but a counter
+    -- and a label-keyed lookup would still *appear* to work in the search, because the
+    relabelling happens to be canonical there. This parent is labelled ``R7``/``R3``/``C5`` for
+    exactly that reason: under a label-keyed rule it would carry nothing at all.
+    """
+    data = simulate(
+        "R1-p(R2,C1)",
+        log_frequencies(1e-1, 1e6, 8),
+        {"R1.R": 50.0, "R2.R": 1e3, "C1.C": 1e-8},
+        noise=0.005,
+        seed=0,
+    )
+    parent = _fitted("R7-p(R3,C5)", data)
+    child = Circuit(simplify(Circuit.parse("R1-p(R2,C1)").root))
+
+    warm = _inherited_values(parent, child)
+
+    assert warm == {
+        "R1.R": parent.result.params["R7.R"],
+        "R2.R": parent.result.params["R3.R"],
+        "C1.C": parent.result.params["C5.C"],
+    }
+
+
+def test_inheritance_is_partial_where_the_child_has_elements_the_parent_lacks() -> None:
+    """An inserted element keeps the template default; ``fit`` accepts a partial dict.
+
+    This is the ordinary case -- a mutation inserts one element -- and the point of carrying
+    values at all: the other five parameters do not have to be rediscovered because one is new.
+    """
+    data = simulate(
+        "R1-p(R2,C1)",
+        log_frequencies(1e-1, 1e6, 8),
+        {"R1.R": 50.0, "R2.R": 1e3, "C1.C": 1e-8},
+        noise=0.005,
+        seed=0,
+    )
+    parent = _fitted("R1-p(R2,C1)", data)
+    child = Circuit(simplify(Circuit.parse("R1-p(R2,C1)-L1-CPE1").root))
+
+    warm = _inherited_values(parent, child)
+
+    assert set(warm) == {"R1.R", "R2.R", "C1.C"}
+    # The starting point is usable as it stands: a partial dict is what ``fit`` takes.
+    polished = fit(child, data, initial=warm, global_search=False, seed=0)
+    assert math.isfinite(polished.statistics.aicc)
+    assert polished.params["R1.R"] > 0.0
+
+
+def test_the_evaluator_keeps_the_better_of_two_fits_of_one_topology() -> None:
+    """The cache is best-wins, which is what makes a warm start safe to re-propose into.
+
+    [measured, section 1.3 of the plan] Over half of each late generation re-proposes a
+    topology already evaluated. First-wins would freeze whichever fit arrived first and make a
+    candidate's score depend on which parent happened to propose it; best-wins turns those
+    hits into cheap refinement instead. The bad fit here is planted rather than hoped for, so
+    the assertion is about the rule and not about a global stage happening to land badly.
+    """
+    data = simulate(
+        "R1-p(R2,C1)",
+        log_frequencies(1e-1, 1e6, 8),
+        {"R1.R": 50.0, "R2.R": 1e3, "C1.C": 1e-8},
+        noise=0.005,
+        seed=0,
+    )
+    tree = Circuit.parse("R1-p(R2,C1)").root
+    circuit = Circuit(simplify(tree))
+    evaluator = _Evaluator(data, "modulus", 1, 12, 30, 1e-5, 0)
+
+    # A fit of the right topology with the capacitance pinned five decades away: it converges,
+    # it is finite, and it is wrong. (Starting a *free* fit from bad values does not work as a
+    # planted failure here -- the local stage finds the optimum from anywhere on a problem this
+    # small, which is itself worth knowing before writing a test around a bad fit.)
+    far_off = fit(circuit, data, fixed={"C1.C": 1e-3}, restarts=1, popsize=8, maxiter=20, seed=0)
+    planted = Candidate(circuit, far_off, 0)
+    evaluator.cache[circuit.canonical_form()] = planted
+
+    improved = evaluator.evaluate(tree, 1, _fitted("R1-p(R2,C1)", data))
+
+    assert improved is not None
+    assert _fit_cost(improved.result) < _fit_cost(planted.result)
+    assert evaluator.cache[circuit.canonical_form()] is improved
+
+
+def test_warm_accept_zero_switches_inheritance_off() -> None:
+    """The control arm the benchmark's sweep needs, asserted as a contract rather than a flag.
+
+    With inheritance off the evaluator must not polish, so a cache hit returns the fit it
+    already had -- the same object, not merely an equal one.
+    """
+    data = simulate(
+        "R1-p(R2,C1)",
+        log_frequencies(1e-1, 1e6, 8),
+        {"R1.R": 50.0, "R2.R": 1e3, "C1.C": 1e-8},
+        noise=0.005,
+        seed=0,
+    )
+    tree = Circuit.parse("R1-p(R2,C1)").root
+    parent = _fitted("R1-p(R2,C1)", data)
+
+    cold = _Evaluator(data, "modulus", 1, 12, 30, 1e-5, 0, 0.0)
+    first = cold.evaluate(tree, 0)
+    assert first is not None
+    assert cold.evaluate(tree, 1, parent) is first
+
+    warm = _Evaluator(data, "modulus", 1, 12, 30, 1e-5, 0)
+    seeded = warm.evaluate(tree, 0)
+    assert seeded is not None
+    revisited = warm.evaluate(tree, 1, parent)
+    assert revisited is not None
+    assert _fit_cost(revisited.result) <= _fit_cost(seeded.result)

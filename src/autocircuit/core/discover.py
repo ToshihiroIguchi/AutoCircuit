@@ -65,7 +65,7 @@ from .enumerate import (
     is_plausible_node,  # noqa: F401
     skeleton_placements,
 )
-from .fit import FitResult, Weighting, fit, screen
+from .fit import PUBLISH_LOCAL, SCREEN_LOCAL, FitResult, Weighting, fit, screen
 from .spectrum import Spectrum
 from .stats import (
     CRITERIA,
@@ -160,6 +160,29 @@ MIN_REFINE_PER_SIZE = 5
 #: its own share on top. The loop keeps the budget it was promised; the report gets half as much
 #: again to be worth reading.
 REFIT_HEADROOM = 1.5
+
+#: How far off the best cost known at the same complexity a warm-started polish may land and
+#: still be taken as that topology's tier-1 score, skipping the global stage.
+#:
+#: A child of a mutated parent starts from the parent's fitted values rather than from nothing
+#: (see :func:`_inherited_values`), so a global search becomes a local polish -- [measured] 21%
+#: of its cost in the median, once the polish is held to
+#: :data:`~autocircuit.core.fit.SCREEN_LOCAL` rather than the publication budget. The polish is
+#: only worth taking when it lands somewhere sensible, and "sensible" needs a yardstick that
+#: does not depend on the topology: the best cost seen so far at the *same* complexity. Nothing
+#: known at that complexity yet means no yardstick, and the global stage runs -- an unmeasured
+#: cheap fit is exactly what tier 1 must not become.
+#:
+#: **The default is infinite, and the sweep is why.** [measured, docs/EVOLVE_SEARCH_PLAN.md
+#: section 3.3.1] 1.5, 3 and 10 all sit inside the run-to-run spread, and 1.5 is *below* the
+#: control: a strict factor pays for the polish and then runs the global search anyway on most
+#: children, so it buys the cost of inheritance with none of the benefit. There is no useful
+#: middle setting -- the knob is nearly binary, and the two settings that mean anything are
+#: "off" and "accept the polish once there is something to compare it against".
+#:
+#: Zero switches inheritance off entirely, which is the control arm gate EV3 is measured
+#: against and, for the same reason, the way back to the pre-step-3 search.
+WARM_ACCEPT_FACTOR = math.inf
 
 #: Tier-1 tasks handed to a worker process at a time. Large enough to amortise the ~1 s
 #: interpreter start-up on Windows, small enough that the early-abandon threshold keeps up.
@@ -923,12 +946,106 @@ def crossover(a: Node, b: Node, rng: np.random.Generator) -> Node:
     return replace_subtree(a, target, donor)
 
 
+def _leaf_params(circuit: Circuit) -> list[tuple[str, tuple[str, ...]]]:
+    """Every leaf as ``(element code, its parameter names)``, in evaluation order."""
+    slices = circuit.slices()
+    return [(leaf.code, circuit.param_names[slices[leaf.label]]) for leaf in circuit.leaves]
+
+
+def _inherited_values(parent: Candidate, child: Circuit) -> dict[str, float]:
+    """The parent's fitted values, carried onto whichever of the child's elements match.
+
+    A child usually differs from its parent by one inserted, deleted or retyped element, so
+    almost all of the parent's parameters are still meaningful -- and refitting from scratch
+    throws them away. This is the correspondence that lets them travel.
+
+    **It cannot be keyed on labels, and that is not a detail.** ``simplify`` returns
+    ``ElementNode(node.code)`` with the label dropped (``circuit.py``), and
+    :meth:`_Evaluator.evaluate` calls ``Circuit(simplify(node))`` before anything else, so by
+    the time a child exists its elements have been renumbered from scratch: the parent's ``R2``
+    and the child's ``R2`` are related by nothing but a counter. (That stripping is also why
+    crossover children never collide on labels, which is worth knowing before someone "fixes"
+    it.) So the correspondence is structural: for each element code, the parent's leaves of that
+    code are zipped in evaluation order with the child's, and anything the child has spare keeps
+    the template default. ``fit`` accepts exactly that -- a *partial* dict of starting values --
+    and clips it to the child's own bounds, so a value that no longer makes sense in the child
+    cannot push the polish outside the search space.
+
+    The result is a starting point, never an answer: what it is worth is decided by the fit it
+    produces, against :data:`WARM_ACCEPT_FACTOR`.
+    """
+    values = parent.result.params
+    donors: dict[str, list[tuple[str, ...]]] = {}
+    for code, names in _leaf_params(parent.circuit):
+        donors.setdefault(code, []).append(names)
+
+    taken: dict[str, int] = {}
+    out: dict[str, float] = {}
+    for code, names in _leaf_params(child):
+        index = taken.get(code, 0)
+        taken[code] = index + 1
+        available = donors.get(code, ())
+        if index >= len(available):
+            continue
+        for name, source in zip(names, available[index], strict=True):
+            value = values.get(source)
+            if value is not None and math.isfinite(value):
+                out[name] = value
+    return out
+
+
+def _fit_cost(result: FitResult) -> float:
+    """Sum of squared weighted residuals -- what the fitter itself minimised."""
+    return float(np.dot(result.residuals, result.residuals))
+
+
+def _cheaper(a: Candidate | None, b: Candidate | None) -> Candidate | None:
+    """The better of two fits **of the same topology**, by residual cost.
+
+    Cost rather than :meth:`Candidate.score` on purpose. These two candidates share a topology,
+    so they share ``k`` and ``n``, and every criterion in :data:`~autocircuit.core.stats.CRITERIA`
+    is then monotone in the cost -- which lets the evaluator keep the better of a warm-started
+    polish and a global search without knowing, or caring, which criterion the run was asked
+    for.
+    """
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return a if _fit_cost(a.result) <= _fit_cost(b.result) else b
+
+
 # -- Search --------------------------------------------------------------------------------
+
+
+#: One tree to evaluate, and the fitted candidate it was bred from -- ``None`` for the initial
+#: population, which was not bred from anything. Kept as a pair rather than as a field on some
+#: richer object because the parent is not a property of the child topology: the same tree
+#: proposed by two different parents inherits two different starting points, and the evaluator's
+#: best-wins cache exists precisely to keep the better of them.
+type _Offspring = tuple[Node, Candidate | None]
 
 
 @dataclass
 class _Evaluator:
-    """Fits topologies with a reduced budget and caches the outcome by canonical form."""
+    """Fits topologies with a reduced budget and caches the outcome by canonical form.
+
+    Two stages, in this order: a local polish from the parent's fitted values when there is a
+    parent to inherit from (:func:`_inherited_values`), and the reduced-budget global search
+    when there is not, or when the polish landed too far off the best cost known at that
+    complexity to stand on its own (:data:`WARM_ACCEPT_FACTOR`).
+
+    The cache is **best-wins, not first-wins**, which is the half of this that is easy to miss.
+    [measured, docs/EVOLVE_SEARCH_PLAN.md section 1.3] Over half of each late generation
+    re-proposes a topology already evaluated; without inheritance those hits are free and
+    information-free. With it, a hit arriving with a *new* warm start is worth a polish -- a few
+    milliseconds -- and the better of the two fits is kept. That also removes the path
+    dependence a warm start would otherwise introduce, where a topology's score depended on
+    which parent happened to propose it first.
+
+    Both stages are tier 1 and neither is publishable: nothing this class returns reaches the
+    user without ``_refine`` fitting it again at full budget.
+    """
 
     spectrum: Spectrum
     weighting: Weighting
@@ -937,41 +1054,128 @@ class _Evaluator:
     maxiter: int
     tol: float
     seed: int
+    warm_accept: float = WARM_ACCEPT_FACTOR
     cache: dict[str, Candidate | None] = field(default_factory=dict)
+    #: Best residual cost seen at each complexity, the yardstick a polish is judged against.
+    best_cost: dict[float, float] = field(default_factory=dict)
 
-    def evaluate(self, node: Node, generation: int) -> Candidate | None:
+    def evaluate(
+        self, node: Node, generation: int, parent: Candidate | None = None
+    ) -> Candidate | None:
         try:
             circuit = Circuit(simplify(node))
         except CircuitError:
             return None
         key = circuit.canonical_form()
-        if key in self.cache:
-            return self.cache[key]
-        if not is_plausible(circuit):
+        seen = key in self.cache
+        known = self.cache.get(key)
+        # A topology that could not be fitted, or is implausible, stays decided. Only a fit
+        # that succeeded is ever revisited.
+        if seen and known is None:
+            return None
+        if not seen and not is_plausible(circuit):
             self.cache[key] = None
             return None
 
-        candidate: Candidate | None
+        warm = self._warm_start(parent, circuit, known)
+        candidate = None if warm is None else self._polish(circuit, generation, warm)
+        # A topology already searched globally is not searched again: the polish refines it.
+        # One never searched needs the global stage unless its polish is close enough to the
+        # best known at its complexity to be believed.
+        if not seen and (candidate is None or not self._close_enough(candidate)):
+            candidate = _cheaper(candidate, self._search(circuit, generation))
+
+        best = _cheaper(candidate, known)
+        self.cache[key] = best
+        if best is not None:
+            cost = _fit_cost(best.result)
+            if cost < self.best_cost.get(best.complexity, math.inf):
+                self.best_cost[best.complexity] = cost
+        return best
+
+    def _warm_start(
+        self, parent: Candidate | None, circuit: Circuit, known: Candidate | None
+    ) -> dict[str, float] | None:
+        """The inherited starting values, or None when there is nothing to gain by polishing."""
+        if parent is None or self.warm_accept <= 0.0:
+            return None
+        warm = _inherited_values(parent, circuit)
+        if not warm:
+            return None
+        # The elite are re-proposed unchanged every generation, so this is the common case: a
+        # cached fit polished from its own values lands where it already is.
+        if known is not None and all(
+            known.result.params.get(name) == value for name, value in warm.items()
+        ):
+            return None
+        return warm
+
+    def _close_enough(self, candidate: Candidate) -> bool:
+        """Whether a polish may stand in for the global stage at this complexity."""
+        reference = self.best_cost.get(candidate.complexity)
+        if reference is None:
+            return False
+        return _fit_cost(candidate.result) <= self.warm_accept * reference
+
+    def _polish(
+        self, circuit: Circuit, generation: int, initial: dict[str, float]
+    ) -> Candidate | None:
+        """One local refinement from the inherited values, with no global stage at all.
+
+        At :data:`~autocircuit.core.fit.SCREEN_LOCAL`, which is the whole reason this is worth
+        doing. [measured] Left at the publication budget the polish is cheap in the median --
+        21% of the global search it replaces -- and its tail is not: two of ten children took
+        13.1 s and 16.6 s against global searches of 14.6 s and 14.9 s, so the refinement cost
+        as much as the search it was meant to save. That tail is rare enough to be invisible in
+        a two-minute run and decisive in a ten-minute one, which is exactly the shape of the
+        first EV3 measurement (+39% topologies at 120 s, +7% at 600 s).
+        """
+        return self._fitted(
+            circuit, generation, initial=initial, global_search=False, restarts=1
+        )
+
+    def _search(self, circuit: Circuit, generation: int) -> Candidate | None:
+        """The reduced-budget global search this class has always run."""
+        return self._fitted(
+            circuit, generation, initial=None, global_search=True, restarts=self.restarts
+        )
+
+    def _fitted(
+        self,
+        circuit: Circuit,
+        generation: int,
+        *,
+        initial: dict[str, float] | None,
+        global_search: bool,
+        restarts: int,
+    ) -> Candidate | None:
+        # The population/iteration budget is passed either way; with ``global_search=False``
+        # it is simply unused, since those three govern the global stage alone.
+        #
+        # ``local`` is bounded only for the warm polish. The global path keeps the budget it
+        # has always had -- not because that is right, but because changing it would move every
+        # number the control arm of gate EV3 is measured against, and a comparison whose
+        # control moved measures nothing. Whether tier 1's global path should also drop to
+        # SCREEN_LOCAL is a separate question with its own before/after.
         try:
             result = fit(
                 circuit,
                 self.spectrum,
                 weighting=self.weighting,
-                restarts=self.restarts,
+                initial=initial,
+                global_search=global_search,
+                restarts=restarts,
                 popsize=self.popsize,
                 maxiter=self.maxiter,
                 tol=self.tol,
+                local=SCREEN_LOCAL if not global_search else PUBLISH_LOCAL,
                 seed=self.seed,
             )
-            candidate = (
-                Candidate(circuit, result, generation)
-                if math.isfinite(result.statistics.aicc)
-                else None
-            )
         except (ValueError, CircuitError, np.linalg.LinAlgError):
-            candidate = None
-        self.cache[key] = candidate
-        return candidate
+            return None
+        if not math.isfinite(result.statistics.aicc):
+            return None
+        return Candidate(circuit, result, generation)
 
 
 def _same_response(a: Candidate, b: Candidate) -> bool:
@@ -1028,6 +1232,7 @@ def discover(
     search_popsize: int = 12,
     search_maxiter: int = 60,
     search_tol: float = 1e-5,
+    warm_accept: float = WARM_ACCEPT_FACTOR,
     final_restarts: int = 5,
     n_refine: int | None = None,
     time_limit: float | None = None,
@@ -1091,6 +1296,9 @@ def discover(
         weighting: Residual weighting passed through to the fitter.
         search_restarts, search_popsize, search_maxiter: Reduced fitting budget used by the
             genetic search. Survivors are refitted properly at the end.
+        warm_accept: How far off the best cost known at the same complexity a warm-started
+            polish may land and still skip the global stage (genetic search only); zero turns
+            parameter inheritance off. See :data:`WARM_ACCEPT_FACTOR`.
         final_restarts: Restart count for the final refit of the reported candidates.
         n_refine: Refit budget for the full-budget second tier. In **both** searches it is a
             *total* that is split into a quota per element count, so that every complexity
@@ -1163,6 +1371,7 @@ def discover(
             time_limit=time_limit,
             seeds=seeds,
             started=started,
+            warm_accept=warm_accept,
             criterion=criterion,
         )
 
@@ -1220,6 +1429,7 @@ def discover(
                 time_limit=remaining,
                 seeds=[c.circuit.to_string() for c in candidates[:5]],
                 started=time.perf_counter(),
+                warm_accept=warm_accept,
                 criterion=criterion,
             )
             candidates = _unique_best(candidates + evolved.candidates, criterion)
@@ -1520,26 +1730,37 @@ def _evolve(
     time_limit: float | None,
     seeds: Sequence[str] | None,
     started: float,
+    warm_accept: float = WARM_ACCEPT_FACTOR,
     criterion: Criterion = DEFAULT_CRITERION,
 ) -> DiscoveryResult:
-    """The genetic search, unchanged: regularised evolution over the topology grammar."""
+    """Regularised evolution over the topology grammar, warm-started from each parent."""
     rng = np.random.default_rng(seed)
     evaluator = _Evaluator(
-        spectrum, weighting, search_restarts, search_popsize, search_maxiter, search_tol, seed
+        spectrum,
+        weighting,
+        search_restarts,
+        search_popsize,
+        search_maxiter,
+        search_tol,
+        seed,
+        warm_accept,
     )
 
-    trees: list[Node] = []
+    # The initial population has no parents: seeds come from the caller and the rest is random,
+    # so every one of these is fitted by the global stage. That is also what fills
+    # ``_Evaluator.best_cost``, which the warm starts are later judged against.
+    trees: list[_Offspring] = []
     for text in seeds or ():
-        trees.append(Circuit.parse(text).root)
+        trees.append((Circuit.parse(text).root, None))
     while len(trees) < population:
         n = int(rng.integers(min_elements, max_elements + 1))
-        trees.append(random_topology(rng, pool, n))
+        trees.append((random_topology(rng, pool, n), None))
 
     scored: list[Candidate] = []
     generation = 0
     for generation in range(generations):
-        for tree in trees:
-            candidate = evaluator.evaluate(tree, generation)
+        for tree, parent in trees:
+            candidate = evaluator.evaluate(tree, generation, parent)
             if candidate is not None:
                 scored.append(candidate)
         if time_limit is not None and time.perf_counter() - started > time_limit:
@@ -1547,10 +1768,10 @@ def _evolve(
 
         alive = _unique_best(scored, criterion)
         if not alive:
-            trees = [
-                random_topology(rng, pool, int(rng.integers(min_elements, max_elements + 1)))
-                for _ in range(population)
-            ]
+            trees = []
+            for _ in range(population):
+                size = int(rng.integers(min_elements, max_elements + 1))
+                trees.append((random_topology(rng, pool, size), None))
             continue
 
         trees = _next_generation(alive, rng, pool, max_elements, population, criterion)
@@ -2354,16 +2575,22 @@ def _next_generation(
     max_elements: int,
     population: int,
     criterion: Criterion = DEFAULT_CRITERION,
-) -> list[Node]:
+) -> list[_Offspring]:
     """Elitism over the Pareto front, then tournament selection with mutation/crossover.
 
     Breeding from the Pareto front rather than from the score ranking alone keeps simple
     topologies in play. Otherwise the population converges on whatever fits best regardless
     of size, and the trade-off curve -- the actual deliverable -- collapses to one point.
+
+    Each child is returned **with the parent it was bred from**, which is what lets the
+    evaluator start its fit from that parent's values rather than from nothing
+    (:func:`_inherited_values`). For a crossover the parent named is the one whose tree was
+    grafted onto, not the donor of the subtree: the child is a modification of that tree, so
+    it is the one most of the inherited values will still belong to.
     """
     front = pareto_front(alive, criterion)
     elite = front[: max(2, population // 6)]
-    trees: list[Node] = [candidate.circuit.root for candidate in elite]
+    trees: list[_Offspring] = [(candidate.circuit.root, candidate) for candidate in elite]
 
     while len(trees) < population:
         parent = _tournament(alive, rng, criterion=criterion)
@@ -2374,7 +2601,7 @@ def _next_generation(
             child = parent.circuit.root
         child = mutate(child, rng, pool, max_elements)
         if count_elements(child) <= max_elements:
-            trees.append(child)
+            trees.append((child, parent))
     return trees
 
 
