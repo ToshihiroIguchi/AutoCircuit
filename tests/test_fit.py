@@ -82,7 +82,53 @@ SYNTHETIC_SUITE = [
         1e2,
         1e9,
     ),
+    # Four parallel RC blocks in series -- the Voigt (Maxwell) ladder a multi-relaxation
+    # ceramic reduces to. Eight free parameters, the largest here, with time constants ~2
+    # decades apart (1e-7, 9e-6, 1e-3, 8e-2 s) so every block is separately resolvable. The
+    # four blocks are interchangeable, so this case only means anything through
+    # ``_canonical_params``; compared name by name it would fail on a relabelling.
+    (
+        "Voigt ladder, four blocks",
+        "p(R1,C1)-p(R2,C2)-p(R3,C3)-p(R4,C4)",
+        {
+            "R1.R": 2e3,
+            "C1.C": 5e-11,
+            "R2.R": 3e3,
+            "C2.C": 3e-9,
+            "R3.R": 5e3,
+            "C3.C": 2e-7,
+            "R4.R": 8e3,
+            "C4.C": 1e-5,
+        },
+        1e-2,
+        1e7,
+    ),
 ]
+
+#: A piezoelectric resonator as the Butterworth-Van Dyke model: the clamped capacitance C0 in
+#: parallel with a motional branch R-L-C. A soft-PZT disc -- fs = 198.94 kHz, fp = 208.65 kHz,
+#: mechanical Q = 100, capacitance ratio C1/C0 = 0.1.
+#:
+#: It is kept out of :data:`SYNTHETIC_SUITE` because that suite sweeps every case at 10 points
+#: per decade, and the sweep is part of *this* reference rather than a detail of it. A
+#: resonance of quality factor Q is about 1/Q wide, so putting ~8 samples inside the -3 dB
+#: width needs roughly ``8 * ln(10) * Q`` points per decade -- 1500 at Q = 100. The same
+#: arithmetic is why the window is 0.2 decades rather than the several decades the other cases
+#: use: a log sweep cannot both span a wide band and resolve a Q = 100 peak at any sane point
+#: count, which is why resonators are measured with a narrow sweep around fs.
+#:
+#: What the sweep buys is *precision*, and the first version of this note claimed more than
+#: that -- it said the case was "not measurable" at 10 points per decade. It is measurable.
+#: [measured] On noise-free data even the three points a 10-per-decade sweep leaves in this
+#: window recover all four parameters exactly, and at 1% noise nothing goes unresolved there
+#: either; what changes is the worst parameter deviation over 10 seeds, 0.29% at 1500 points
+#: per decade against 9.9% at 10. ``test_the_resonator_earns_its_sweep`` asserts that ratio
+#: rather than the impossibility that was assumed before it was measured.
+BVD_RESONATOR = (
+    "p(C1,R1-L1-C2)",
+    {"C1.C": 2e-9, "R1.R": 40.0, "L1.L": 3.2e-3, "C2.C": 2e-10},
+    log_frequencies(1.6e5, 2.6e5, 1500),
+)
 
 
 def _canonical_params(circuit: Circuit, values: dict[str, float] | np.ndarray) -> dict[str, float]:
@@ -136,6 +182,72 @@ def test_recovers_parameters_from_noisy_data(
             f"{label}: {name} off by {deviation:.3g} "
             f"(value {value:.3g}, stderr {stderr[name]:.3g})"
         )
+
+
+def test_recovers_a_resonator_from_noise_free_data() -> None:
+    """A resonance is a different shape from every relaxation above, and must recover too."""
+    dsl, truth, f = BVD_RESONATOR
+    circuit = Circuit.parse(dsl)
+    data = simulate(circuit, f, truth, seed=0)
+    result = fit(circuit, data, seed=0)
+
+    got = _canonical_params(circuit, result.values)
+    for name, value in _canonical_params(circuit, truth).items():
+        assert got[name] == pytest.approx(value, rel=1e-3), name
+    assert result.relative_error < 1e-6
+
+
+def test_recovers_a_resonator_from_noisy_data() -> None:
+    """At 1% noise every Butterworth-Van Dyke parameter must still resolve.
+
+    Tighter than the relaxation cases' 15%, deliberately: a resonance pins its own parameters
+    hard, so a loose bound here would pass on a fit that had lost the resonance altogether.
+    """
+    dsl, truth, f = BVD_RESONATOR
+    circuit = Circuit.parse(dsl)
+    data = simulate(circuit, f, truth, noise=0.01, seed=11)
+    result = fit(circuit, data, seed=0)
+
+    assert result.relative_error < 0.03
+    stderr = result.stderr
+    got = _canonical_params(circuit, result.values)
+    for name, value in _canonical_params(circuit, truth).items():
+        assert got[name] == pytest.approx(value, rel=0.02), name
+        # Every parameter is identifiable here; an unresolved one would mean the fit had
+        # neutralised part of the model rather than found the resonance.
+        assert stderr[name] < abs(got[name]), f"{name} is not resolved"
+
+
+def test_the_resonator_earns_its_sweep() -> None:
+    """The claim in :data:`BVD_RESONATOR`'s note, asserted rather than left as prose.
+
+    Two halves. The structural one is exact: at the shared suite's 10 points per decade this
+    window holds three points and none of them lands inside the resonance's -3 dB band, while
+    the reference sweep puts several there. The consequence is statistical, and it is a loss
+    of precision rather than of feasibility -- which is the part that had to be measured,
+    because the assumption it replaced was that the coarse sweep could not fit at all.
+    """
+    dsl, truth, fine = BVD_RESONATOR
+    circuit = Circuit.parse(dsl)
+    f_series = 1.0 / (2.0 * math.pi * math.sqrt(truth["L1.L"] * truth["C2.C"]))
+    half_width = f_series / (2.0 * 100.0)  # Q = 100
+
+    coarse = log_frequencies(1.6e5, 2.6e5, 10)
+    assert coarse.size == 3
+    assert np.sum(np.abs(coarse - f_series) <= half_width) == 0
+    assert np.sum(np.abs(fine - f_series) <= half_width) >= 5
+
+    def mean_worst_deviation(f: np.ndarray) -> float:
+        deviations = []
+        for seed in range(4):
+            data = simulate(circuit, f, truth, noise=0.01, seed=seed)
+            got = fit(circuit, data, seed=0).params
+            deviations.append(max(abs(got[k] - v) / abs(v) for k, v in truth.items()))
+        return float(np.mean(deviations))
+
+    # [measured] ~20x on these seeds, and 34x on the 10-seed worst case. The bar is 5x so that
+    # it tests the sweep rather than the seeds.
+    assert mean_worst_deviation(coarse) > 5.0 * mean_worst_deviation(fine)
 
 
 def test_fit_is_reproducible_from_seed() -> None:

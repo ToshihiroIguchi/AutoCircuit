@@ -211,9 +211,12 @@ magnitude worse, which is what the restart comparison detects.
   standard errors need rescaling by `dp/dx = p ln 10`.
 - Rank of the Jacobian is reported; `rank < n_params` means structural over-parameterisation.
 - χ², weighted residual plots, AICc (drives model comparison in auto mode).
-- **[measured]** Reported standard errors are calibrated: over 25 noise realisations of the
-  capacitor-with-skin-effect model the z-scores have mean ≈ 0, standard deviation 0.8–1.1 and
-  92–96% coverage inside ±2σ.
+- **[measured]** Reported standard errors are calibrated: over 25 noise realisations of each
+  of four models — capacitor with skin effect, brick layer with CPE, a four-block Voigt ladder
+  (eight parameters) and a Butterworth-Van Dyke resonator — the z-scores have mean within
+  ±0.55, standard deviation 0.72–1.34 and 88–100% coverage inside ±2σ. Re-measured 2026-08-22;
+  the wider band is partly the two added models and partly the original pair reading 88%
+  coverage at its lowest where this line previously said 92%. See `benchmarks/README.md`.
 - Branch order is canonicalised after fitting. `p(R1,C1)-p(R2,C2)` is unchanged by swapping
   its two blocks, so without this the optimizer returns either assignment at random, repeated
   runs look like they disagree, and the uniqueness check fires spuriously.

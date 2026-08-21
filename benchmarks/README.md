@@ -264,19 +264,123 @@ to **rank 1 of 657 at every budget**, margin 0.14, with 4×20 finishing in 0.9�
 first place, and measured alone it says the cut is free. It is free only there. Same shape as
 the `_shortlist` bug: invisible on the easy case, expensive on the real space.
 
-### `fitting.py accuracy`
+### `fitting.py accuracy` — re-measured 2026-08-22
 
-All five circuits recover their true parameters from clean data with no initial guess
-(worst error < 0.01%), and stay within a few percent at 1% noise. Times: 0.3–4.5 s.
+All **seven** circuits recover their true parameters from clean data with no initial guess
+(worst error < 0.01%), and stay within 9% at 1% noise. Times 0.6–4.9 s clean, 0.2–2.2 s noisy.
 
-### `fitting.py calibration`
+| case | n | worst error, 1% noise |
+|------|--:|----------------------:|
+| capacitor C-ESR-ESL | 3 | 1.64% |
+| capacitor + skin effect | 5 | 6.33% |
+| Randles | 4 | 0.30% |
+| Maxwell-Wagner, 2 blocks | 4 | 0.47% |
+| brick layer + CPE | 6 | 8.53% |
+| **Voigt ladder, 4 blocks** | **8** | **1.26%** |
+| **piezo resonator (BVD)** | **4** | **0.16%** |
 
-Reported standard errors are honest: over 25 noise realisations the z-scores have mean ≈ 0,
-standard deviation 0.8–1.1, and 92–96% coverage inside ±2σ.
+The last two are new. They were added to answer two questions the first five do not: whether
+the fitter carries *eight* parameters without an initial guess, and whether it handles a
+*resonance* rather than a relaxation. Both answer yes, and neither leaves a parameter
+unresolved — 0/8 and 0/4 with standard errors below their own values, over 5 seeds.
+
+Two things about them are worth more than the error column.
+
+*The eight-parameter case is the easy kind of eight.* Its four RC time constants are ~2
+decades apart, so every block is separately resolvable and 1.26% is a statement about the
+optimizer, not about the data. The deliberately hard version — three blocks with two of them
+0.6 decades apart — is `LARGE_REFERENCES[0]` in `discovery_v2.py`, where the same measurement
+reads 24.1%. Keeping them apart keeps "can the fitter carry eight parameters" from being
+reported as "can the data separate two relaxations".
+
+*The resonator's sweep is part of the reference.* A resonance of quality factor Q is about 1/Q
+wide, so it needs ~`8·ln(10)·Q` points per decade — 1500 at Q = 100 — and a window of 0.2
+decades rather than the several decades every other case uses, because a log sweep cannot both
+span a wide band and resolve a Q = 100 peak at any sane point count. **The first version of
+that note claimed the case would be unmeasurable at the suite's 10 points per decade, and the
+measurement disagreed.** It is measurable: the three points a 10-per-decade sweep leaves in
+this window recover all four parameters exactly from noise-free data and leave none unresolved
+at 1% noise. What the sweep buys is precision — worst deviation over 10 seeds 0.29% at 1500
+points per decade against 9.9% at 10. `tests/test_fit.py::test_the_resonator_earns_its_sweep`
+pins that ratio, so the claim cannot drift back to the stronger one.
+
+### `fitting.py calibration` — re-measured 2026-08-22
+
+Reported standard errors are honest on all four cases in `CALIBRATION`: over 25 noise
+realisations the z-scores have mean within ±0.55, standard deviation 0.72–1.34, and 88–100%
+coverage inside ±2σ.
+
+Those ranges are wider than the "mean ≈ 0, 0.8–1.1, 92–96%" recorded here before, and only
+partly because two cases were added. Re-running the *original* pair on the same seeds now
+reads 88% coverage at its lowest (`CPE1.Q` and `CPE1.n` on the brick layer) rather than 92%.
+The earlier line is left contradicted rather than quietly replaced: this table is the current
+reading, and where the previous summary came from is not recoverable from it.
+
+The two new cases are the ones with a shape the covariance estimate had not been checked on.
+The eight-parameter ladder is the best-behaved case in the table (std 0.72–1.17, coverage
+92–100%). The resonator carries a mild bias the relaxation cases do not — mean z +0.54 on C0
+and +0.45 on the motional C1, the two parameters the anti-resonance ties together — with
+standard deviations 0.73–1.06 and coverage 92–100%. Worth knowing before quoting a capacitance
+ratio to three figures; not enough to call the errors dishonest.
+
+### The two 2026-08-22 additions — what they measured beyond recovery
+
+Neither circuit was added to `discovery_v2.py`'s `REFERENCES`: every mode in that file
+iterates that list, so appending to it invalidates each table above and costs hours to
+restore. Both are `fitting.py` cases (mode 1, topology given) and both are shipped as web
+examples. Two things turned up on the way, and they are here because they are the reason
+somebody should think before promoting either one to a discovery reference.
+
+**The BVD resonator has a near-degenerate rival, and it is not an exact equivalent.** Screened
+against the whole R/C/L space, `C1-p(C2,L1,R1)` — the dual, a series capacitance with a
+parallel R-L-C — fits the resonator's noise-free data to 1.1% relative RMS. That is not a
+reparameterisation (the exact equivalents in `topology_space.py` (b) reach 1e-9), but at the
+project's standard 1% noise it is indistinguishable, and it has the same element count. Ad-hoc
+`mode="exhaustive"` runs on the resonator, pool R/C/L, 4 workers: at limit 4 (100 candidates,
+10 s) the truth was the recommendation on the one seed run; at limit 5 (449 candidates, ~34 s)
+it was 2 of 3 seeds, the third recommending the dual and dropping the truth off the front
+entirely. **A gate written as "the truth is the recommendation" would be flaky on this
+reference at 1% noise.** Four seeds across two limits is an observation and not a measurement:
+there is no `discovery_v2.py` mode for these runs, so nobody can re-run them by name, and the
+counts are far too small to be a pass fraction.
+
+Two follow-ups that look obvious and are not. Raising Q makes it *worse*, not better: the
+dual's misfit falls 1.52% → 1.12% → 0.67% → 0.37% at Q = 50, 100, 300, 1000, because at high Q
+both circuits are dominated by the same pole pair and the difference lives in the off-resonance
+shape. Widening the window makes it worse too — 1.1% on the 0.2-decade reference window against
+0.30% over 3 decades. The narrow, lossy case is the *most* separable one, which is the opposite
+of the intuition.
+
+**The resonator broke the Lin-KK test, and the test blamed the data.** The example is
+KK-compliant by construction — it is the exact response of a passive circuit plus i.i.d. noise
+— and `validate` returned FAIL with "the data is not consistent with a linear, causal,
+stationary system". The cause is basis incompleteness, not order selection: a Voigt series has
+only real poles and a resonance is a complex pole pair, so [measured] the residual sits at
+96.8% of |Z| at **every** order from M = 3 to M = 317, flat to four figures. The order scan and
+its mu criterion were working correctly; there was nothing to select.
+
+The discriminator is clean in both directions and is now in the code as
+`validate.MODEL_FAILURE_RMS`:
+
+| spectrum | best RMS residual | gain from M=3 to best | what it means |
+|----------|------------------:|----------------------:| --------------|
+| Randles, 1% noise | 0.99% | 22.6× | passes |
+| Randles + 40% drift across the sweep | 1.77% | 11.5× | a real KK violation |
+| piezo resonator | 48.7% | **1.24×** | the model, not the data |
+
+A genuine violation is *tracked* — the model follows the curve and the verdict comes from the
+residual's systematic pattern at a small magnitude. An unreachable shape is not tracked at all,
+and nothing about the data's causality has been tested. Above 25% RMS the summary now says the
+test could not be applied and names both possibilities (unreachable response, or data too
+corrupted for any model) instead of asserting drift. **`passed` is unchanged**: a test that
+could not be applied is not a pass, so no verdict, threshold or number in any table above
+moves — only what the failure is allowed to blame. `tests/test_validate.py` pins both branches.
 
 ### `fitting.py restarts`
 
-On the hardest six-parameter case, at 1% noise:
+On the hardest six-parameter case (`brick layer + CPE`, now pinned by label rather than as
+`SUITE[-1]`, so that appending a case cannot move this sweep onto a different circuit while
+still printing this heading), at 1% noise:
 
 | restarts | popsize | failures | mean time |
 |----------|---------|----------|-----------|
