@@ -228,6 +228,14 @@ magnitude worse, which is what the restart comparison detects.
     residuals are *systematic*: a Wald-Wolfowitz runs test on the residual signs. Noise
     changes sign about half the time; a KK violation is smooth in frequency and does not.
     Measured: clean data runs z ≈ 0 (pass), 30% drift gives runs z = −7.9 (fail).
+  - **[measured]** A failed test is not automatically a verdict about the data. The Voigt
+    basis has only real poles, so a *resonance* is unreachable by it: on a Butterworth-Van
+    Dyke spectrum, which is KK-compliant by construction, the residual is 96.8% of |Z| at
+    every order from M = 3 to M = 317. A genuine violation looks nothing like that — 40%
+    drift is tracked to 1.8% RMS and improves 11.5× with model order, against 1.24× here. So
+    above `validate.MODEL_FAILURE_RMS` (25% RMS) the report says the test could not be applied
+    and names both possible causes rather than asserting drift. `passed` is unchanged: a test
+    that could not be applied is not a pass.
 
 ## 6. Automatic topology discovery
 

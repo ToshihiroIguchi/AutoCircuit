@@ -104,10 +104,15 @@ def _preflight(spectrum: Spectrum, skip: bool) -> None:
         return
     if not result.passed:
         print(result.summary(spectrum), file=sys.stderr)
-        print(
-            "\n! Continuing anyway, but treat the fitted parameters with suspicion.\n",
-            file=sys.stderr,
+        # A test that could not be applied casts no suspicion on anything; saying it does
+        # would be the same over-claim the summary itself no longer makes.
+        note = (
+            "! Continuing: the KK test could not be applied here, so it says nothing"
+            " either way about the fit."
+            if result.model_failed
+            else "! Continuing anyway, but treat the fitted parameters with suspicion."
         )
+        print(f"\n{note}\n", file=sys.stderr)
 
 
 def _write_outputs(

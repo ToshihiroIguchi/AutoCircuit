@@ -134,6 +134,17 @@ recorded in the code as a comment and in `docs/IMPLEMENTATION_PLAN.md` marked **
 - **Lin-KK pass/fail cannot be a fixed residual threshold.** 1%-noise data legitimately gives
   ~2.7% peak residuals. The decision is a runs test on residual *signs*: noise alternates,
   a KK violation is smooth.
+- **A failed Lin-KK test does not always mean the data is bad, and the report used to say it
+  did.** The Voigt basis has only real poles, so a *resonance* — a complex pole pair — is
+  unreachable by it at any order. On a Butterworth-Van Dyke spectrum, which is KK-compliant by
+  construction, the residual is 96.8% of |Z| from M = 3 to M = 317, flat to four figures: the
+  order scan and the mu criterion are working, there is simply nothing to select. A genuine
+  violation looks nothing like it — 40% drift is *tracked* to 1.8% RMS and improves 11.5× with
+  model order, against 1.24× for the resonator — which is the discriminator now sitting in
+  `validate.MODEL_FAILURE_RMS` (25% RMS). Above it, the summary says the test could not be
+  applied and names both possible causes. **`passed` is deliberately unchanged**: a test that
+  could not be applied is not a pass, so no threshold or measured number moved — only what the
+  failure is allowed to blame. Do not "fix" this by making such spectra pass.
 - **`SKINW`'s asymptotic branch needs three terms**, `J0/J1 = j + 1/(2q) - 3j/(8q²)`, and a
   switch at |q| = 1e5. The Hankel series converges as 1/|q|, *not* exponentially; the leading
   term alone at |q| = 300 left a 0.17% discontinuity.

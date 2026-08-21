@@ -7,7 +7,14 @@ import pytest
 
 from autocircuit.core.simulate import log_frequencies, simulate
 from autocircuit.core.spectrum import Spectrum
-from autocircuit.core.validate import RUNS_Z_LIMIT, _runs_z, lin_kk
+from autocircuit.core.validate import (
+    MODEL_FAILURE_RMS,
+    RUNS_Z_LIMIT,
+    _runs_z,
+    _solve,
+    lin_kk,
+)
+from autocircuit.core.weighting import weight_vectors
 
 # Circuits used to exercise the noise-free / noisy passes below.
 _CIRCUITS: list[tuple[str, dict[str, float]]] = [
@@ -55,6 +62,71 @@ def test_lin_kk_fails_on_smooth_multiplicative_drift() -> None:
     assert result.runs_z < RUNS_Z_LIMIT
     # Well below the threshold, not just barely over it.
     assert result.runs_z < -5.0
+
+
+def test_drift_is_blamed_on_the_data_because_the_model_did_track_it() -> None:
+    """The other side of the resonator test below: here the KK model *does* follow the data.
+
+    That is what makes the systematic residual evidence about the measurement, and it is the
+    distinction ``model_failed`` draws. Asserted here so the two messages cannot both be
+    reached by the same spectrum.
+    """
+    circuit, values = _CIRCUITS[0]
+    spectrum = _simulate(circuit, values)
+    ramp = np.linspace(1.0, 1.4, spectrum.n)
+    drifted = Spectrum(spectrum.f, spectrum.z * ramp, dict(spectrum.metadata))
+
+    result = lin_kk(drifted)
+    assert not result.passed
+    assert not result.model_failed
+    assert result.rms_residual < 0.05
+    assert "not consistent with a linear, causal, stationary system" in result.summary(drifted)
+
+
+def test_a_resonance_is_not_reported_as_bad_data() -> None:
+    """A Butterworth-Van Dyke resonator is KK-compliant by construction -- it is the exact
+    response of a passive circuit -- but a Voigt series has only real poles and cannot express
+    a complex pole pair. The test must fail (it could not be applied) without blaming the
+    measurement, which is what it did before ``model_failed`` existed.
+    """
+    f = log_frequencies(1.6e5, 2.6e5, points_per_decade=1500)
+    spectrum = simulate(
+        "p(C1,R1-L1-C2)", f, {"C1.C": 2e-9, "R1.R": 40.0, "L1.L": 3.2e-3, "C2.C": 2e-10}
+    )
+
+    result = lin_kk(spectrum)
+    assert not result.passed
+    assert result.model_failed
+    assert result.rms_residual > MODEL_FAILURE_RMS
+    summary = result.summary(spectrum)
+    assert "could not follow this data at all" in summary
+    assert "not consistent with a linear" not in summary
+
+
+def test_more_voigt_elements_do_not_rescue_a_resonance() -> None:
+    """Why :data:`MODEL_FAILURE_RMS` is keyed on the residual and not on the model order.
+
+    The residual is flat in M because the shape is unreachable, not because the order scan
+    stopped early. Solved here at two orders 60x apart rather than through ``lin_kk``, which
+    would choose an order for us and so could not show that the choice does not matter.
+    """
+    f = log_frequencies(1.6e5, 2.6e5, points_per_decade=1500)
+    spectrum = simulate(
+        "p(C1,R1-L1-C2)", f, {"C1.C": 2e-9, "R1.R": 40.0, "L1.L": 3.2e-3, "C2.C": 2e-10}
+    )
+    omega, z = spectrum.omega, spectrum.z
+    w_re, w_im = weight_vectors(z, "modulus")
+
+    def rms_at(m: int) -> float:
+        tau = np.logspace(np.log10(1.0 / omega.max()), np.log10(1.0 / omega.min()), m)
+        _, z_fit = _solve(omega, z, tau, w_re, w_im, True, True)
+        return float(np.sqrt(np.mean(np.abs(z - z_fit) ** 2 / np.abs(z) ** 2)))
+
+    stiff, generous = rms_at(3), rms_at(200)
+    assert generous > MODEL_FAILURE_RMS
+    # [measured] 1.24x. Drifting data, which the basis *can* express, improves ~11x over the
+    # same range; the bar sits between the two.
+    assert stiff / generous < 3.0
 
 
 def test_lin_kk_series_rlc_is_exactly_representable() -> None:

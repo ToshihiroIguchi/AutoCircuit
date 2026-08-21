@@ -10,12 +10,19 @@ The idea: fit the data with a series of ``M`` Voigt (parallel RC) elements whose
 constants are *fixed* on a logarithmic grid, plus a series resistance and optionally a series
 inductance and capacitance. Every such element is KK-compliant by construction, and because
 the time constants are fixed the resistances follow from ordinary *linear* least squares --
-no initial values, no local minima. If a KK-compliant model with enough elements still cannot
-follow the data, the data itself violates the KK relations: drift, non-stationarity or a
-non-linear response.
+no initial values, no local minima. A KK-compliant model that follows the data closely but
+*systematically* is the test's evidence that the data violates the KK relations: drift,
+non-stationarity or a non-linear response.
 
 A drifting spectrum will happily fit an equivalent circuit and give confident, wrong numbers,
 so this test is run automatically as a pre-flight check before fitting.
+
+**The failure to be careful about is the model's own.** A Voigt series has only real poles, so
+it can express relaxations and nothing else; a *resonance* is a complex pole pair and no number
+of Voigt elements will reach it. [measured] On a Butterworth-Van Dyke resonator -- data that is
+KK-compliant by construction, being the exact response of a passive circuit -- the residual sits
+at 96.8% of |Z| from M = 3 all the way to M = 317. That is not a verdict about the data, and
+this module must not report it as one; see :data:`MODEL_FAILURE_RMS`.
 """
 
 from __future__ import annotations
@@ -43,6 +50,20 @@ DEFAULT_MU_CRITERION = 0.85
 DEFAULT_RESIDUAL_LIMIT = 0.01
 #: Runs-test z-score below which residuals are called systematic rather than random.
 RUNS_Z_LIMIT = -3.0
+#: RMS residual (relative to |Z|) above which the *model*, not the data, is judged to have
+#: failed -- the Voigt series never followed the curve, so nothing about the data's causality
+#: has been tested and none may be claimed.
+#:
+#: [measured] The two situations are an order of magnitude apart, in both directions. A genuine
+#: KK violation (a Randles cell whose charge-transfer resistance drifts 40% across the sweep)
+#: still gets tracked: best RMS residual 1.8%, improving 11.5x as the model order grows, and
+#: the verdict comes from the residual *pattern*. A resonance the basis cannot express gets
+#: best RMS 48.7%, improving 1.2x -- adding elements buys nothing because the shape is not
+#: reachable. 25% sits clear of both.
+#:
+#: This changes no verdict: a spectrum over this line still fails, because a test that could
+#: not be applied is not a pass. It changes only what the failure is allowed to blame.
+MODEL_FAILURE_RMS = 0.25
 
 
 @dataclass(frozen=True)
@@ -72,6 +93,11 @@ class KKResult:
     passed: bool
     residual_limit: float
 
+    @property
+    def model_failed(self) -> bool:
+        """True when the KK model never followed the data; see :data:`MODEL_FAILURE_RMS`."""
+        return self.rms_residual >= MODEL_FAILURE_RMS
+
     def summary(self, spectrum: Spectrum) -> str:
         verdict = "PASS" if self.passed else "FAIL"
         lines = [
@@ -85,14 +111,28 @@ class KKResult:
         if not self.passed:
             combined = np.abs(self.residual_real) + np.abs(self.residual_imag)
             worst = int(np.argmax(combined))
-            lines += [
-                f"  Worst point     : {spectrum.f[worst]:.6g} Hz",
-                "",
-                "  The data is not consistent with a linear, causal, stationary system.",
-                "  Typical causes: drift during the sweep, a non-linear excitation amplitude,",
-                "  temperature change, or a bad contact. Fitting a circuit to this data will",
-                "  produce confident but meaningless parameters.",
-            ]
+            lines.append(f"  Worst point     : {spectrum.f[worst]:.6g} Hz")
+            lines.append("")
+            if self.model_failed:
+                # The residual is the size of the data, so the model reproduced essentially
+                # none of it and has tested nothing. Saying which of the two causes it is
+                # would be a guess, so both are named and neither is asserted.
+                lines += [
+                    "  The KK model could not follow this data at all, so the test has not",
+                    "  been applied -- this is not a verdict on the measurement. Two things",
+                    "  look like this. Either the response is outside what a Voigt series can",
+                    "  express, a resonance being the usual case, since a series of RC",
+                    "  elements has only real poles; or the data is too corrupted for any",
+                    "  model to track. Check whether the spectrum turns inductive over a",
+                    "  narrow band before reading this as bad data.",
+                ]
+            else:
+                lines += [
+                    "  The data is not consistent with a linear, causal, stationary system.",
+                    "  Typical causes: drift during the sweep, a non-linear excitation",
+                    "  amplitude, temperature change, or a bad contact. Fitting a circuit to",
+                    "  this data will produce confident but meaningless parameters.",
+                ]
         return "\n".join(lines)
 
     def to_wire(self, spectrum: Spectrum) -> dict[str, Any]:
@@ -195,8 +235,10 @@ def lin_kk(
         residual_limit: Residual magnitude (relative to |Z|) that passes unconditionally.
 
     Returns:
-        A :class:`KKResult`. ``passed`` is False when the data cannot be represented by a
-        KK-compliant model, which means the measurement, not the model, is the problem.
+        A :class:`KKResult`. ``passed`` is False when a KK-compliant model tracks the data
+        but leaves a systematic residual, which means the measurement is the problem -- and
+        also when the model never tracked the data at all, which means nothing has been
+        tested. :attr:`KKResult.model_failed` separates the two, and the summary says which.
     """
     omega = spectrum.omega
     z = spectrum.z
