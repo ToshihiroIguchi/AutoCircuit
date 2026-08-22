@@ -632,6 +632,11 @@ body {
   color: var(--text-secondary);
 }
 
+.kk-badge--inconclusive {
+  background: var(--status-warning-bg);
+  color: var(--status-warning-text);
+}
+
 .kk-badge--na {
   background: var(--status-warning-bg);
   color: var(--status-warning-text);

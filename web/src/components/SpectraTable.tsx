@@ -32,7 +32,14 @@ function Row({
 }) {
   const summary = useMemo(() => summarizeSpectrum(spectrum.current), [spectrum.current]);
   const badgeState = kkBadgeState(spectrum);
-  const badgeTitle = spectrum.validationError ?? undefined;
+  // A hover for the two states whose one-word label cannot carry its own meaning. The panel
+  // beside the table has the full text; this is for the row.
+  const badgeTitle =
+    spectrum.validationError ??
+    (badgeState === "inconclusive"
+      ? "The Lin-KK model could not follow this data, so the test has not been applied. " +
+        "This is not a verdict on the measurement -- see the panel."
+      : undefined);
 
   return (
     <tr

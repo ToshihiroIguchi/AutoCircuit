@@ -135,16 +135,31 @@ recorded in the code as a comment and in `docs/IMPLEMENTATION_PLAN.md` marked **
   ~2.7% peak residuals. The decision is a runs test on residual *signs*: noise alternates,
   a KK violation is smooth.
 - **A failed Lin-KK test does not always mean the data is bad, and the report used to say it
-  did.** The Voigt basis has only real poles, so a *resonance* — a complex pole pair — is
-  unreachable by it at any order. On a Butterworth-Van Dyke spectrum, which is KK-compliant by
-  construction, the residual is 96.8% of |Z| from M = 3 to M = 317, flat to four figures: the
-  order scan and the mu criterion are working, there is simply nothing to select. A genuine
-  violation looks nothing like it — 40% drift is *tracked* to 1.8% RMS and improves 11.5× with
-  model order, against 1.24× for the resonator — which is the discriminator now sitting in
-  `validate.MODEL_FAILURE_RMS` (25% RMS). Above it, the summary says the test could not be
-  applied and names both possible causes. **`passed` is deliberately unchanged**: a test that
-  could not be applied is not a pass, so no threshold or measured number moved — only what the
-  failure is allowed to blame. Do not "fix" this by making such spectra pass.
+  did.** The Voigt basis plus the three series terms has only real poles, so a complex *pole*
+  of Z — an anti-resonance — is unreachable at any order. On a Butterworth-Van Dyke spectrum,
+  which is KK-compliant by construction, the residual is 96.8% of |Z| from M = 3 to M = 317,
+  flat to four figures: the order scan and the mu criterion are working, there is simply
+  nothing to select. A genuine violation looks nothing like it — 40% drift is *tracked* to
+  1.8% RMS — which is the discriminator sitting in `validate.MODEL_FAILURE_RMS` (25% RMS).
+  Above it the outcome is `verdict == "inconclusive"`: the summary says the test could not be
+  applied, the CLI exits 2 rather than 1, and the browser's badge reads NO VERDICT.
+  **`passed` is deliberately unchanged**, so no threshold or measured number moved — only what
+  the failure is allowed to blame. Do not "fix" this by making such spectra pass.
+- **Three things about that escape are measured, and two of them are not what you would
+  guess.** (a) *`passed` must be asked before the residual magnitude.* Noise inflates the
+  residual without being a violation: KK-compliant data at 30% and 50% noise reads 28.1% and
+  43.7% RMS, over the threshold, while passing correctly on the runs test. `KKResult.verdict`
+  is the single place that order is decided, and the browser takes it over the wire rather
+  than rebuilding it. (b) *A series resonance is representable.* A series R-L-C **is** the
+  three series terms of the basis and passes at 0.98% residual; it is the pole, not the
+  resonance. (c) ***The escape only covers the high-residual end, and that gap is open.*** A
+  moderately damped anti-resonance is half-reached — the same resonator at Q = 2, 3, 5, 10, 15
+  gives 1.3%, 2.6%, 4.6%, 17.6%, 24.5% RMS, all under the threshold, with runs z from −5.7 to
+  −17.3 — so those still report as a plain failure and still blame the measurement.
+  `tests/test_validate.py::test_the_open_gap_at_moderate_damping_is_recorded_rather_than_claimed_fixed`
+  pins that as current behaviour. Closing it means giving the basis complex poles (a bank of
+  parallel R-L-C blocks on a resonance grid), which changes what the test can detect at all
+  and so needs its own gate — it is not a tweak to the threshold.
 - **`SKINW`'s asymptotic branch needs three terms**, `J0/J1 = j + 1/(2q) - 3j/(8q²)`, and a
   switch at |q| = 1e5. The Hankel series converges as 1/|q|, *not* exponentially; the leading
   term alone at |q| = 300 left a 0.17% discontinuity.

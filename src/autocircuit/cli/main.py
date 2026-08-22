@@ -109,7 +109,7 @@ def _preflight(spectrum: Spectrum, skip: bool) -> None:
         note = (
             "! Continuing: the KK test could not be applied here, so it says nothing"
             " either way about the fit."
-            if result.model_failed
+            if result.verdict == "inconclusive"
             else "! Continuing anyway, but treat the fitted parameters with suspicion."
         )
         print(f"\n{note}\n", file=sys.stderr)
@@ -342,7 +342,10 @@ def cmd_validate(args: argparse.Namespace) -> int:
         header = "frequency_hz,residual_real,residual_imag"
         np.savetxt(args.residuals, rows, delimiter=",", header=header, comments="")
         print(f"\nWrote residuals to {args.residuals}")
-    return 0 if result.passed else 1
+    # Three outcomes, three codes. Collapsing "could not be applied" onto 1 would make
+    # `validate && fit` refuse perfectly good data whose response the Voigt basis cannot
+    # express, and collapsing it onto 0 would claim the data had been validated.
+    return {"pass": 0, "fail": 1, "inconclusive": 2}[result.verdict]
 
 
 def _probe_structure(spectrum: Spectrum) -> DRTResult | None:
@@ -598,7 +601,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     # validate
     p_val = subparsers.add_parser(
-        "validate", help="Kramers-Kronig consistency check (run this before trusting a fit)"
+        "validate",
+        help="Kramers-Kronig consistency check (run this before trusting a fit)",
+        description=(
+            "Exit code 0 the data passed, 1 the data is inconsistent, 2 the test could not "
+            "be applied because the Lin-KK model cannot express this response -- which says "
+            "nothing either way about the measurement."
+        ),
     )
     _add_data_arguments(p_val)
     p_val.add_argument("--mu", type=float, default=0.85, help="model-order criterion")

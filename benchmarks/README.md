@@ -370,11 +370,36 @@ The discriminator is clean in both directions and is now in the code as
 
 A genuine violation is *tracked* — the model follows the curve and the verdict comes from the
 residual's systematic pattern at a small magnitude. An unreachable shape is not tracked at all,
-and nothing about the data's causality has been tested. Above 25% RMS the summary now says the
-test could not be applied and names both possibilities (unreachable response, or data too
-corrupted for any model) instead of asserting drift. **`passed` is unchanged**: a test that
-could not be applied is not a pass, so no verdict, threshold or number in any table above
-moves — only what the failure is allowed to blame. `tests/test_validate.py` pins both branches.
+and nothing about the data's causality has been tested. Above 25% RMS the outcome is a third
+state, `verdict == "inconclusive"`: the summary says the test could not be applied and names
+both possibilities, `validate` exits 2 rather than 1, and the web badge reads NO VERDICT.
+**`passed` is unchanged**, so no verdict, threshold or number in any table above moves — only
+what the failure is allowed to blame.
+
+Making that a user-visible state meant widening the evidence, and three of the extra
+measurements changed the design rather than confirming it.
+
+*`passed` has to be asked first.* Noise inflates the residual without being a violation at all:
+KK-compliant Randles data at 30% and 50% noise reads 28.1% and 43.7% RMS — over the threshold —
+while passing correctly on the runs test. A badge that asked the residual question first would
+have reported healthy noisy data as untested. `KKResult.verdict` is the one place that order
+lives, and the browser takes it over the wire rather than rebuilding it.
+
+*The drift family never comes near the line.* 40%, 100%, 300% and 1000% multiplicative drift
+give 2.5%, 4.1%, 8.0% and 15.0% RMS. Two orders of magnitude of drift, and the margin holds.
+
+*A series resonance is representable, and the first version of this note said otherwise.* A
+series R-L-C **is** the basis's three series terms, and it passes at 0.98%. It is the complex
+*pole* — the anti-resonance — that is unreachable, not resonance as such.
+
+**And the escape only covers the high-residual end.** The same resonator at mechanical
+Q = 2, 3, 5, 10, 15 leaves 1.3%, 2.6%, 4.6%, 17.6% and 24.5% RMS — all under the threshold —
+with runs z from −5.7 to −17.3. A half-reached anti-resonance therefore still reports as a
+plain failure and still blames the measurement. That gap is open, it is asserted as current
+behaviour in `tests/test_validate.py`, and the plain-failure text names the false positive so
+a user meeting it has something to check. Closing it means giving the basis complex poles — a
+bank of parallel R-L-C blocks on a resonance grid — which changes what the test can detect at
+all, and so is a change with its own gate rather than a new threshold.
 
 ### `fitting.py restarts`
 

@@ -10,6 +10,7 @@ from autocircuit.core.spectrum import Spectrum
 from autocircuit.core.validate import (
     MODEL_FAILURE_RMS,
     RUNS_Z_LIMIT,
+    WIRE_VERSION,
     _runs_z,
     _solve,
     lin_kk,
@@ -139,6 +140,95 @@ def test_lin_kk_series_rlc_is_exactly_representable() -> None:
     spectrum = simulate("R1-L1-C1", f, {"R1.R": 5.0, "L1.L": 1e-6, "C1.C": 1e-6})
     result = lin_kk(spectrum)
     assert result.max_residual < 1e-8
+
+
+def test_noisy_but_valid_data_passes_even_though_its_residual_is_large() -> None:
+    """The measured trap behind the order of the two questions in ``verdict``.
+
+    Noise inflates the residual without being a KK violation. At 30% noise this spectrum is
+    over ``MODEL_FAILURE_RMS`` while its residual signs are still random, so a consumer that
+    asked the residual question first would report healthy data as untested.
+    """
+    circuit, values = _CIRCUITS[0]
+    spectrum = _simulate(circuit, values, noise=0.30, seed=5)
+
+    result = lin_kk(spectrum)
+    assert result.model_failed
+    assert result.passed
+    assert result.verdict == "pass"
+
+
+def test_drift_stays_a_verdict_about_the_data_at_every_magnitude() -> None:
+    """A genuine violation is *tracked*, so it never reaches the inconclusive branch.
+
+    [measured] 40%, 100%, 300% and 1000% drift give 2.5%, 4.1%, 8.0% and 15.0% RMS -- two
+    orders of magnitude of drift, and the whole family stays under ``MODEL_FAILURE_RMS``.
+    """
+    circuit, values = _CIRCUITS[0]
+    spectrum = _simulate(circuit, values)
+    for drift in (0.4, 1.0, 3.0, 10.0):
+        ramp = np.linspace(1.0, 1.0 + drift, spectrum.n)
+        drifted = Spectrum(spectrum.f, spectrum.z * ramp, dict(spectrum.metadata))
+
+        result = lin_kk(drifted)
+        assert result.verdict == "fail", drift
+        assert result.rms_residual < MODEL_FAILURE_RMS, drift
+
+
+def test_a_series_resonance_is_representable_and_a_parallel_one_is_not() -> None:
+    """The distinction is the *pole*, not the resonance, and it is easy to state too broadly.
+
+    A series R-L-C is literally the three series terms of the Lin-KK basis, so it passes. The
+    Butterworth-Van Dyke resonator's anti-resonance is a complex pole of Z, and no number of
+    real-pole Voigt elements reaches it.
+    """
+    series = simulate(
+        "L1-C1-R1",
+        log_frequencies(1e4, 1e6, points_per_decade=300),
+        {"L1.L": 1e-3, "C1.C": 1e-9, "R1.R": 20.0},
+    )
+    assert lin_kk(series).verdict == "pass"
+
+    parallel = simulate(
+        "p(C1,R1-L1-C2)",
+        log_frequencies(1.6e5, 2.6e5, points_per_decade=1500),
+        {"C1.C": 2e-9, "R1.R": 40.0, "L1.L": 3.2e-3, "C2.C": 2e-10},
+    )
+    assert lin_kk(parallel).verdict == "inconclusive"
+
+
+def test_the_open_gap_at_moderate_damping_is_recorded_rather_than_claimed_fixed() -> None:
+    """`MODEL_FAILURE_RMS` catches an unreachable shape only when the basis misses completely.
+
+    [measured] The same resonator at mechanical Q = 5 leaves a residual of about 4.6% -- well
+    under the threshold -- while the residual pattern is firmly systematic. It therefore still
+    reports as a plain failure and still blames the measurement. This asserts the *current*
+    behaviour so that the limitation is visible in the suite rather than only in prose; closing
+    it means giving the basis complex poles, which is a change with its own measurement.
+    """
+    damped = simulate(
+        "p(C1,R1-L1-C2)",
+        log_frequencies(1.6e5, 2.6e5, points_per_decade=1500),
+        # R = 2*pi*fs*L / Q with Q = 5.
+        {"C1.C": 2e-9, "R1.R": 800.0, "L1.L": 3.2e-3, "C2.C": 2e-10},
+    )
+
+    result = lin_kk(damped)
+    assert result.verdict == "fail"
+    assert result.rms_residual < MODEL_FAILURE_RMS
+    assert result.systematic
+
+
+def test_wire_carries_the_verdict() -> None:
+    circuit, values = _CIRCUITS[0]
+    spectrum = _simulate(circuit, values)
+    wire = lin_kk(spectrum).to_wire(spectrum)
+
+    assert wire["version"] == WIRE_VERSION
+    assert wire["verdict"] in {"pass", "fail", "inconclusive"}
+    # The browser reads `verdict` rather than rebuilding it, so both must travel and agree.
+    assert wire["verdict"] == ("pass" if wire["passed"] else wire["verdict"])
+    assert isinstance(wire["summary"], str)
 
 
 def test_runs_z_is_near_zero_for_random_signs() -> None:

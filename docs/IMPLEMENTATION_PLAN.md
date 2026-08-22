@@ -231,14 +231,22 @@ magnitude worse, which is what the restart comparison detects.
     residuals are *systematic*: a Wald-Wolfowitz runs test on the residual signs. Noise
     changes sign about half the time; a KK violation is smooth in frequency and does not.
     Measured: clean data runs z ≈ 0 (pass), 30% drift gives runs z = −7.9 (fail).
-  - **[measured]** A failed test is not automatically a verdict about the data. The Voigt
-    basis has only real poles, so a *resonance* is unreachable by it: on a Butterworth-Van
-    Dyke spectrum, which is KK-compliant by construction, the residual is 96.8% of |Z| at
-    every order from M = 3 to M = 317. A genuine violation looks nothing like that — 40%
-    drift is tracked to 1.8% RMS and improves 11.5× with model order, against 1.24× here. So
-    above `validate.MODEL_FAILURE_RMS` (25% RMS) the report says the test could not be applied
-    and names both possible causes rather than asserting drift. `passed` is unchanged: a test
-    that could not be applied is not a pass.
+  - **[measured]** A failed test is not automatically a verdict about the data, so the outcome
+    is three-way: `KKResult.verdict` is `pass`, `fail` or `inconclusive`. The basis has only
+    real poles, so a complex *pole* of Z — an anti-resonance — is unreachable: on a
+    Butterworth-Van Dyke spectrum, KK-compliant by construction, the residual is 96.8% of |Z|
+    at every order from M = 3 to M = 317, while 40% drift is tracked to 1.8%. Above
+    `validate.MODEL_FAILURE_RMS` (25% RMS) the report says the test could not be applied,
+    `validate` exits 2 rather than 1, and the web badge reads NO VERDICT. `passed` is
+    unchanged: a test that could not be applied is not a pass.
+    - `passed` is asked before the residual magnitude, because noise inflates the residual
+      without being a violation — KK-compliant data at 30% noise is over the threshold and
+      must still read as a pass.
+    - A *series* R-L-C is exactly the basis's three series terms and passes; it is the pole,
+      not the resonance, that is unreachable.
+    - The escape covers only the high-residual end. A moderately damped anti-resonance
+      (Q ≈ 2–15, residuals 1.3–24.5%) still reports as a plain failure and still blames the
+      measurement. Open; closing it means adding complex poles to the basis.
 
 ## 6. Automatic topology discovery
 

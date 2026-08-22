@@ -97,7 +97,9 @@ const SAMPLES = [
       "parallel with a motional R-L-C branch. The only resonant example here, and the only one " +
       "built from R, C and L alone. The sweep is narrow and dense on purpose -- a Q = 100 " +
       "resonance is about 1% of its frequency wide, so it is measured around fs rather than " +
-      "over decades.",
+      "over decades. The Lin-KK check reports no verdict on it: a Voigt series cannot express " +
+      "an anti-resonance, so there is nothing it can say about data that is, by construction, " +
+      "perfectly Kramers-Kronig consistent.",
   },
 ];
 

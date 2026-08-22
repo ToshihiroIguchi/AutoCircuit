@@ -386,6 +386,7 @@ def test_validate_matches_lin_kk_directly() -> None:
     payload = response["result"]["validation"]
 
     assert payload["passed"] == expected.passed
+    assert payload["verdict"] == expected.verdict
     assert payload["systematic"] == expected.systematic
     assert payload["n_elements"] == expected.n_elements
     assert payload["summary"] == expected.summary(spectrum)

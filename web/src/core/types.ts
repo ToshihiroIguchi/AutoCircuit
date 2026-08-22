@@ -39,6 +39,13 @@ export interface ValidationWire {
   runs_z: WireFloat;
   systematic: boolean;
   passed: boolean;
+  /**
+   * The three-way outcome. `fail` is a statement about the data; `inconclusive` is a statement
+   * about the *model* -- the Lin-KK basis could not express this response -- and says nothing
+   * either way about the measurement. Decided in `core/validate.py`, never re-derived here:
+   * the order of its two questions is a measured detail, not an obvious one.
+   */
+  verdict: "pass" | "fail" | "inconclusive";
   residual_limit: WireFloat;
   /** The CLI's verdict text, carried verbatim so the UI never paraphrases the science. */
   summary: string;

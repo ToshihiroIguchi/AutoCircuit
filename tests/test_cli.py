@@ -138,6 +138,24 @@ def test_validate_exits_0_on_clean_data_and_1_on_drifting_data(tmp_path: Path) -
     assert rc == 1
 
 
+def test_validate_exits_2_when_the_test_could_not_be_applied(tmp_path: Path) -> None:
+    """A Butterworth-Van Dyke resonator is KK-compliant, and the Voigt basis cannot express it.
+
+    Neither 0 nor 1 is honest here: 0 would claim the data had been validated, and 1 would make
+    `validate && fit` refuse a perfectly good measurement. Hence a third code.
+    """
+    out = tmp_path / "bvd.csv"
+    rc = main([
+        "simulate", "-c", "p(C1,R1-L1-C2)",
+        "-p", "C1.C=2e-9", "-p", "R1.R=40", "-p", "L1.L=0.0032", "-p", "C2.C=2e-10",
+        "--fmin", "160000", "--fmax", "260000", "--points-per-decade", "1500",
+        "-o", str(out),
+    ])
+    assert rc == 0
+
+    assert main(["validate", str(out)]) == 2
+
+
 # =============================================================================================
 # convert
 # =============================================================================================

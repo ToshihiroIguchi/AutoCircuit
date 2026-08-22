@@ -17,19 +17,35 @@ non-stationarity or a non-linear response.
 A drifting spectrum will happily fit an equivalent circuit and give confident, wrong numbers,
 so this test is run automatically as a pre-flight check before fitting.
 
-**The failure to be careful about is the model's own.** A Voigt series has only real poles, so
-it can express relaxations and nothing else; a *resonance* is a complex pole pair and no number
-of Voigt elements will reach it. [measured] On a Butterworth-Van Dyke resonator -- data that is
-KK-compliant by construction, being the exact response of a passive circuit -- the residual sits
-at 96.8% of |Z| from M = 3 all the way to M = 317. That is not a verdict about the data, and
-this module must not report it as one; see :data:`MODEL_FAILURE_RMS`.
+**The failure to be careful about is the model's own.** A Voigt series plus the three series
+terms has only real poles, so a complex *pole* of Z -- an anti-resonance, which is what a
+parallel resonance is -- is unreachable at any order. [measured] On a Butterworth-Van Dyke
+resonator, data that is KK-compliant by construction because it is the exact response of a
+passive circuit, the residual sits at 96.8% of |Z| from M = 3 all the way to M = 317. That is
+not a verdict about the data, and this module must not report it as one.
+
+Note the limits of that sentence, both of which are measured rather than reasoned:
+
+*A series resonance is fine.* A series R-L-C has Z = R + jwL + 1/(jwC), which is literally the
+three series terms of this basis, and it passes with a 0.98% residual. It is the pole, not the
+resonance, that the basis cannot reach.
+
+*And the escape is only complete at the high-residual end.* :data:`MODEL_FAILURE_RMS` catches
+an unreachable shape by its residual *magnitude*, which works when the basis misses completely.
+A moderately damped anti-resonance is half-reached: [measured] the same resonator at mechanical
+Q = 2, 3, 5, 10 and 15 gives residuals of 1.3%, 2.6%, 4.6%, 17.6% and 24.5% -- under the
+threshold -- while the residual pattern stays firmly systematic (runs z from -5.7 to -17.3).
+Those still report as a plain failure and still blame the measurement. **That gap is open**, and
+closing it means giving the basis complex poles (a bank of parallel R-L-C blocks on a resonance
+grid), which would change what the test can and cannot detect and so needs its own measurement.
+The plain-failure text names the possibility so that a user meeting it has something to check.
 """
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -42,7 +58,14 @@ Float = NDArray[np.float64]
 Complex = NDArray[np.complex128]
 
 #: Version of :meth:`KKResult.to_wire`; see :data:`autocircuit.core.fit.WIRE_VERSION`.
-WIRE_VERSION = 1
+#:
+#: 2 (2026-08-22) added ``verdict``, so that the browser's badge stops compressing a three-way
+#: outcome into pass/fail.
+WIRE_VERSION = 2
+
+#: What the test concluded. ``"fail"`` is a statement about the data; ``"inconclusive"`` is a
+#: statement about the model, and says nothing either way about the measurement.
+Verdict = Literal["pass", "fail", "inconclusive"]
 
 #: Default stopping value for Schoenleber's mu criterion (0.85 is the value in the paper).
 DEFAULT_MU_CRITERION = 0.85
@@ -61,8 +84,15 @@ RUNS_Z_LIMIT = -3.0
 #: best RMS 48.7%, improving 1.2x -- adding elements buys nothing because the shape is not
 #: reachable. 25% sits clear of both.
 #:
-#: This changes no verdict: a spectrum over this line still fails, because a test that could
-#: not be applied is not a pass. It changes only what the failure is allowed to blame.
+#: Extra evidence, gathered when this became a user-visible state. Genuine violations stay far
+#: below it across two orders of magnitude of drift -- 40%, 100%, 300% and 1000% multiplicative
+#: drift give 2.5%, 4.1%, 8.0% and 15.0% RMS -- so the drift family never reaches this line.
+#:
+#: **Do not read this flag on its own; read :attr:`KKResult.verdict`.** Noise raises the residual
+#: without being a KK violation at all: [measured] KK-compliant Randles data at 30% and 50% noise
+#: gives 28.1% and 43.7% RMS and is over this line, while passing correctly on the runs test. A
+#: consumer that asked this question before asking whether the spectrum passed would report
+#: healthy noisy data as untested.
 MODEL_FAILURE_RMS = 0.25
 
 
@@ -95,13 +125,30 @@ class KKResult:
 
     @property
     def model_failed(self) -> bool:
-        """True when the KK model never followed the data; see :data:`MODEL_FAILURE_RMS`."""
+        """True when the KK model never followed the data; see :data:`MODEL_FAILURE_RMS`.
+
+        A raw magnitude question, and rarely the one a caller wants. Use :attr:`verdict`.
+        """
         return self.rms_residual >= MODEL_FAILURE_RMS
 
+    @property
+    def verdict(self) -> Verdict:
+        """The three-way outcome, and the single place the order of those questions is decided.
+
+        ``passed`` is asked *first*, which is not an arbitrary ordering: noise inflates the
+        residual without being a KK violation, so KK-compliant data at 30% noise is over
+        :data:`MODEL_FAILURE_RMS` and must still read as a pass. Asking the magnitude question
+        first would report it as untested. Every consumer -- the summary below, the CLI's exit
+        code, the browser's badge -- goes through here rather than re-deriving it.
+        """
+        if self.passed:
+            return "pass"
+        return "inconclusive" if self.model_failed else "fail"
+
     def summary(self, spectrum: Spectrum) -> str:
-        verdict = "PASS" if self.passed else "FAIL"
+        headline = {"pass": "PASS", "fail": "FAIL", "inconclusive": "NO VERDICT"}[self.verdict]
         lines = [
-            f"Lin-KK validation : {verdict}",
+            f"Lin-KK validation : {headline}",
             f"  Voigt elements  : {self.n_elements} (mu = {self.mu:.3f})",
             f"  Max residual    : {self.max_residual:.4%}  (limit {self.residual_limit:.2%})",
             f"  RMS residual    : {self.rms_residual:.4%}",
@@ -113,7 +160,7 @@ class KKResult:
             worst = int(np.argmax(combined))
             lines.append(f"  Worst point     : {spectrum.f[worst]:.6g} Hz")
             lines.append("")
-            if self.model_failed:
+            if self.verdict == "inconclusive":
                 # The residual is the size of the data, so the model reproduced essentially
                 # none of it and has tested nothing. Saying which of the two causes it is
                 # would be a guess, so both are named and neither is asserted.
@@ -121,10 +168,10 @@ class KKResult:
                     "  The KK model could not follow this data at all, so the test has not",
                     "  been applied -- this is not a verdict on the measurement. Two things",
                     "  look like this. Either the response is outside what a Voigt series can",
-                    "  express, a resonance being the usual case, since a series of RC",
-                    "  elements has only real poles; or the data is too corrupted for any",
-                    "  model to track. Check whether the spectrum turns inductive over a",
-                    "  narrow band before reading this as bad data.",
+                    "  express -- an anti-resonance is the usual case, because this basis has",
+                    "  only real poles -- or the data is too corrupted for any model to track.",
+                    "  Check whether the spectrum turns inductive over a band and back before",
+                    "  reading this as bad data.",
                 ]
             else:
                 lines += [
@@ -132,6 +179,11 @@ class KKResult:
                     "  Typical causes: drift during the sweep, a non-linear excitation",
                     "  amplitude, temperature change, or a bad contact. Fitting a circuit to",
                     "  this data will produce confident but meaningless parameters.",
+                    "",
+                    "  One known false positive: a moderately damped anti-resonance. The Voigt",
+                    "  basis cannot express one, and at mechanical Q below about 15 it misses",
+                    "  it by too little to be caught above. If the spectrum turns inductive",
+                    "  over a band and back, read this verdict with that in mind.",
                 ]
         return "\n".join(lines)
 
@@ -161,6 +213,7 @@ class KKResult:
             "runs_z": encode_float(self.runs_z),
             "systematic": self.systematic,
             "passed": self.passed,
+            "verdict": self.verdict,
             "residual_limit": encode_float(self.residual_limit),
             "summary": self.summary(spectrum),
         }
