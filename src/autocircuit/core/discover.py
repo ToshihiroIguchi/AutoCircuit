@@ -50,6 +50,7 @@ from .circuit import (
     subtree_at,
     subtree_paths,
 )
+from .descriptors import PoolChoice, choose_pool
 from .elements import DEFAULT_POOL
 from .enumerate import (
     DEFAULT_DEGENERACY_BUDGET,
@@ -350,6 +351,25 @@ class DiscoveryResult:
     numbers underneath mean, and a front labelled only "score" is a front whose column heading
     the reader has to guess. It does **not** change :attr:`recommended`; see there.
     """
+    pool_choice: PoolChoice | None = None
+    """How :attr:`pool` was arrived at, when the spectrum chose it rather than the caller.
+
+    None when the caller named a pool, since then the narrowing is the caller's and they
+    already know about it. Present on the automatic path whether or not anything was added,
+    because the case that says nothing is the one the rule exists for: a report silent about
+    the diffusion elements has excluded them exactly as thoroughly as one that names them.
+    See :mod:`autocircuit.core.descriptors`.
+    """
+    base_complete_up_to: int | None = None
+    """Coverage reached before the pool was widened, when a widening happened.
+
+    Two pools were searched, so there are two completeness statements and neither implies the
+    other: every topology up to this size was evaluated from the *base* pool, and every
+    topology up to :attr:`complete_up_to` from the widened one. Widening costs a level
+    (docs/POOL_FROM_SPECTRUM_PLAN.md section 2), so this is normally the larger number, and
+    collapsing the two into one would either overclaim the wide pool or throw away what the
+    narrow one actually covered.
+    """
 
     @property
     def best(self) -> Candidate | None:
@@ -575,6 +595,37 @@ class DiscoveryResult:
             f"from this pool was evaluated."
         )
 
+    def _with_pool_note(self, coverage: str) -> str:
+        """The coverage sentence, plus how the pool it refers to was arrived at.
+
+        Appended rather than merged, because the two claims are about different things and a
+        reader who takes one for the other has been misled. The coverage sentence bounds the
+        *size* of what was searched; this one bounds the *vocabulary*, and a pool that never
+        contained an element excludes it at every size at once.
+        """
+        if self.pool_choice is None:
+            return coverage
+        note = self.pool_choice.sentence()
+        base = self.base_complete_up_to
+        if base is None or base == self.complete_up_to:
+            return f"{coverage} {note}"
+        narrow = ", ".join(self.pool_choice.base)
+        if self.complete_up_to is None:
+            # The wide pool overflowed its budget before finishing even one size. What the
+            # narrow pool covered is still true and is the only completeness claim left, so it
+            # has to be stated here or it is lost with the level it describes.
+            return (
+                f"{coverage} {note} The widened pool reached no complete size at all, so the "
+                f"only completeness claim that survives is the narrower one: every plausible "
+                f"topology with up to {base} elements from {narrow} was evaluated."
+            )
+        return (
+            f"{coverage} {note} Widening cost a level: the narrower pool ({narrow}) was "
+            f"complete to {base} elements and the wider one to {self.complete_up_to}, so a "
+            f"topology of {self.complete_up_to + 1} elements using an added code was not "
+            "evaluated."
+        )
+
     def _with_refit_note(self, coverage: str) -> str:
         """The coverage sentence, plus what a half-finished second tier does to it.
 
@@ -584,6 +635,7 @@ class DiscoveryResult:
         change. Saying so on the same line is the same rule a skeleton follows -- a reader who
         skims past the qualification has been misled by a true sentence.
         """
+        coverage = self._with_pool_note(coverage)
         if self.refit_progress is None:
             return coverage
         done, total = self.refit_progress
@@ -743,6 +795,8 @@ class DiscoveryResult:
             ),
             "skeleton": self.skeleton,
             "complete_up_to": self.complete_up_to,
+            "base_complete_up_to": self.base_complete_up_to,
+            "pool_choice": (None if self.pool_choice is None else self.pool_choice.to_dict()),
             "coverage": self.completeness(),
             "unresolved_everywhere": self.unresolved_everywhere,
             "excluded_equivalents": (
@@ -1212,7 +1266,7 @@ def pareto_front(
 def discover(
     spectrum: Spectrum,
     *,
-    pool: Sequence[str] = DEFAULT_POOL,
+    pool: Sequence[str] | None = None,
     skeleton: str | None = None,
     mode: Mode = "auto",
     exhaustive_limit: int | None = None,
@@ -1262,8 +1316,14 @@ def discover(
 
     Args:
         spectrum: The measured data.
-        pool: Element codes the search may use. Restricting this is the main way to inject
-            physical knowledge -- e.g. ``("R", "C", "L", "CPE", "SKINF")`` for components.
+        pool: Element codes the search may use, or None -- the default -- to let the spectrum
+            choose. Naming one is how a caller who *does* know something about the part injects
+            it, e.g. ``("R", "C", "L", "CPE", "SKINF")`` for components; it narrows the search
+            and the report says so. Left as None the search starts from
+            :data:`~autocircuit.core.elements.DEFAULT_POOL` and widens it only when that pool's
+            own completed fit leaves a systematic residual, which is the only evidence
+            available that an element is missing rather than merely unused. See
+            :mod:`autocircuit.core.descriptors` for what fires it and which codes it may add.
         skeleton: A circuit every candidate must contain, e.g. ``"C1-R1-L1"``. The search
             adds elements to it and never removes them, so it is an assertion rather than a
             finding. ``pool`` governs the *added* elements only: the skeleton may use codes
@@ -1327,7 +1387,11 @@ def discover(
         known = ", ".join(CRITERIA)
         raise ValueError(f"unknown model-selection criterion {criterion!r}; known: {known}")
     started = time.perf_counter()
-    codes = tuple(pool)
+    # None means "the spectrum decides". The base pool is where that decision starts, never
+    # where it is allowed to end silently: a run that adds nothing still reports having
+    # considered the diffusion elements (docs/POOL_FROM_SPECTRUM_PLAN.md).
+    derive_pool = pool is None
+    codes = DEFAULT_POOL if pool is None else tuple(pool)
     refine = REFINE_DEFAULT[mode] if n_refine is None else n_refine
     frame = None if skeleton is None else Circuit.parse(skeleton)
 
@@ -1353,7 +1417,7 @@ def discover(
     limit = exhaustive_limit_for(None if frame is None else len(frame.leaves), exhaustive_limit)
 
     if mode == "evolve":
-        return _evolve(
+        evolved = _evolve(
             spectrum,
             pool=codes,
             generations=generations,
@@ -1374,6 +1438,14 @@ def discover(
             warm_accept=warm_accept,
             criterion=criterion,
         )
+        # The genetic search never completes a pool, so it cannot produce the evidence the
+        # widening rests on. Saying "unasked" rather than leaving the field empty is the
+        # difference between a check that came back negative and no check at all.
+        if derive_pool:
+            evolved.pool_choice = choose_pool(
+                spectrum, residual_runs_z=math.nan, base=codes
+            )
+        return evolved
 
     candidates, complete_up_to, n_screened = _exhaustive(
         spectrum,
@@ -1399,6 +1471,52 @@ def discover(
         criterion=criterion,
     )
     generations_run = 0
+    pool_choice: PoolChoice | None = None
+    base_complete_up_to: int | None = None
+
+    # Widening the pool, when either reading of the data asks for an element it lacks.
+    #
+    # This runs *before* the genetic fallback and not after, because the two are answers to the
+    # same symptom on different axes -- a systematic residual means either the vocabulary is
+    # too small or the circuit is -- and the pool axis stays inside the exhaustive stage, which
+    # is the half of discovery that recovers the truth 30 times in 30 rather than 1 time in 9
+    # (docs/EVOLVE_SEARCH_PLAN.md section 1). It also costs a completeness level, so trying it
+    # first and the genetic search second means the expensive, unreliable stage is only reached
+    # once the cheap, reliable one has been given every element the data admits.
+    if derive_pool:
+        pool_choice = choose_pool(
+            spectrum, residual_runs_z=_best_runs_z(candidates), base=codes
+        )
+        remaining = None if time_limit is None else time_limit - (time.perf_counter() - started)
+        if pool_choice.added and (remaining is None or remaining > 0.0):
+            base_complete_up_to = complete_up_to
+            codes = pool_choice.pool
+            widened, complete_up_to, n_widened = _exhaustive(
+                spectrum,
+                pool=codes,
+                skeleton=None if frame is None else frame.root,
+                limit=limit if frame is not None else min(limit, max_elements),
+                floor=max(1, exhaustive_min),
+                max_candidates=max_candidates,
+                feasibility_filter=feasibility_filter,
+                feasibility_budget=feasibility_budget,
+                weighting=weighting,
+                seed=seed,
+                n_refine=refine,
+                final_restarts=final_restarts,
+                workers=workers,
+                on_progress=on_progress,
+                time_limit=time_limit,
+                started=started,
+                extra=seeds,
+                criterion=criterion,
+            )
+            # The base-pool candidates are kept rather than discarded: they were fitted against
+            # the same data with the same budget, and every one of them is also a member of the
+            # wider pool's space. Dropping them would lose the sizes the wider enumeration could
+            # no longer afford, which is precisely what ``base_complete_up_to`` records.
+            candidates = _unique_best(candidates + widened, criterion)
+            n_screened += n_widened
 
     # The genetic fallback is skipped under a skeleton rather than filtered: its operators can
     # delete the asserted elements, and a report that mixed constrained and unconstrained
@@ -1448,6 +1566,8 @@ def discover(
         complete_up_to=complete_up_to,
         skeleton=None if frame is None else frame.to_string(),
         criterion=criterion,
+        pool_choice=pool_choice,
+        base_complete_up_to=base_complete_up_to,
     )
 
 
@@ -1693,22 +1813,31 @@ def exhaustive_limit_for(skeleton_size: int | None, requested: int | None) -> in
     return limit
 
 
-def _is_underfitted(candidates: Sequence[Candidate]) -> bool:
-    """True when the best model leaves residuals that look like structure, not noise.
+def _best_runs_z(candidates: Sequence[Candidate]) -> float:
+    """Runs z of the best fit's residuals; NaN when there is nothing to test.
 
     The residual vector is the real parts followed by the imaginary parts, so it is split
     before the runs test -- a sign pattern that alternates within each half but flips between
-    them would otherwise read as random.
+    them would otherwise read as random. The smaller half is taken, because structure in
+    either one is structure.
     """
     if not candidates:
-        return True
+        return -math.inf
     best = min(candidates, key=lambda c: c.result.chi2_reduced)
     residuals = best.result.residuals
     if residuals.size < 4:
-        return False
+        return math.nan
     half = residuals.size // 2
-    z = min(_runs_z(residuals[:half]), _runs_z(residuals[half:]))
-    return bool(z < RUNS_Z_LIMIT)
+    return min(_runs_z(residuals[:half]), _runs_z(residuals[half:]))
+
+
+def _is_underfitted(candidates: Sequence[Candidate]) -> bool:
+    """True when the best model leaves residuals that look like structure, not noise."""
+    z = _best_runs_z(candidates)
+    return False if math.isnan(z) else bool(z < RUNS_Z_LIMIT)
+
+
+
 
 
 def _evolve(

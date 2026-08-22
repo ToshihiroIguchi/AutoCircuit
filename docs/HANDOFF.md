@@ -1559,3 +1559,161 @@ since that is where the topology was found rather than asserted and where the eq
 caveat lives. The browser does not show one. And the `model`/`interpret` objective split that
 `CLAUDE.md` now defines is written down but not wired anywhere; gate O1 (both objectives produce
 a byte-identical `DiscoveryResult`) is unimplemented.
+
+## 22. The default pool stops being a decision about the part -- `core/descriptors.py`
+
+`CLAUDE.md` required the automatic path to take frequency and impedance and nothing else, and
+the default pool `("R", "C", "L", "CPE")` was a standing violation of it: "this is not an
+electrochemical cell", written into a default the target user will never change, and never
+mentioned by the coverage sentence. `--pool auto` is now the CLI default and
+`discover(pool=None)` the API one. The full argument is `docs/POOL_FROM_SPECTRUM_PLAN.md`; this
+section is what must not be re-derived.
+
+### The exclusion was real, and one quarter of it was not
+
+[measured] 1% noise, 61 points, 0.01 Hz to 100 kHz. `Ws`, `Wo` and `G` are transmission lines,
+so no finite tree of R, C, L and CPE reproduces one: the best four-parameter default-pool answer
+is 7.80%, 23.56% and 5.35% relative error against a 1.4% noise floor, and buying that down to
+1.75-2.71% takes *seven* parameters against the truth's three.
+
+**`W` is the exception and it is the one that looks most like the missing feature.** A
+semi-infinite Warburg *is* a CPE at `n = 0.5`. On an `R1-W1` spectrum the truth fits to 1.3344%
+and `R1-CPE1` fits to 1.3344% -- the same five figures -- so `W` is in the pool already under
+another name, and `WIDENING_CANDIDATES` deliberately excludes it. The same fact is why an
+`R1-W1` spectrum comes out right by a route worth following: the shape reading fires on it
+loudly (it *is* a 45-degree spectrum) and the residual reading does not (+0.00, since the pool
+can already express it), so the widening runs, the band admits only `W`, and **nothing is
+added**. Two independent facts agreeing.
+
+### Two readings, and **neither one is sufficient** -- do not delete either
+
+Both instruments were tried as the sole trigger and both were rejected by measurement, on
+*different* spectra. `choose_pool` widens when either asks. A version of this feature with one
+of them removed passes every other gate and silently loses a class of answer; gate C6 in
+`tests/test_descriptors.py` pins the two failure cases for exactly that reason.
+
+**The shape reading** is the longest stretch, in decades, where the spectrum runs at 45 degrees.
+Two corrections were needed before it measured anything and both must survive any rewrite: the
+phase of `Z` is the wrong quantity, because `Ws`, `Wo` and `G` are 45-degree at their
+*high*-frequency end -- exactly where a series resistance dominates -- and a detector built on
+`arg Z` misses `R1-Wo1` and `R1-G1` completely, so the quantity is the local Nyquist angle
+`atan2(dIm/dln w, -dRe/dln w)` where the additive constant differentiates away; and the sign is
+the direction of travel, since a Nyquist plot is traversed towards *decreasing* frequency, and
+taken the other way every case reports no branch at all.
+
+[measured, 3 seeds x 2 noise x 4 grids] It fires 24/24 on `R1-Ws1`, `R1-Wo1` and `R1-G1`, 17/24
+on `R1-p(R2,C1)-Ws1`, and **0/24 on `R1-p(R2,CPE1)-Wo1`** -- 0.20 to 0.60 decades, inside the
+diffusion-free range, because a depressed arc's own tangent sweeps through 45 degrees on its way
+round and a second process in the same decade blends the two. Against eight diffusion-free
+truths it fires **0 times in 192 trials**, so the threshold `DIFFUSION_RUN_DECADES = 0.75` sits
+between a measured 0.50 maximum and a measured 1.00 minimum.
+
+**The residual reading** asks the search: `_best_runs_z` on the best base-pool fit, against
+`POOL_WIDENING_RUNS_Z`. [measured, every truth at three noise seeds, production element limit]
+
+| truth | runs z | fires at -1.5 | shape fires |
+|---|---|---|---|
+| `R1-Ws1` | -2.07, -0.77, -1.03 | 1/3 | **24/24** |
+| `R1-Wo1` | -0.77, -2.07, -1.29 | 1/3 | **24/24** |
+| `R1-G1` | -0.77, **+0.77**, -0.26 | **0/3** | **24/24** |
+| `R1-p(R2,C1)-Ws1` | -2.58, -2.07, -2.07 | **3/3** | 17/24 |
+| `R1-p(R2,CPE1)-Wo1` | -5.42, -4.39, -3.87 | **3/3** | **0/24** |
+
+**The residual works on the composite truths, 6 of 6, and fails on the single-element ones, 2 of
+9 -- and the shape reading is the exact mirror image.** `R1-G1` is the sharpest case: its three
+residuals sit *inside* the diffusion-free distribution, so no residual threshold whatever could
+separate it. That is not two noisy instruments averaging out; it is two instruments looking at
+different things. The shape reading sees an unobstructed diffusion branch; the residual reading
+sees the misfit a diffusion branch causes *when something else obscures it*. Exactly what hides
+one is what reveals the other, which is why the union covers a set neither does.
+
+The single-element cases fail because given five elements the default pool builds an
+eight-parameter CPE stack (`p(p(R1-CPE1,CPE2)-C1,R2)`) reaching 1.385-1.577% against a 1.4%
+floor: what separates the models there is parsimony, three parameters against eight, and the
+runs test does not see parsimony. Note also that `R1-Wo1` read -4.39 at `exhaustive_limit=4` and
+-0.77 at 5 -- these numbers are **not** comparable across limits.
+
+### The trap beside the residual reading
+
+**A systematic residual has two causes and the runs test cannot tell them apart** -- the pool is
+too narrow, or the element limit is too low. That is a conflict rather than a nuisance: widening
+the pool *costs* an element level (below), so answering a size-starved search by widening its
+vocabulary makes the real problem worse. [measured] At `exhaustive_limit=4` the diffusion-free
+`R1-p(R2,C1)-p(R3,C2)` fires at 24.191% -- correctly underfitted, wrongly attributed. At the
+production limit of 5 it is at -0.26 and the ambiguity is gone. The three spectra that must not
+fire sit at -0.26, -0.26 and +0.00, so `RUNS_Z_LIMIT = -3.0` is not wrong about them; it is the
+Kramers-Kronig validator's constant, chosen where a false positive tells a user their
+*measurement* is bad, and it sits on the wrong side of the ones that must fire. Hence a separate
+constant, at -1.5.
+
+**Both bars are set on the cheap side on purpose, and the implementation is what makes that
+safe**: the widening *keeps* the base pool's candidates and merges them, so a false positive
+costs a second search and changes no reported number, while `base_complete_up_to` still records
+that every topology up to five elements from `R,C,L,CPE` was evaluated. A false negative returns
+an eight-parameter stand-in for a three-parameter Warburg that no statistic in the report flags.
+[measured] The empirical false-positive rate at -1.5 is **0 of 15** -- five truths the pool
+covers exactly, three seeds each: `R1-W1` +0.00/+0.00/+0.52, `R1-p(R2,C1)` -0.26/-0.26/+0.52,
+`R1-p(R2,C1)-p(R3,C2)` -0.26/+0.26/+1.03, `C1-R1-L1` **-1.29**/-0.77/+0.26, `R1-p(R2,CPE1)` at
+`n = 0.80` -0.77/+1.29/+0.52. Closest approach 0.21; the nearest value that must fire is -2.07,
+0.57 the other way, so the bar leans towards the cheap error by design.
+
+**Do not raise the bar towards -3.0 on the theoretical rate.** The runs z is standard normal
+when the signs are random, so `1 - (1 - Phi(t))^2` predicts 12.9% spurious widenings at -1.5
+against 4.5% at -2.0 and 0.27% at -3.0 -- and the measurement beats that by an order of
+magnitude, because eight of the fifteen values above are *positive*: fitting absorbs structure
+and pushes the signs towards alternating, so a well-fitted spectrum is not a null draw. What
+-1.5 buys over -3.0 is exactly one case and it is the weakest one: `R1-p(R2,C1)-Ws1` is 3/3
+below -1.5, 0/3 below -3.0, and is the only truth the shape reading fails to cover completely
+(17/24). At -3.0 it falls through both instruments on the 7/24 the shape misses.
+
+### The report carries both readings, and derives the verdict
+
+`PoolChoice` stores `diffusion_decades` and `residual_runs_z` and computes `triggered` from
+them. That is not tidiness: an earlier version stored the verdict as its own field and a test
+promptly built a `"yes"` whose two readings both said no, so the sentence and the flag described
+different runs. `"unasked"` wins over a firing shape reading, because it is the genetic search,
+which never completes a pool -- half the evidence is missing whatever the other half says, and
+the sentence reports the shape reading separately.
+
+### Why it cannot simply add all four codes
+
+[measured] Topologies up to five elements, before the feasibility screen: pool of 4 gives 2,976,
+5 gives 11,550, 6 gives 31,712, 8 gives 143,156. After the screen at `max_candidates = 20000` on
+an `R1-Ws1` spectrum: `R,C,L,CPE` covers 5, `+Wo` covers 5, `+Ws,G` covers **4**, all four covers
+4. One added code is affordable; two are not. And `Ws` and `G` are **not** substitutes -- swapping
+them costs 3.3x to 3.6x in relative error (`R1-Ws1` fits at 1.333%, `R1-G1` at 4.334% on the same
+data) -- so when the band admits both, both go in and the fifth level goes.
+
+Which codes is decided by `EndpointBehaviour.low_band`, the same interval the feasibility screen
+already trusts to *drop* topologies: `Ws`, `Wo` and `G` differ only in their DC limit (0, -1, 0).
+[measured] The true code is in the admitted set in 138 of 144 trials; the six misses are all
+`R1-p(R2,CPE1)-Wo1` on grids whose lowest frequency sits above the blocking region.
+
+### Two smaller things
+
+**`final_restarts=5` is not always enough once diffusion is in the pool.** [measured]
+`R1-p(R2,C1)-G1` at 1% noise, fitted with its own generating topology, returns 15.055% relative
+error at `restarts=5, seed=1` and 1.313% at `restarts=20` for both seeds tried -- and at 5
+restarts the *wrong* topology `R1-p(R2,C1)-Ws1` scored better (2.599%) than the right one. Five
+is `discover`'s default.
+
+**mypy does not check `tests/`** (`packages = ["autocircuit"]` in `pyproject.toml`). Changing
+`choose_pool`'s `triggered` from `bool` to a three-state literal left the tests passing `True`
+and `False`, which silently took the *non*-triggered branch -- so gates C1 and C3 were exercising
+nothing on the path they exist for, and the suite was green. Caught by reading, not by a tool.
+
+### What is not done
+
+The browser is unwired: `web/bridge.py` and `web/job.py` still take a concrete pool and default
+to `DEFAULT_POOL`, so the browser reproduces the exact violation this section fixes. Wiring it
+means the two-stage flow inside `DiscoveryJob`, which is resumable and cancellable, so it is not
+a one-line change.
+
+`R1-p(R2,C1)-Ws1` is the weakest case in the table and neither instrument is comfortable on it:
+the shape covers it 17/24 and the residual reads -2.58 at one seed, unmeasured across seeds. If
+this feature ever needs a third instrument, that is the case to build it against.
+
+The widening is not disabled under a skeleton and should work, since `_exhaustive` takes both;
+nothing tests it. And `CC`, `HN`, `SKINF` and `SKINW` are outside `WIDENING_CANDIDATES` because
+nothing has measured whether the default pool already expresses them -- the same unmeasured
+guess this section removes, one level up, named rather than left implicit.

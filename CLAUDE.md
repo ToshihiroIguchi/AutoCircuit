@@ -113,10 +113,12 @@ by convention. Two people with the same spectrum must get the same circuit and t
 whatever they came for; the moment an objective narrows the pool, reorders the Pareto front or
 changes what is recommended, the analyst-independence that is this project's whole differentiator
 against ZView is gone. Nothing upstream needs to differ, and that was checked rather than
-assumed: the pool is to be derived from the spectrum's own shape (see the consequence above —
-and note that the current default pool `("R","C","L","CPE")` does *not* yet do this and silently
-excludes the diffusion elements, which is an open violation of that rule rather than a
-counter-example to it), every element exports to SPICE because `core/spice.py` synthesises
+assumed: the pool is derived from the data rather than fixed (see the consequence above, and
+`docs/POOL_FROM_SPECTRUM_PLAN.md` — the CLI default is now `--pool auto`, which searches
+`("R","C","L","CPE")` and widens it only when *that pool's own completed fit* leaves a
+systematic residual, because the obvious shape detector was built and measured not to separate
+the composite spectra that matter; the browser is not yet wired), every element exports to
+SPICE because `core/spice.py` synthesises
 ladders from the impedance function rather than per element, and
 parsimony-with-every-parameter-resolved is the right recommendation rule for both.
 
@@ -301,6 +303,25 @@ static-site Web UI running the same core via WASM (Pyodide).
    which is what makes it safe to add to the check that protects every other result here.
    §5 says what is still not fixed and does not pretend otherwise: this test cannot validate a
    resonator, and a spectrum of pure noise still passes.
+
+12. `docs/POOL_FROM_SPECTRUM_PLAN.md` — the default element pool, which used to be a decision
+   about the part rather than about the data. **Implemented in the core and the CLI (`--pool
+   auto`); gates C1–C5 measured; the browser is not wired.** Two of its sections are the ones to
+   read. §3 is where the obvious detector — find a 45-degree branch, add the diffusion elements —
+   was built and *rejected by its own measurement*: it separates a pure diffusion spectrum from a
+   pure relaxation one completely and lands `R1-p(R2,CPE1)-Wo1` at 0.20–0.60 decades against a
+   no-diffusion range of 0.00–0.50, so on the composite spectra that are the realistic case there
+   is no threshold at all. §5 is the instrument that replaced it, and the trap it walked into
+   first: a systematic residual means *either* the vocabulary is too small *or* the element limit
+   is, the runs test cannot tell them apart, and the two remedies pull against each other because
+   widening the pool costs a completeness level. At the production limit of five the ambiguity
+   resolves — but so does most of the signal, because given five elements the default pool builds
+   an eight-parameter CPE stack that reaches the noise floor in place of a three-parameter
+   Warburg. **`W` is the one code with a measured reason never to add**: a CPE at `n = 0.5` *is* a
+   semi-infinite Warburg, matching it to 1.3344% against 1.3344%. And §1's other half is why the
+   whole exercise is not cosmetic: `Ws`, `Wo` and `G` are transmission lines that no finite tree
+   of R, C, L and CPE reproduces, and the default pool's best answer for them is 4x to 17x the
+   noise floor.
 
 Update these when decisions change.
 

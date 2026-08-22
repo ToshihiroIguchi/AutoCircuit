@@ -19,13 +19,14 @@ import numpy as np
 
 from autocircuit import __version__
 from autocircuit.core.circuit import Circuit
+from autocircuit.core.descriptors import WIDENING_CANDIDATES
 from autocircuit.core.discover import (
     discover,
     excluded_equivalents,
     exhaustive_limit_for,
 )
 from autocircuit.core.drt import DRTResult, drt
-from autocircuit.core.elements import POOLS, REGISTRY
+from autocircuit.core.elements import DEFAULT_POOL, POOLS, REGISTRY
 from autocircuit.core.fit import FitResult, fit, report_dict
 from autocircuit.core.interpret import Interpretation, interpret
 from autocircuit.core.simulate import log_frequencies, simulate
@@ -253,10 +254,17 @@ def cmd_discover(args: argparse.Namespace) -> int:
     print()
     _preflight(spectrum, args.no_validate)
 
-    pool = POOLS[args.pool] if args.pool in POOLS else tuple(args.pool.split(","))
-    unknown = [code for code in pool if code not in REGISTRY]
-    if unknown:
-        raise SystemExit(f"error: unknown element codes in pool: {', '.join(unknown)}")
+    # ``auto`` is None all the way down to ``discover``, which is what makes "the spectrum
+    # chose the pool" a fact about the call rather than a convention: nothing here can name a
+    # pool on the user's behalf without the report saying a pool was named.
+    pool: tuple[str, ...] | None
+    if args.pool == "auto":
+        pool = None
+    else:
+        pool = POOLS[args.pool] if args.pool in POOLS else tuple(args.pool.split(","))
+        unknown = [code for code in pool if code not in REGISTRY]
+        if unknown:
+            raise SystemExit(f"error: unknown element codes in pool: {', '.join(unknown)}")
 
     # Argument checks belong before the search, not after it: a run that enumerates and fits
     # for minutes and then exits on a flag combination is a run the user did not need to wait
@@ -303,7 +311,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
             result.recommended,
             args.skeleton,
             spectrum,
-            pool=pool,
+            pool=result.pool,
             weighting=args.weighting,
             seed=args.seed,
             workers=args.workers,
@@ -442,6 +450,10 @@ def cmd_elements(args: argparse.Namespace) -> int:
         print(f"{code:<8}{params:<40}{form:<12}{element.name}")
     print()
     print("Pools:")
+    print(
+        f"  {'auto':<16}{', '.join(DEFAULT_POOL)}, widened with "
+        f"{', '.join(WIDENING_CANDIDATES)} when the fit says an element is missing"
+    )
     for name, pool in POOLS.items():
         print(f"  {name:<16}{', '.join(pool)}")
     print()
@@ -538,8 +550,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_data_arguments(p_disc)
     p_disc.add_argument(
-        "--pool", default="default",
-        help="element pool: 'default', 'component', 'electrochemical', or a comma list",
+        "--pool", default="auto",
+        help="element pool: 'auto' (default: the spectrum chooses; the report says what was "
+             "left out and why), 'default', 'component', 'electrochemical', or a comma list",
     )
     p_disc.add_argument(
         "--mode", choices=["auto", "exhaustive", "evolve"], default="auto",

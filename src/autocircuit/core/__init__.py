@@ -30,6 +30,7 @@ if TYPE_CHECKING:  # resolved statically; nothing is imported at run time
         series,
         simplify,
     )
+    from .descriptors import PoolChoice, choose_pool, diffusion_branch_decades
     from .dsl import CircuitSyntaxError, format_circuit, parse_circuit
     from .elements import REGISTRY, BoundsContext, Element, ParamSpec
     from .interpret import Interpretation, Quantity, interpret, interpret_values
@@ -47,6 +48,9 @@ _LAZY: dict[str, str] = {
     "parallel": "circuit",
     "series": "circuit",
     "simplify": "circuit",
+    "PoolChoice": "descriptors",
+    "choose_pool": "descriptors",
+    "diffusion_branch_decades": "descriptors",
     "CircuitSyntaxError": "dsl",
     "format_circuit": "dsl",
     "parse_circuit": "dsl",
@@ -72,11 +76,14 @@ __all__ = [
     "Interpretation",
     "Parallel",
     "ParamSpec",
+    "PoolChoice",
     "Quantity",
     "Series",
     "Spectrum",
     "canonical_form",
+    "choose_pool",
     "count_elements",
+    "diffusion_branch_decades",
     "format_circuit",
     "interpret",
     "interpret_values",
