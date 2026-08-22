@@ -9,8 +9,9 @@
     "dev": "npm run assets && vite",
     "build": "npm run assets && npm run check && vite build",
     "preview": "vite preview",
-    "check": "tsc --noEmit && npm run schematic",
+    "check": "tsc --noEmit && npm run schematic && npm run samples-check",
     "schematic": "node scripts/schematic-check.mjs",
+    "samples-check": "node scripts/samples-check.mjs",
     "smoke": "npm run assets && node scripts/smoke.mjs"
   },
   "dependencies": {

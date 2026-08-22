@@ -5,7 +5,8 @@ it. There is no server and there will not be one — see `docs/WEB_UI_PLAN.md` �
 
 Live at **<https://toshihiroiguchi.github.io/AutoCircuit/>**, published by
 `.github/workflows/pages.yml` on every push to `main`. That workflow gates on `npm run check`
-— the types and the schematic's geometry — and on `npm run smoke`, so a push that breaks the
+— the types, the schematic's geometry, and that every shipped example still matches the benchmark
+case it claims to come from — and on `npm run smoke`, so a push that breaks the
 Python path fails instead of replacing the site.
 
 ```powershell
@@ -13,8 +14,9 @@ cd web
 npm install
 npm run dev          # http://localhost:5173
 npm run build        # -> dist/, deployable as static files
-npm run check        # tsc --noEmit, then the schematic geometry
+npm run check        # tsc --noEmit, the schematic geometry, then the example manifest
 npm run schematic    # the canvas's geometry alone -- docs/SCHEMATIC_PLAN.md §5
+npm run samples-check # every example still matches its benchmark case (needs python)
 npm run smoke        # the Python path under Pyodide, headless, no browser
 ```
 

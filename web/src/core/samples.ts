@@ -13,6 +13,14 @@
 /** One entry of `public/samples/index.json`, as `build-assets.mjs` writes it. */
 export interface Sample {
   id: string;
+  /**
+   * Which benchmark entry this is a copy of, as `<list>:<label>`.
+   *
+   * Not shown. It exists so `scripts/samples-check.mjs` can compare every field against the
+   * Python list and `npm run check` can refuse to publish an example that has drifted from the
+   * case it names.
+   */
+  source: string;
   /** Which heading the row appears under: "Shapes" or "Devices". A UI grouping, not data. */
   group: string;
   label: string;

@@ -17,10 +17,17 @@
 // a user of that kind of sample would already know, and each one below has been checked with
 // `contains_skeleton` to be a skeleton the circuit really contains.
 //
+// `source` is `<list>:<label>` -- which benchmark entry this row is a copy of -- and it is what
+// makes the paragraph above true rather than merely intended. `scripts/samples-check.mjs` walks the
+// Python lists and compares every field against it, and `npm run check` runs it, so an example that
+// has drifted from the case it names cannot be published. Before that script the values here were
+// retyped beside a Python list nothing compared them against.
+//
 // `group` orders and heads the list in the UI. It is not a property of the data.
 const SAMPLES = [
   {
     id: "capacitor",
+    source: "discovery:capacitor (C-R-L + skin effect)",
     group: "Shapes",
     label: "Capacitor (C-R-L + skin effect)",
     circuit: "C1-R1-L1-SKINF1",
@@ -37,6 +44,7 @@ const SAMPLES = [
   },
   {
     id: "maxwell-wagner",
+    source: "discovery:Maxwell-Wagner (two blocks)",
     group: "Shapes",
     label: "Maxwell-Wagner (two blocks)",
     circuit: "p(R1,C1)-p(R2,C2)",
@@ -54,6 +62,7 @@ const SAMPLES = [
   },
   {
     id: "randles",
+    source: "discovery:Randles (with Warburg)",
     group: "Shapes",
     label: "Randles (with Warburg)",
     circuit: "R1-p(C1,R2-W1)",
@@ -70,6 +79,7 @@ const SAMPLES = [
   },
   {
     id: "voigt-ladder",
+    source: "fitting:Voigt ladder, 4 blocks",
     group: "Shapes",
     label: "Voigt ladder (four RC blocks)",
     circuit: "p(R1,C1)-p(R2,C2)-p(R3,C3)-p(R4,C4)",
@@ -93,6 +103,7 @@ const SAMPLES = [
   },
   {
     id: "piezo-resonator",
+    source: "fitting:piezo resonator (BVD)",
     group: "Shapes",
     label: "Piezoelectric resonator (BVD)",
     circuit: "p(C1,R1-L1-C2)",
@@ -114,6 +125,7 @@ const SAMPLES = [
   },
   {
     id: "li-ion-cell",
+    source: "fitting:lithium-ion cell",
     group: "Devices",
     label: "Lithium-ion cell",
     circuit: "L1-R1-p(R2,CPE1)-p(CPE2,R3-Wo1)",
@@ -146,6 +158,7 @@ const SAMPLES = [
   },
   {
     id: "polymer-capacitor",
+    source: "fitting:polymer capacitor",
     group: "Devices",
     label: "Polymer capacitor",
     circuit: "L1-R1-CPE1",
@@ -165,6 +178,7 @@ const SAMPLES = [
   },
   {
     id: "ferrite-bead",
+    source: "fitting:ferrite bead",
     group: "Devices",
     label: "Ferrite bead",
     circuit: "R1-p(R2,L1,C1)",
@@ -183,6 +197,7 @@ const SAMPLES = [
   },
   {
     id: "coated-steel",
+    source: "fitting:coated steel panel",
     group: "Devices",
     label: "Coated steel panel",
     circuit: "R1-p(CPE1,R2-p(CPE2,R3))",
@@ -210,6 +225,7 @@ const SAMPLES = [
   },
   {
     id: "sofc-cathode",
+    source: "fitting:SOFC cathode (Gerischer)",
     group: "Devices",
     label: "SOFC cathode (Gerischer)",
     circuit: "L1-R1-p(R2,CPE1)-G1",
@@ -237,6 +253,7 @@ const SAMPLES = [
   },
   {
     id: "tissue-cole",
+    source: "fitting:tissue (Cole)",
     group: "Devices",
     label: "Tissue (Cole)",
     circuit: "R1-CC1",
@@ -255,6 +272,7 @@ const SAMPLES = [
   },
   {
     id: "polymer-dielectric",
+    source: "fitting:polymer dielectric (HN)",
     group: "Devices",
     label: "Polymer dielectric (Havriliak-Negami)",
     circuit: "p(C1,HN1)",
@@ -274,6 +292,7 @@ const SAMPLES = [
   },
   {
     id: "thin-layer-cell",
+    source: "fitting:thin-layer cell (Ws)",
     group: "Devices",
     label: "Thin-layer cell (finite-length Warburg)",
     circuit: "R1-p(CPE1,R2-Ws1)",
