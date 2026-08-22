@@ -239,8 +239,13 @@ Report (download the results).
 The point of running the real package rather than a re-implementation is that the two cannot
 drift: the browser's Lin-KK verdicts match the CLI's, its fits match to every reported digit, its
 search returns the same Pareto front row for row, and every file it downloads is written by the
-same Python function `autocircuit fit --json`, `--spice` and `discover --json` use. Example
-spectra are built into the site, so there is something to try without a measurement of your own.
+same Python function `autocircuit fit --json`, `--spice` and `discover --json` use. Thirteen
+example spectra are built into the site, so there is something to try without a measurement of your
+own: five *shapes* — a relaxation, a resonance, a four-block ladder — and eight *devices*, which
+are the circuits actually used to fit a lithium-ion cell, a polymer capacitor, a ferrite bead, a
+coated steel panel, an SOFC cathode, tissue, a dielectric and a thin-layer cell. Every one of them
+is generated at build time by this project's own `simulate` command from a case in
+`benchmarks/fitting.py`, and the site prints the command beside it.
 
 One honest number: a first visit has to fetch and start a Python runtime, and that is 41 MB — but
 not all of it before the page works. The load is two stages: numpy and the data path first
@@ -251,7 +256,8 @@ the moment the first stage landed — the click waits, you do not. That second r
 own spread; the same 19 MB took 45 s on one visit and 16 s on another. With the runtime cached both
 stages are seconds. After that a fit takes a second or two, as it does on the command line. See
 `web/README.md` to build or serve it yourself, and `docs/STARTUP_AND_EDITING_PLAN.md` for how the
-staging was measured.
+staging was measured — and section 8 of it for why the page now says so in the middle of the
+screen instead of in an eleven-point caption.
 
 ## Development
 

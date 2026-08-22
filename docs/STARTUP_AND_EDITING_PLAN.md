@@ -444,3 +444,66 @@ about a request that was perfectly valid. The list now travels in the `version` 
 core that defines it, which is the rule this project already applies to the reader list, the
 element pools and the criteria menu. It is empty until `version` has answered, so the default is
 that everything waits, which is the safe direction.
+
+## 8. Saying that the page is not ready — 2026-08-22
+
+§3 made the page *usable sooner*. It did not make the page *look* unfinished while it was, and
+those are different problems with the same cause. This section is the second one.
+
+### 8.1 What it looked like
+
+[measured] From GitHub Pages in a fresh browser context (empty HTTP cache), on the build live
+before this change:
+
+| | first visit | reload, warm cache |
+|---|---|---|
+| usable for data | **22.31 s** (boot 19.39, numpy 1.38, unpack 0.04, import 0.09) | 0.78 s |
+| usable for fitting | **28.49 s** (scipy 5.40, unpack 0.08, import 0.69) | 2.30 s |
+
+For those 28 seconds the page was **fully painted**: a header, four tabs, a drop zone, and an
+Example panel with five blue Load buttons. The only thing saying otherwise was an eleven-point grey
+caption in the header, wedged between the title and the theme toggle, with a ten-pixel spinner.
+
+That is the complaint, and it is a fair one. A page that looks finished and is not is worse than a
+page that looks unfinished, because the visitor's next action is a click that appears to do
+nothing. The staging in §3 slightly *sharpened* this: there are now two moments of readiness, so
+three of the four tabs are inert for six seconds after the first one lands, and nothing said which.
+
+### 8.2 What changed, and what deliberately did not
+
+**Moved, not added.** The status line left the header and now sits in the content column, directly
+under the tabs, at the size of something meant to be read. It has three states — loud for the first
+stage, quiet for the second, and a green **Ready** for four seconds when the second finishes.
+
+Five smaller things, each answering "how would somebody know?":
+
+* **A pre-mount splash in `index.html`.** Between the first paint and React's first render, `#root`
+  was empty; the honest first frame now says the page is loading. `createRoot().render()` removes
+  it. It is styled inline because the stylesheet is in the bundle it is waiting for.
+* **The tab strip marks what is not live yet** — a small spinning dot on Data until the reader is
+  up and on Discover, Fit and Report until the fitter is. They stay *clickable*: going there and
+  reading why is reasonable, and `RuntimeNotice` already explains it.
+* **The document title carries the stage** (`AutoCircuit — loading…`, then `— loading the fitter…`),
+  because half a minute is long enough that this is often not the tab being looked at.
+* **The drop zone and the Example rows say they are queueing, before the click rather than after
+  it.** §3.4 made both live from the first paint, which is right and stays; what was missing is
+  that a control which silently defers its work is indistinguishable from one that ignored you. The
+  Example buttons read **Queue** rather than **Load** until the reader exists.
+* **The expected duration is printed**, because "is it stuck?" is the actual question and the table
+  above answers it. About 40 MB and 20–30 s on a first visit; a couple of seconds afterwards.
+
+**No progress bar, and that is the rule this section is most careful about.** The stages advance
+when a stage really finishes; nothing here moves on a timer. A bar that filled itself would be a
+claim about progress this page cannot make, and — the part that matters — it would look exactly the
+same if the worker had died. `loadPackage` reports no byte counts, so a determinate bar would have
+to be animated, which is to say invented. The elapsed clock is the honest version of the same
+reassurance: it is a fact, and a visitor can compare it against the printed expectation themselves.
+
+### 8.3 What is still not fixed
+
+The first stage is 19.4 s of *boot* — fetching and instantiating the wasm and the stdlib — before
+numpy is even asked for. Nothing in this section makes that shorter; it makes it legible. The two
+ideas that would make it shorter were both built and both measured down:
+`METRICS_AND_UX_PLAN.md` §1.5 (preload, twice) and §3 of this document (staging, which moved 24 s
+out of the way and is the reason the first stage is 22 s rather than 46 s). What is left is the
+runtime itself, and the only lever on it is shipping less runtime.

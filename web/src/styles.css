@@ -121,16 +121,46 @@ body {
 
 /* ---- status bar ---- */
 
+/* Not in the header any more: it sits in the content column, above the screen, because for the
+   20-30 s a first visit takes it is the only true thing on a page that otherwise looks finished.
+   See the header comment of components/StatusBar.tsx for the measurement that moved it. */
 .status-bar {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-secondary);
   display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px;
+  border: 1px solid var(--gridline);
+  border-left: 3px solid var(--series-1);
+  border-radius: 4px;
+  background: var(--surface-1);
+}
+
+.status-bar__headline {
+  display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
+  margin: 0;
+}
+
+.status-bar__headline strong {
+  color: var(--text-primary);
+}
+
+/* The first stage: nothing on the page works yet, and this is the size of something meant to be
+   read rather than noticed. */
+.status-bar--first .status-bar__headline {
+  font-size: 14px;
 }
 
 .status-bar--error {
+  color: var(--status-critical);
+  border-left-color: var(--status-critical);
+}
+
+.status-bar--error .status-bar__headline strong {
   color: var(--status-critical);
 }
 
@@ -138,15 +168,26 @@ body {
    about a tab that is not yet. */
 .status-bar--second {
   color: var(--text-muted);
+  border-left-color: var(--text-muted);
 }
 
 .status-bar--second .status-bar__spinner {
   border-top-color: var(--text-muted);
 }
 
+/* The finish, which is shown for a few seconds and then removes itself. */
+.status-bar--done {
+  border-left-color: var(--status-good);
+}
+
+.status-bar--done .status-bar__headline strong {
+  color: var(--status-good);
+}
+
 .status-bar__spinner {
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
+  flex: none;
   border-radius: 50%;
   border: 2px solid var(--gridline);
   border-top-color: var(--series-1);
@@ -165,6 +206,8 @@ body {
   list-style: none;
   margin: 0;
   padding: 0;
+  flex-wrap: wrap;
+  font-size: 11px;
 }
 
 .status-bar__step {
@@ -186,11 +229,25 @@ body {
   color: var(--gridline);
 }
 
-.status-bar__elapsed {
+.status-bar__detail {
+  margin: 0;
   font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* The expected duration. It is a measurement rather than an animation, which is the whole of this
+   component's argument with a progress bar. */
+.status-bar__note {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  max-width: 90ch;
 }
 
 .status-bar__elapsed {
+  margin-left: auto;
+  font-family: var(--font-mono);
   color: var(--text-muted);
 }
 
@@ -269,6 +326,15 @@ body {
 }
 
 /* Answers "what can I drop here?" at the place the question is asked. */
+/* Said before the click rather than after it: the zone is deliberately live from the first paint
+   (see components/DropZone.tsx), and a control that silently queues its work looks exactly like a
+   control that ignored you. */
+.drop-zone__waiting {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 .drop-zone__formats {
   margin: 0;
   color: var(--text-muted);
@@ -325,6 +391,15 @@ body {
   margin: 0 0 8px;
   font-size: 12px;
   color: var(--status-critical);
+}
+
+.sample-panel__group {
+  margin: 12px 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
 }
 
 .sample-panel__list {
@@ -836,6 +911,28 @@ body {
   border-bottom: 1px solid var(--surface-1);
   color: var(--text-primary);
   font-weight: 600;
+}
+
+/* A tab whose screen cannot do anything yet.
+   Not disabled: going there and reading why is a reasonable thing to want, and the screens say so
+   themselves (components/RuntimeNotice.tsx). What was missing is that the four tabs looked
+   identical while three of them were inert for half a minute, so the ones that are still loading
+   now say so in the tab strip rather than only after being clicked. */
+.app-tab--pending {
+  color: var(--text-muted);
+}
+
+.app-tab--pending::after {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 6px;
+  vertical-align: baseline;
+  border-radius: 50%;
+  border: 1.5px solid var(--gridline);
+  border-top-color: var(--text-muted);
+  animation: spin 0.8s linear infinite;
 }
 
 /* ---- fit screen ---- */

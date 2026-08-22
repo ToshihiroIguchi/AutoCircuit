@@ -13,6 +13,8 @@
 /** One entry of `public/samples/index.json`, as `build-assets.mjs` writes it. */
 export interface Sample {
   id: string;
+  /** Which heading the row appears under: "Shapes" or "Devices". A UI grouping, not data. */
+  group: string;
   label: string;
   /** The circuit the data was generated from. Shown, never hidden: see the note above. */
   circuit: string;

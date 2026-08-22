@@ -8,6 +8,14 @@ import type { ChangeEvent } from "react";
 export interface DropZoneProps {
   dragActive: boolean;
   /**
+   * Whether the reader exists yet.
+   *
+   * Used only to say so. The zone stays live either way (see below); what this adds is that the
+   * queueing is stated *before* the click rather than in a pending row after it, because a control
+   * that silently defers its work is indistinguishable from one that ignored you.
+   */
+  dataReady: boolean;
+  /**
    * Which readers the loaded core has, from its own registry.
    *
    * "What files can I drop here?" is a question asked *at* the drop zone, and it used to be
@@ -27,7 +35,7 @@ export interface DropZoneProps {
  * file chosen now is held by `App` and read the moment the reader exists, and the page says so
  * while it waits -- which is both truer and shorter than making them wait to click.
  */
-export function DropZone({ dragActive, formats, onFiles }: DropZoneProps) {
+export function DropZone({ dragActive, dataReady, formats, onFiles }: DropZoneProps) {
   const inputId = useId();
 
   function handleChange(event: ChangeEvent<HTMLInputElement>): void {
@@ -42,6 +50,12 @@ export function DropZone({ dragActive, formats, onFiles }: DropZoneProps) {
   return (
     <div className={classes}>
       <p className="drop-zone__hint">Drag and drop impedance data files anywhere on this page.</p>
+      {!dataReady && (
+        <p className="drop-zone__waiting">
+          The reader is still loading — a file chosen now is queued and read as soon as it is up.
+          You do not have to click again.
+        </p>
+      )}
       {formats.length > 0 && (
         <p className="drop-zone__formats">Reads {formats.join(", ")} — the format is sniffed.</p>
       )}

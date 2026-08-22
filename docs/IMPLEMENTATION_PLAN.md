@@ -199,6 +199,19 @@ Hence the default `restarts=5, popsize=20`. A larger population is *worse* per u
 Failed restarts are not silent: a run that lands in a local minimum shows a chi² an order of
 magnitude worse, which is what the restart comparison detects.
 
+**[measured] That table is one circuit's answer, and there is now a circuit with a different
+one.** `R1-p(CPE1,R2-Ws1)` — a thin-layer cell, added to the fitting suite 2026-08-22 — lands in a
+wrong basin (18% residual against a 1.3% noise floor) on **4 of 10 seeds at `restarts=5`**, 1 of 10
+at 10, and 0 of 10 at 20. It is the first case in the suite the default budget is not enough for,
+and it is the reason the accuracy benchmark now prints the number of warnings beside the deviation.
+
+The default is deliberately **not** raised. Twenty restarts would quadruple the cost of every fit
+in the program, including the tier-2 refits the topology search runs thousands of, to rescue a
+basin one circuit in fifteen falls into; and the failure is not silent — the bad runs report
+`R1.R` and `R2.R` with standard errors larger than their own values. The right response to a
+circuit that fits like this is to pass `restarts=20` for it, which is a thing the caller can do and
+the default cannot.
+
 ### 5.3 Statistics and validation
 
 - Covariance from the polish-stage Jacobian → per-parameter σ and correlation matrix; flag

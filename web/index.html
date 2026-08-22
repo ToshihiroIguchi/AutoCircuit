@@ -38,7 +38,39 @@
     </script>
   </head>
   <body>
-    <div id="root"></div>
+    <!-- What is on screen between the first paint and React's first render.
+
+         Not a spinner for its own sake: the bundle is fetched, parsed and mounted before any of
+         the application's own loading states exist, and until then #root is empty, so a first
+         visit met a blank white page and then a page that looked finished but was not
+         (see src/components/StatusBar.tsx for the measurement). This is the honest first frame;
+         `createRoot(...).render()` removes it. Styled inline because the stylesheet is in the
+         bundle this is waiting for. -->
+    <div id="root">
+      <div class="boot-splash">
+        <strong>AutoCircuit</strong>
+        <span>Loading — the page is not ready yet.</span>
+      </div>
+    </div>
+    <style>
+      .boot-splash {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin: 24px;
+        padding: 12px 14px;
+        border-radius: 4px;
+        font-family: system-ui, sans-serif;
+        font-size: 13px;
+        border: 1px solid rgb(0 0 0 / 12%);
+        background: rgb(0 0 0 / 3%);
+      }
+      :root[data-theme="dark"] .boot-splash {
+        color: #d7dae0;
+        border-color: rgb(255 255 255 / 14%);
+        background: rgb(255 255 255 / 5%);
+      }
+    </style>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

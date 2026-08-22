@@ -53,11 +53,12 @@ export function DataScreen(props: DataScreenProps) {
     <>
       <DropZone
         dragActive={props.dragActive}
+        dataReady={props.dataReady}
         formats={props.formats}
         onFiles={props.onFiles}
       />
 
-      <SamplePanel onFile={(file) => props.onFiles([file])} />
+      <SamplePanel dataReady={props.dataReady} onFile={(file) => props.onFiles([file])} />
 
       {props.pending.length > 0 && (
         <ul className="pending-files" role="status" aria-live="polite">

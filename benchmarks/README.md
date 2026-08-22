@@ -265,45 +265,110 @@ to **rank 1 of 657 at every budget**, margin 0.14, with 4×20 finishing in 0.9�
 first place, and measured alone it says the cut is free. It is free only there. Same shape as
 the `_shortlist` bug: invisible on the easy case, expensive on the real space.
 
-### `fitting.py accuracy` — re-measured 2026-08-22
+### `fitting.py accuracy` — suite extended 2026-08-22
 
-All **seven** circuits recover their true parameters from clean data with no initial guess
-(worst error < 0.01%), and stay within 9% at 1% noise. Times 0.6–4.9 s clean, 0.2–2.2 s noisy.
+Fifteen circuits, in two halves. The first seven are **shapes** — a relaxation, a resonance, a
+ladder, a skin effect — and were chosen for a feature of the impedance. The eight below them are
+**devices**: the equivalent circuits actually used to fit a named real part. All fifteen recover
+their true parameters from clean data with no initial guess, with one exception that is the point
+of the last row.
 
-| case | n | worst error, 1% noise |
-|------|--:|----------------------:|
-| capacitor C-ESR-ESL | 3 | 1.64% |
-| capacitor + skin effect | 5 | 6.33% |
-| Randles | 4 | 0.30% |
-| Maxwell-Wagner, 2 blocks | 4 | 0.47% |
-| brick layer + CPE | 6 | 8.53% |
-| **Voigt ladder, 4 blocks** | **8** | **1.26%** |
-| **piezo resonator (BVD)** | **4** | **0.16%** |
+| case | n | worst error, 1% noise | warnings |
+|------|--:|----------------------:|---------:|
+| capacitor C-ESR-ESL | 3 | 1.64% | 0 |
+| capacitor + skin effect | 5 | 6.33% | 1 |
+| Randles | 4 | 0.30% | 0 |
+| Maxwell-Wagner, 2 blocks | 4 | 0.47% | 0 |
+| brick layer + CPE | 6 | 8.53% | 0 |
+| Voigt ladder, 4 blocks | 8 | 1.26% | 0 |
+| piezo resonator (BVD) | 4 | 0.16% | 1 |
+| **lithium-ion cell** | **10** | **13.97%** | 0 |
+| **polymer capacitor** | **4** | **0.47%** | 0 |
+| **ferrite bead** | **4** | **0.50%** | 0 |
+| **coated steel panel** | **7** | **1.64%** | 0 |
+| **SOFC cathode (Gerischer)** | **7** | **29.96%** | 0 |
+| **tissue (Cole)** | **4** | **1.04%** | 0 |
+| **polymer dielectric (HN)** | **5** | **3.09%** | 0 |
+| **thin-layer cell (Ws)** | **6** | **1.28%** | 0 |
 
-The last two are new. They were added to answer two questions the first five do not: whether
-the fitter carries *eight* parameters without an initial guess, and whether it handles a
-*resonance* rather than a relaxation. Both answer yes, and neither leaves a parameter
-unresolved — 0/8 and 0/4 with standard errors below their own values, over 5 seeds.
+The runner now prints a **warnings** column beside the deviation, and it is there because of the
+last row. The two answer different questions: a large deviation with `warn=0` is a *silent* error,
+and a large deviation with `warn>0` is the program saying it does not believe its own answer.
+Reading the first column alone gets both cases wrong.
 
-Two things about them are worth more than the error column.
+#### Why these eight
 
-*The eight-parameter case is the easy kind of eight.* Its four RC time constants are ~2
-decades apart, so every block is separately resolvable and 1.26% is a statement about the
-optimizer, not about the data. The deliberately hard version — three blocks with two of them
-0.6 decades apart — is `LARGE_REFERENCES[0]` in `discovery_v2.py`, where the same measurement
-reads 24.1%. Keeping them apart keeps "can the fitter carry eight parameters" from being
-reported as "can the data separate two relaxations".
+Two gaps, both of them real rather than tidy-minded.
+
+**Four elements had no benchmark at all.** `Gerischer`, `ColeCole`, `HavriliakNegami` and
+`WarburgShort` had analytic tests, which say the formula is right, and nothing that said whether
+the *fitter* can recover their parameters from noisy data without initial values — which is this
+project's actual claim. They now do: 29.96%, 1.04%, 3.09% and 1.28%.
+
+**Two topology shapes had none either.** `coated steel panel` is the first **nested** case — a
+parallel block inside the branch of another parallel block — where every case above it is a flat
+series of blocks; `ferrite bead` is the first **three-way parallel**. Both are shapes the fitter,
+the canonical form, the SPICE writer and the schematic renderer all have to handle.
+
+#### Four measurements worth more than the error column
+
+*The lithium-ion cell is the largest case in the file, and its time constants are a decision.*
+[measured] With the SEI arc at 500 Hz and the charge-transfer arc at 20 Hz — 1.4 decades, which is
+what a room-temperature full cell really looks like — 1 seed in 3 landed in a **different basin at
+the same residual** (1.318% against 1.240%), with `CPE1.Q` out by 18740% and `CPE2.Q` by −99%.
+That is not a fitter failure: the SEI/charge-transfer split genuinely is not identifiable when the
+arcs overlap, which is why the literature resolves it on half cells or at low temperature. And the
+fitter said so — that run carried eight "varies across restarts: the fit is not unique" warnings
+and a +0.9917 correlation between the two Warburg parameters. But a parameter-recovery reference
+has to be recoverable, so the reference puts the arcs 4 decades apart, where 10/10 seeds converge
+with no uniqueness warning at all.
+
+*Its 13.97% is a unit artefact, and so is the SOFC cathode's 29.96%.* Both are `CPE.Q`, every
+time. Q is in S·s^n, so holding a CPE's impedance fixed while n moves forces
+`d(ln Q) = −dn·ln(ω)`. [measured] Regressing the ten lithium-ion seeds gives a slope of **−8.79**
+against the predicted `−ln(2π·2000) = −9.44`, correlation **−0.986**; and while Q moves by up to
+29.4%, the impedance that CPE actually produces at the arc's peak is recovered to within **6.58%**.
+Every other parameter in both cases is within 4%.
+
+*The thin-layer cell is the first case the default restart budget is not enough for.* [measured]
+`R1-p(CPE1,R2-Ws1)` lands in a wrong basin — 18% residual against a 1.3% noise floor — on **4 of 10
+seeds at `restarts=5`**, 1 of 10 at 10, and 0 of 10 at 20. When it converges, all six parameters
+come back within 2%. The table above catches it in the act on the *noise-free* row and not the
+noisy one, which is worth staring at: the failure is a property of the basin structure and the
+seed, not of the noise. See `fitting.py restarts` below for why the default is not being raised.
+
+*One candidate was dropped rather than tuned.* A wound ferrite-core inductor, `p(C1,SKINW1-L1)`,
+was measured and is deliberately absent. [measured] Its `SKINW1.tau_s` came back off by 27–142%
+over 3 seeds at 1% noise while the other three parameters were exact, and the reason is not a
+fitter weakness: a winding's skin effect is a resistance underneath its own reactance, so where the
+skin corner sits the loss is well under a percent of |Z| and 1% proportional noise erases it.
+Measuring it needs a Q meter, not an impedance sweep. A reference whose truth the data does not
+contain would measure the noise model rather than the fitter.
+
+#### The two 2026-08-22 shape additions
+
+*The eight-parameter case is the easy kind of eight.* Its four RC time constants are ~2 decades
+apart, so every block is separately resolvable and 1.26% is a statement about the optimizer, not
+about the data. The deliberately hard version — three blocks with two of them 0.6 decades apart —
+is `LARGE_REFERENCES[0]` in `discovery_v2.py`, where the same measurement reads 24.1%. Keeping them
+apart keeps "can the fitter carry eight parameters" from being reported as "can the data separate
+two relaxations".
 
 *The resonator's sweep is part of the reference.* A resonance of quality factor Q is about 1/Q
-wide, so it needs ~`8·ln(10)·Q` points per decade — 1500 at Q = 100 — and a window of 0.2
-decades rather than the several decades every other case uses, because a log sweep cannot both
-span a wide band and resolve a Q = 100 peak at any sane point count. **The first version of
-that note claimed the case would be unmeasurable at the suite's 10 points per decade, and the
-measurement disagreed.** It is measurable: the three points a 10-per-decade sweep leaves in
-this window recover all four parameters exactly from noise-free data and leave none unresolved
-at 1% noise. What the sweep buys is precision — worst deviation over 10 seeds 0.29% at 1500
-points per decade against 9.9% at 10. `tests/test_fit.py::test_the_resonator_earns_its_sweep`
-pins that ratio, so the claim cannot drift back to the stronger one.
+wide, so it needs ~`8·ln(10)·Q` points per decade — 1500 at Q = 100 — and a window of 0.2 decades
+rather than the several decades every other case uses, because a log sweep cannot both span a wide
+band and resolve a Q = 100 peak at any sane point count. **The first version of that note claimed
+the case would be unmeasurable at the suite's 10 points per decade, and the measurement
+disagreed.** It is measurable: the three points a 10-per-decade sweep leaves in this window recover
+all four parameters exactly from noise-free data and leave none unresolved at 1% noise. What the
+sweep buys is precision — worst deviation over 10 seeds 0.29% at 1500 points per decade against
+9.9% at 10. `tests/test_fit.py::test_the_resonator_earns_its_sweep` pins that ratio, so the claim
+cannot drift back to the stronger one.
+
+The ferrite bead is the second resonant case in the file and needs none of that, which is the
+comparison worth having: its Q is `R·sqrt(C/L)` = **1.28** against the piezo's 100. A bead works
+*because* the resonance is over-damped — the broad impedance hump is the loss it is sold for — so
+the two resonant references sit at opposite ends of the only axis a resonance has.
 
 ### `fitting.py calibration` — re-measured 2026-08-22
 
@@ -324,12 +389,15 @@ and +0.45 on the motional C1, the two parameters the anti-resonance ties togethe
 standard deviations 0.73–1.06 and coverage 92–100%. Worth knowing before quoting a capacitance
 ratio to three figures; not enough to call the errors dishonest.
 
-### The two 2026-08-22 additions — what they measured beyond recovery
+### Why none of the 2026-08-22 additions is a discovery reference
 
-Neither circuit was added to `discovery_v2.py`'s `REFERENCES`: every mode in that file
-iterates that list, so appending to it invalidates each table above and costs hours to
-restore. Both are `fitting.py` cases (mode 1, topology given) and both are shipped as web
-examples. Two things turned up on the way, and they are here because they are the reason
+**Nothing added on 2026-08-22 — the Voigt ladder, the BVD resonator, or any of the eight device
+cases — went into `discovery_v2.py`'s `REFERENCES` or `LARGE_REFERENCES`, and that is a rule
+rather than an omission.** Every mode in that file iterates those lists, so appending to either one
+invalidates each table above and costs hours to restore. They are all `fitting.py` cases (mode 1,
+topology given) and all shipped as web examples.
+
+For the ladder and the resonator there is a second reason, and it is the interesting one. Two things turned up on the way, and they are here because they are the reason
 somebody should think before promoting either one to a discovery reference.
 
 **The BVD resonator has a near-degenerate rival, and it is not an exact equivalent.** Screened
@@ -448,6 +516,17 @@ still printing this heading), at 1% noise:
 Hence the library default `restarts=5, popsize=20`. A larger population is *worse* per unit
 time — and worse outright at 40. Failures are not silent: a run that lands in a local minimum
 reports a chi² an order of magnitude worse.
+
+**That table is one circuit's answer, and since 2026-08-22 there is a circuit with a different
+one.** [measured] `thin-layer cell (Ws)`, `R1-p(CPE1,R2-Ws1)`, fails **4 of 10** seeds at
+`restarts=5`, 1 of 10 at 10, and 0 of 10 at 20. The sweep above is still run on `brick layer +
+CPE`, which is pinned by label, and it is still the right circuit to tune a *default* on; what
+changed is that the default is now known to be a default rather than a sufficiency proof.
+
+It is deliberately not raised. Twenty restarts would quadruple the cost of every fit in the
+program, including the tier-2 refits the topology search runs thousands of, to rescue a basin one
+circuit in fifteen falls into — and the bad runs report `R1.R` and `R2.R` with standard errors
+larger than their own values, so the caller can see it and pass `restarts=20` for that circuit.
 
 (The failure counts are unchanged from the first time this was measured; the times are ~3×
 lower because batched element evaluation landed afterwards. Any time estimate elsewhere in the

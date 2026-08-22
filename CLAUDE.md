@@ -131,7 +131,14 @@ static-site Web UI running the same core via WASM (Pyodide).
    screen uses it**, so the page comes up on numpy and fetches the fitter behind it — which is
    *not* the prefetch `METRICS_AND_UX_PLAN` §1.5 rejected, because nothing is fetched earlier than
    before, only later. §6 is where splitting the bytecode overlay the obvious way produced a
-   22-byte file that broke nothing and would have cost every visitor a recompile.
+   22-byte file that broke nothing and would have cost every visitor a recompile. **§8 is the
+   second half of §3 and was added after the site had been live for a while**: making the page
+   usable sooner did not make it *look* unfinished while it was, and [measured] a first visit from
+   GitHub Pages is 22.3 s to read data and 28.5 s to fit, spent staring at a fully painted page
+   whose only disclaimer was an eleven-point caption in the header. The load state now sits in the
+   content column, the tab strip marks what is not live, and the finish is announced instead of
+   merely ceasing — and there is still no progress bar, because `loadPackage` reports no bytes and
+   an animated bar would look identical to a dead worker.
 9. `docs/SCHEMATIC_PLAN.md` — how the Fit screen draws the circuit. **Implemented; gates S1–S4
    measured.** The picture is computed rather than laid out: `web/src/core/schematic.ts` turns the
    parsed tree into coordinates, which is what makes "every wire is axis-aligned", "no wire ends

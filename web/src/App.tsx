@@ -241,6 +241,17 @@ export function App() {
   /** The fitter is up too: everything else. */
   const ready = runtime !== null;
 
+  // The tab title carries the load state too, because a 20-30 s first visit is long enough that
+  // the page is often not the tab being looked at. It says which of the two stages is outstanding
+  // rather than just "loading", for the same reason the bar does.
+  useEffect(() => {
+    document.title = dataReady
+      ? ready
+        ? "AutoCircuit"
+        : "AutoCircuit — loading the fitter…"
+      : "AutoCircuit — loading…";
+  }, [dataReady, ready]);
+
   useEffect(() => {
     client
       .ready()
@@ -706,30 +717,44 @@ export function App() {
     <div className="app">
       <header className="app-header">
         <h1>AutoCircuit</h1>
-        <StatusBar
-          stage={stage}
-          detail={detail}
-          dataReady={dataReady}
-          ready={ready}
-          bootError={bootError}
-          runtimeError={runtimeError}
-        />
         <ThemeToggle choice={themeChoice} onChoice={setTheme} />
       </header>
 
       <nav className="app-tabs">
-        {SCREENS.map(([name, title]) => (
-          <button
-            key={name}
-            type="button"
-            className={`app-tab${screen === name ? " app-tab--active" : ""}`}
-            onClick={() => setScreen(name)}
-            aria-current={screen === name ? "page" : undefined}
-          >
-            {title}
-          </button>
-        ))}
+        {SCREENS.map(([name, title]) => {
+          // A tab is pending while the screen behind it cannot do its job: everything until the
+          // reader is up, and the three that need the fitter until scipy is. They stay clickable
+          // -- each screen explains itself -- but they no longer look identical to a tab that
+          // works, which for the 20-30 s of a first visit is what three of these four were.
+          const pending = name === "data" ? !dataReady : !ready;
+          return (
+            <button
+              key={name}
+              type="button"
+              className={
+                `app-tab${screen === name ? " app-tab--active" : ""}` +
+                (pending ? " app-tab--pending" : "")
+              }
+              onClick={() => setScreen(name)}
+              aria-current={screen === name ? "page" : undefined}
+              title={pending ? "Still loading — this screen is not live yet" : undefined}
+            >
+              {title}
+            </button>
+          );
+        })}
       </nav>
+
+      {/* Below the tabs rather than in the header, and in the content column rather than beside
+          the title: it is the one thing on the page that is true while the rest of it is not. */}
+      <StatusBar
+        stage={stage}
+        detail={detail}
+        dataReady={dataReady}
+        ready={ready}
+        bootError={bootError}
+        runtimeError={runtimeError}
+      />
 
       {/* Only the plots read this, and they read it as a value rather than as CSS -- Plotly draws
           into a canvas, which no stylesheet reaches. It wraps the screens rather than the page

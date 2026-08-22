@@ -48,6 +48,19 @@ const CASES = {
   "p(R1,p(C1,L1)-R2,CPE1)": S(
     P(E("R", "R1"), S(P(E("C", "C1"), E("L", "L1")), E("R", "R2")), E("CPE", "CPE1")),
   ),
+  // The two shapes the device examples added, drawn here so the geometry gate covers what the
+  // site actually ships rather than only what it shipped when the gate was written. The bead is a
+  // three-way parallel of bare elements -- the other three-way case above has a series in one of
+  // its branches, so the rails are reached differently -- and the coating is a parallel block
+  // sitting directly inside another block's branch.
+  "ferrite bead R1-p(R2,L1,C1)": S(
+    E("R", "R1"),
+    P(E("R", "R2"), E("L", "L1"), E("C", "C1")),
+  ),
+  "coating R1-p(CPE1,R2-p(CPE2,R3))": S(
+    E("R", "R1"),
+    P(E("CPE", "CPE1"), S(E("R", "R2"), P(E("CPE", "CPE2"), E("R", "R3")))),
+  ),
   "deep series in every branch": S(
     E("L", "L1"),
     P(S(E("R", "R1"), E("C", "C1")), S(E("W", "W1"), E("SKINF", "SKINF1"), E("R", "R2"))),
