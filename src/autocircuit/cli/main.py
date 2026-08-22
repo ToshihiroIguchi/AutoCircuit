@@ -27,6 +27,7 @@ from autocircuit.core.discover import (
 from autocircuit.core.drt import DRTResult, drt
 from autocircuit.core.elements import POOLS, REGISTRY
 from autocircuit.core.fit import FitResult, fit, report_dict
+from autocircuit.core.interpret import Interpretation, interpret
 from autocircuit.core.simulate import log_frequencies, simulate
 from autocircuit.core.spectrum import Spectrum
 from autocircuit.core.spice import to_netlist
@@ -116,10 +117,16 @@ def _preflight(spectrum: Spectrum, skip: bool) -> None:
 
 
 def _write_outputs(
-    args: argparse.Namespace, spectrum: Spectrum, circuit: Circuit, result: FitResult
+    args: argparse.Namespace,
+    spectrum: Spectrum,
+    circuit: Circuit,
+    result: FitResult,
+    interpretation: Interpretation | None = None,
 ) -> None:
     if getattr(args, "json", None):
         payload = report_dict(result, spectrum)
+        if interpretation is not None:
+            payload["interpretation"] = interpretation.to_dict()
         Path(args.json).write_text(json.dumps(payload, indent=2), encoding="utf-8")
         print(f"\nWrote fit report to {args.json}")
     if getattr(args, "spice", None):
@@ -163,7 +170,11 @@ def cmd_fit(args: argparse.Namespace) -> int:
         time_limit=args.time_limit,
     )
     print(result.summary())
-    _write_outputs(args, spectrum, circuit, result)
+    reading = interpret(result, spectrum) if args.interpret else None
+    if reading is not None:
+        print()
+        print(reading.summary())
+    _write_outputs(args, spectrum, circuit, result, reading)
     return 0 if result.success else 1
 
 
@@ -509,6 +520,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_fit.add_argument("--time-limit", type=float, help="seconds per global search stage")
     p_fit.add_argument("--model-csv", help="write the fitted model spectrum here")
     p_fit.add_argument("--no-validate", action="store_true", help="skip the Lin-KK pre-check")
+    p_fit.add_argument(
+        "--interpret",
+        action="store_true",
+        help=(
+            "also read the fit as internal structure: relaxation times, polarisation shares, "
+            "ESR, self-resonance. Splits what every equivalent topology agrees on from what "
+            "only this circuit form says"
+        ),
+    )
     _add_output_arguments(p_fit)
     p_fit.set_defaults(func=cmd_fit)
 

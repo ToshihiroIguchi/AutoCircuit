@@ -32,6 +32,7 @@ if TYPE_CHECKING:  # resolved statically; nothing is imported at run time
     )
     from .dsl import CircuitSyntaxError, format_circuit, parse_circuit
     from .elements import REGISTRY, BoundsContext, Element, ParamSpec
+    from .interpret import Interpretation, Quantity, interpret, interpret_values
     from .spectrum import Spectrum
 
 #: Which submodule each exported name comes from.
@@ -53,6 +54,10 @@ _LAZY: dict[str, str] = {
     "BoundsContext": "elements",
     "Element": "elements",
     "ParamSpec": "elements",
+    "Interpretation": "interpret",
+    "Quantity": "interpret",
+    "interpret": "interpret",
+    "interpret_values": "interpret",
     "Spectrum": "spectrum",
 }
 
@@ -64,13 +69,17 @@ __all__ = [
     "CircuitSyntaxError",
     "Element",
     "ElementNode",
+    "Interpretation",
     "Parallel",
     "ParamSpec",
+    "Quantity",
     "Series",
     "Spectrum",
     "canonical_form",
     "count_elements",
     "format_circuit",
+    "interpret",
+    "interpret_values",
     "parallel",
     "parse_circuit",
     "series",

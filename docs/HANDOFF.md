@@ -7,14 +7,16 @@ round-trip (§15), again after taking both workflows off Node 20 (§16), and aga
 questions the deployed site raised — what the Discover→Fit hand-off carries, moving an element that
 is already on the canvas, and a start-up that made a visitor wait for scipy before it would read a
 CSV (§19), and again while giving the genetic search its first quality gate (§20 — **work in
-progress**, and the only section here that describes something unfinished).
+progress**), and again after the first of the geometry-free readouts that `CLAUDE.md`'s purpose
+point 2 asks for (§21 — landed and gated, with its own list of what is not done).
 Read this first, then `CLAUDE.md`, then the plan for whichever part you are touching.
 
 ## 1. Where things stand
 
-The command-line backend is **complete and verified**: 712 tests pass
-(`python -m pytest tests -q`, ~6 min rested — and that is one full run, not a union of subsets).
-Nineteen of them are the ngspice round-trip (§15) and **skip on this machine**, because ngspice
+The command-line backend is **complete and verified**: [measured] 797 tests collected, **778
+pass and 19 skip** on this machine (`python -m pytest tests -q`, 9 min 15 s on the run that
+produced these numbers — and that is one full run, not a union of subsets). The nineteen skips
+are the ngspice round-trip (§15), because ngspice
 does not run on Windows; `.github/workflows/tests.yml` installs it, and §4 says how to run them
 here through WSL. [measured] On `ubuntu-latest` **all 712 run**, the round-trip among them, in
 417 s on one run and 520 s on another — same suite, different runner, so the spread is not a
@@ -79,6 +81,7 @@ Module map (`src/autocircuit/`):
 | `core/validate.py` | Lin-KK data validation |
 | `core/enumerate.py` | exhaustive topology enumeration, skeleton-constrained growth, the structural feasibility filter |
 | `core/drt.py` | regularised distribution of relaxation times; structure probing only |
+| `core/interpret.py` | a fitted circuit read as internal structure, split invariant vs form-dependent |
 | `core/discover.py` | exhaustive and genetic topology search, Pareto front, equivalence classes |
 | `core/wire.py` | lossless JSON encoding of the arrays that cross a worker boundary |
 | `web/bridge.py` | the browser's only entry point: JSON in, JSON out, no decisions |
@@ -1470,3 +1473,89 @@ was lost to a machine restart 9 of 12 runs in, which is why long sweeps are now 
 invocation per reference. And **two benchmarks at once is not free**: this is a Core 7 150U with
 2 performance cores, and the fast test subset went 4 s → 118 s while two evolve runs were going.
 Run one at a time.
+
+## 21. Reading a fit as internal structure -- `core/interpret.py`
+
+`CLAUDE.md`'s purpose point 2 is that the circuit is a means and what is inside the part is the
+end. Until now the pipeline stopped at parameters with units. This module is the step after, and
+it is reachable as `autocircuit fit --interpret` (also `interpretation` in `--json`) and as
+`autocircuit.core.interpret`.
+
+**Everything it reports is geometry-free, by decision rather than by omission.** `Z(f)` fixes a
+capacitance and cannot fix a permittivity: the two differ by `A/d`, which the spectrum does not
+contain. So there is no permittivity, conductivity, diffusion coefficient or thickness anywhere
+in the output -- but note `Ws1.D_over_L2`, which comes straight out of a finite-length Warburg's
+own time constant. The rule takes absolute quantities away and leaves ratios.
+
+### The split the module is built around
+
+Every :class:`Quantity` is marked `invariant` or not, and that flag is the whole design:
+
+* **invariant** -- computed from `Z`, so every member of the equivalence class gives it
+  identically: `r_dc`, `r_inf`, `r_polarisation`, `self_resonant_frequency`,
+  `esr_at_resonance`, `z_min`, `capacitance_at_f_min`, `tan_delta`, `q_factor`, and the poles
+  and zeros of `Z(s)`.
+* **form-dependent** -- computed from a block of the tree: a relaxation's `tau`, its share of
+  the polarisation, an R-CPE effective capacitance, `capacitance_ratio`.
+
+**The part that gets guessed wrong: characteristic time constants are invariant.** Identical `Z`
+means identical poles. What is form-dependent is the *habit* of reading a time constant off as
+`R*C` of a block. So when the circuit is R/L/C only, `modes_of()` gives time constants every
+member of the class agrees on -- built as an exact rational function of `s` and rooted, not
+estimated from samples. When a CPE or a Warburg makes `Z` non-rational there are no poles at
+all, and the module says so and points at the DRT, which is computed from the data and therefore
+form-independent by construction.
+
+### Gate I1 has two halves, and the second one is the one that can fail
+
+`tests/test_interpret.py` runs it on the pair `docs/HANDOFF.md` section 3 already records as
+fitting the same data to 1.2e-15, with the correspondence written down exactly rather than
+fitted, so the gate tests the interpretation and not the optimizer:
+
+    R1' = R1 + R2        R2' = R1(R1+R2)/R2        C1' = R2^2 C1 / (R1+R2)^2
+
+Half one: every invariant quantity agrees to 1e-9, and so does every pole and zero. Half two:
+`R1-p(R2,C1)` shows **one** relaxation block and its exact equivalent `p(R1,C1-R2)` shows
+**none**. Same data, same `Z`, different answer to "how many relaxations does this circuit
+show" -- which is why the flag means something. Without half two the cheapest way to pass I1 is
+to mark everything form-dependent.
+
+### Five things not to re-derive
+
+1. **The grid is angular, and the first version of it was not.** `_omega_grid` resamples in
+   rad/s because that is what every `impedance()` here takes; the first draft passed Hz
+   straight in and the self-resonant frequency came out as 4.47e7 Hz where the closed form says
+   7.118e6 -- a factor of 2*pi, large enough to be wrong and plausible enough to read as a
+   number. It was caught by the pole/zero path disagreeing with the crossing search, which is
+   an argument for computing the same quantity two ways.
+2. **A limit that is numerically zero must be reported as zero, and the threshold is the
+   *smallest* measured |Z| and not the largest.** A two-block network is a short at high
+   frequency and comes back as `r_inf = 5e-13 ohm +/- 2.9e-15`, which dresses a rounding
+   artefact up as a measurement. Taking the threshold from the top of the range instead would
+   erase a real 0.01 ohm ESR on a 5000 ohm spectrum. Hence `NEGLIGIBLE_FRACTION` against
+   `min|Z|`.
+3. **An apparent capacitance and a loss tangent are defined where the part is not a capacitor,
+   and are meaningless there.** A plain `R-p(R,C)` reads 15.9 F and tan delta 11 at 1 Hz. Both
+   are now gated on `-Im Z > Re Z` (`CAPACITIVE_PHASE_RATIO`) and simply do not appear
+   otherwise.
+4. **Standard errors propagate exactly for a power product, and the covariance has to be taken
+   back into log space to do it.** `log_covariance` rebuilds cov(ln x) from the reported
+   standard errors and correlation matrix -- the inverse of the map the fitter already applied
+   (section 3) -- and `_propagate` is a central-difference delta method in that space. For
+   `tau = R*C` the finite difference is exact, and the test pins `sigma_tau/tau = sqrt(2)*0.1`
+   for two uncorrelated 10% parameters. For the poles no standard error is attempted, because
+   root ordering is not a smooth function of the parameters.
+5. **The 2%-polarisation block is not recoverable at 1% noise even when the topology is
+   asserted.** `p(R1,C1)-p(R2,C2)` at 100/5000 ohm was the first round-trip case; the fit of the
+   *true* circuit returns `R1 = 0.09 ohm` and a time constant of 3e-15. That is an
+   identifiability limit of the data, not something the interpretation can read around -- the
+   round-trip test uses 100/500 instead, and says why. Worth remembering next to section 3's
+   DRT entry, which is about detecting that same small block from the data.
+
+### What is not done
+
+The discovery report does not carry an interpretation -- which is where it would matter most,
+since that is where the topology was found rather than asserted and where the equivalence-class
+caveat lives. The browser does not show one. And the `model`/`interpret` objective split that
+`CLAUDE.md` now defines is written down but not wired anywhere; gate O1 (both objectives produce
+a byte-identical `DiscoveryResult`) is unimplemented.

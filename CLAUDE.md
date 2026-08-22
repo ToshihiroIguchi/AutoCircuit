@@ -23,10 +23,125 @@ Fable and Opus are very expensive. Delegate work to cheaper models via subagents
 
 ## Project overview
 
-**AutoCircuit** analyzes frequency-characteristic (impedance) data of passive components and
-extracts equivalent circuit models.
+### Purpose
 
-Three modes, which differ only in how much of the topology the user fixes:
+**AutoCircuit takes measured impedance-vs-frequency data of an electronic component and
+returns both the equivalent-circuit topology and its parameter values.** Three sentences say
+what that is for, and they are the tie-breaker whenever a design decision is arguable:
+
+1. **Search the circuit out of the data, parameters included.** Not "fit a circuit the user
+   already wrote down" — that is one supported mode, not the goal. The goal is that the data
+   chooses the topology *and* the values.
+2. **The circuit is a means, not the end: the target is what is inside the part.** Impedance is
+   swept over many frequencies on a ceramic (or another passive component), the equivalent
+   circuit is extracted, and the circuit is then read as internal structure — grain versus grain
+   boundary, dielectric loss, electrode and interface contributions, ESR/ESL and skin effect.
+   **The only input is the spectrum: frequency and impedance, and nothing else.** No sample
+   geometry, no part number, no material data sheet. This is a decision, not a gap to be filled
+   later, and it draws a hard line through what "internal structure" may mean here — see the
+   consequence below.
+3. **Automate the two steps that used to require an expert, so that a non-expert gets the same
+   answer.** Historically a human chose the topology and hand-picked fitting initial values, so
+   the result depended on who ran it. Both steps are to be automated well enough that an analyst
+   with little background reaches a defensible answer.
+
+Consequences that follow from those three, and that outrank local convenience:
+
+- **A knob the target user cannot set correctly is not a feature.** Point 3 is broken by any
+  required input that only an expert could supply — initial values above all, but also
+  algorithm internals. Budget-shaped controls ("how long", "how thorough", "how large a
+  circuit") are the user's; search internals must have measured defaults instead of being
+  handed over. "What kind of part is this?" is *not* a budget control and is ruled out by the
+  next consequence.
+- **The automatic path takes the spectrum and nothing else; every other input is an optional
+  narrowing the user asked for.** `pool` and `skeleton` (mode 2) stay, because a user who does
+  know something about the part may say so and the report already states what the constraint
+  excluded. But nothing beyond frequency and impedance may ever be *required*, and the software
+  must not ask what kind of part this is — that question is precisely the expert judgement
+  point 3 exists to remove, and a non-expert's wrong answer to it would silently narrow the
+  search. Whatever the search would have gained from an answer must instead be **derived from
+  the spectrum's own shape**: presence of a resonance, the low-frequency slope, a 45-degree
+  diffusion branch, the number of relaxations the data can distinguish.
+- **Geometry-free quantities are in scope; absolute material constants are not, and never will
+  be.** Z(f) fixes a capacitance; it cannot fix a permittivity, because the two differ by A/d,
+  a factor the spectrum does not contain. So permittivity, conductivity, layer thickness and
+  every other quantity needing an absolute length or area are **out of scope by decision** —
+  not "not yet". What survives the geometry ban is a large and useful set, and it is the set to
+  build out: ESR, ESL, self-resonant frequency, Q, tan δ, time constants τ = RC, relaxation
+  frequencies, the number of relaxations the data can actually distinguish, each block's share
+  of the total polarisation, and dimensionless *ratios* such as grain-to-grain-boundary
+  capacitance. Those are internal structure stated in the only terms the input supports.
+- **Point 2 is under way and not finished.** `core/interpret.py` computes the geometry-free
+  readouts from a fitted circuit -- `autocircuit fit --interpret`, and `interpretation` in the
+  `--json` report. What it is built around is the split that matters: every quantity is marked
+  **invariant** (the same for every topology in the equivalence class, because it is a property
+  of `Z` -- terminal resistances, self-resonance, tan delta, and the poles and zeros of `Z(s)`)
+  or **form-dependent** (a feature of the tree that was reported, such as a block's `R*C`).
+  Gate I1 has both halves: the invariant quantities must agree across an exact
+  reparameterisation, *and* the form-dependent ones must be seen to disagree, because a label
+  nothing can falsify is not a label. Still missing: the discovery report does not carry an
+  interpretation, the browser does not show one, and the `objective` split below is not wired
+  anywhere.
+- **Honest reporting outranks a satisfying answer**, because point 3 removes the expert who
+  would otherwise catch an over-claim. This is why discovery reports a Pareto front and
+  equivalence classes rather than "the answer", and why every claim below is either measured or
+  marked as not.
+
+### Objectives — what the user wants out, which is not what the search does
+
+There are two reasons to bring an impedance spectrum here, and they want different reports from
+the *same* analysis:
+
+- **`model`** — an equivalent circuit to use, typically in a simulator. Deliverable: the SPICE
+  subcircuit plus the band it is valid over. Readouts: ESR(f), ESL, self-resonant frequency, Q,
+  minimum |Z|, tan δ, DC resistance. Bode is the plot that matters. Its claim is complete and
+  checkable from the data alone: *this reproduces the measured Z over this band*.
+- **`interpret`** — what the spectrum says is happening inside the part. Deliverable: the
+  processes the data can distinguish — how many relaxations, each one's τ and relaxation
+  frequency, each block's share of the total polarisation, the CPE exponent as a measure of how
+  distributed a process is, whether there is a diffusion branch and of which kind, and
+  dimensionless ratios such as grain-to-grain-boundary capacitance. Nyquist and DRT are the
+  plots that matter. Its claim is always conditional.
+
+**Objective and mode are orthogonal axes and must not be conflated.** The mode says how much of
+the topology the user fixes and it changes the *search*; the objective says what the user wants
+out and it must change **only the report**.
+
+**The invariant: the objective never reaches a number.** `discover()` and `fit()` do not take it
+— it is a parameter of the reporting layer, so the rule is enforced by construction rather than
+by convention. Two people with the same spectrum must get the same circuit and the same values
+whatever they came for; the moment an objective narrows the pool, reorders the Pareto front or
+changes what is recommended, the analyst-independence that is this project's whole differentiator
+against ZView is gone. Nothing upstream needs to differ, and that was checked rather than
+assumed: the pool is to be derived from the spectrum's own shape (see the consequence above —
+and note that the current default pool `("R","C","L","CPE")` does *not* yet do this and silently
+excludes the diffusion elements, which is an open violation of that rule rather than a
+counter-example to it), every element exports to SPICE because `core/spice.py` synthesises
+ladders from the impedance function rather than per element, and
+parsimony-with-every-parameter-resolved is the right recommendation rule for both.
+
+**Gate O1 — the objective changes no number.** The full pipeline run under both objectives on the
+same spectrum and seed produces a **byte-identical** `DiscoveryResult` wire payload; only the
+rendered report differs. Fingerprint it the way EV5 does. *Not implemented yet.*
+
+**Why the split exists at all is the equivalence classes, not the vocabulary.** `R1-p(R2,C1)` and
+`p(R1,C1-R2)` fit the same data to 1.2e-15. Under `model` that is harmless — same terminal
+behaviour, either one exports and simulates identically, and asking which is "right" has no
+content. Under `interpret` it *is* the question: whether R2 is a grain boundary or an electrode
+interface is exactly that difference in form, and the spectrum does not contain the answer. So
+what the objective legitimately changes is **how loudly the report says the data cannot decide** —
+loudest under `interpret`, where a non-expert is most likely to read a topology as a mechanism.
+
+**One extension belongs to `interpret` alone**, and it stays inside the frequency-and-impedance
+rule because it only adds more spectra: several sweeps at different temperatures or DC bias, fitted
+to one circuit simultaneously. It yields activation energies, and it is the only instrument
+available here that can actually *break* a degeneracy, since two forms that are indistinguishable
+at one condition often depend on temperature differently. It buys `model` nothing.
+
+### Modes
+
+Three modes, which differ only in how much of the topology the user fixes (and note that this is
+an axis orthogonal to the objective above):
 1. **Manual topology**: the user supplies the whole equivalent circuit; AutoCircuit fits all
    parameters **without any user-supplied initial values** (global optimization; this is the key
    differentiator vs. ZView).

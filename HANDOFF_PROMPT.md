@@ -1,6 +1,7 @@
-# 引き継ぎプロンプト(2026-08-15、Node 20 対応 + README リンク 完了時点)
+# 引き継ぎプロンプト(2026-08-22、目的の明文化 + `core/interpret.py` 実装 時点)
 
-このファイルは git 管理外の作業メモ。次セッションの冒頭に以下をそのまま貼る。用が済んだら削除してよい。
+このファイルは次セッションの冒頭にそのまま貼るための作業メモ。用が済んだら更新するか削除してよい。
+(注:ファイル冒頭に「git 管理外」と書いてあったが実際には**追跡されている**。commit すると履歴に入る。)
 
 ---
 
@@ -8,166 +9,156 @@ AutoCircuit プロジェクト(`C:\Users\toshi\python\AutoCircuit`)の作業を�
 
 ## まず読むもの(この順で)
 
-1. `CLAUDE.md` — 規約。「Three modes」直後の「A user-supplied constraint narrows what the report is
-   allowed to claim」の段落が、モード2でもステップ4の中断処理でもステップ5の除外パスでも、そして
-   今回の CI ゲートでも実際に効いた原則。
-2. `docs/HANDOFF.md` — 現状。§3(再導出してはいけない実測)、§4(環境の癖)、§7(モード2)、
-   §8〜§14(Web UI ステップ1〜7)、§15(ngspice 往復と初のテスト用ワークフロー)、
-   **§16(Node 20 離脱と README、新設)**。
-3. `docs/IMPLEMENTATION_PLAN.md` §7 — SPICE export。ngspice 往復の実測がここに入った。
-4. `docs/WEB_UI_PLAN.md` — **phase 6 は完了。全7ステップ、全ゲート決着済み。**
-   §2.3(Node の数字がブラウザで3倍外れていた)、§2.4(フィット結果はインタプリタ間でビット一致しない)、
-   §2.5(ゲート W2 の一条項が達成不能だと判明)、§2.6(止められる報告は弱い文を必要とする)、
-   §2.7(2つのゲートを開けたまま出荷し、そう書いた)、§2.8(その2つを逆方向に決着させた)、
-   §6 がゲート一覧。
-5. `web/README.md` — ブラウザ側の地図。4画面、テーマの規則、`public/` に何が生成されるか。
+1. **`CLAUDE.md`** — 前セッションで `## Project overview` に **`### Purpose` と `### Objectives`
+   を新設した。ここが今いちばん重要で、以降の設計判断の決定基準。特に:
+   - 目的3点(データから回路を探す / 回路は手段で目的は部品の中身 / 専門家が要った2工程の自動化)
+   - 帰結:**入力は周波数とインピーダンスだけ**。形状も型番も部品種別も受け取らない・聞かない。
+     必要な情報はスペクトルの形から導出する。`pool` と `skeleton` は「ユーザが明示的に狭める
+     任意オプション」としてのみ存続。
+   - 帰結:**幾何不要な量は対象、絶対的な材料定数は対象外(永久に)**。Z(f) は容量を決めるが
+     誘電率は決めない(差は A/d)。`D/L²` は出せるが `D` は出せない、が境界の実例。
+   - `### Objectives`:`model` / `interpret` の2目的。**objective はレポートだけを変え、数値には
+     絶対に触れない。** ゲート O1(両 objective で `DiscoveryResult` がバイト一致)は**未実装**。
+2. **`docs/HANDOFF.md`** — 現状。**§21(新設、`core/interpret.py`)**、§3(再導出してはいけない実測)、
+   §4(環境の癖)、§20(遺伝的探索のゲート、**作業中**)。§1 のテスト数は実測で更新済み。
+3. 触る部分の plan doc(`CLAUDE.md` の「Start here」1〜11)。
 
-`docs/PARTIAL_TOPOLOGY_PLAN.md` と `docs/DISCOVERY_V2_PLAN.md` は完了済み。訂正記録として読む価値は
-あるが着手対象ではない。
+## 前セッションで決まったこと・やったこと
 
-## 現状
+### 決定(コードより先にこちらを守る)
 
-- **サイトは公開済み: <https://toshihiroiguchi.github.io/AutoCircuit/>**
-  `.github/workflows/pages.yml` が `main` への push ごとにビルドして公開する。`tsc --noEmit` と
-  `npm run smoke` がゲート。**push は「保存」ではなく「公開」。**
-- **ワークフローは2本。**`pages.yml`(公開)と `tests.yml`(ruff / mypy / フルスイート /
-  ngspice 往復)。両方 push ごとに走る。**Node 20 の非推奨注釈は解消済み**(§16。
-  `checkout@v7` / `setup-python@v7` / `setup-node@v7` / `upload-pages-artifact@v5` /
-  `deploy-pages@v5`)。
-- CLI バックエンド完成、**712 テスト**(うち 19 は ngspice 往復で、**Windows では skip**。
-  CI では全 712 が走り 417 s と 520 s ― 同じスイートで別ランナー。**壁時計差を回帰と読まない**)。
-  discovery v2 は G1〜G5、モード2 は P1〜P4 実測済み。
-- **README はサイトにリンク済み**で、`## In the browser` 節がある。そこに書いたコールドスタートは
-  公開 URL からの 21 s(キャッシュ後 5〜11 s)で、`localhost` の 5 s ではない。混ぜないこと。
-- **phase 6 は完了。W1・W2・W4・W6 合格、W3 は条件付き合格、W5 は撤回。**
-  - **W3(コールドスタート)**:ビルド時にバイトコードを作って配る変更で **約2倍**改善。
-    休んだマシンで 4.9〜5.7 s(初回フィット完了まで約6.6 s)、**負荷のかかったマシンで 10.9 s
-    (同 約13 s)**。10秒の目標はマシンの2倍ドリフトの内側に入った、というのが結論。
-    片方だけ報告しないこと。次に効くのは wheel 展開(2.2〜4.4 s)と転送量(サイト全体41 MB)。
-  - **W5(オフライン / `file://`)は撤回**。`file://` はどんな梱包でも不可能(実測)。オフラインは
-    Service Worker があれば可能だが、**やらないと決めた**(push ごとに公開するサイトと訪問者の
-    間にキャッシュを挟むことになるため)。
-- **SPICE export は方言としても正しいことが実測された(§15)。**
-- 低優先の残件:Gamry `.DTA` / BioLogic `.mpt` リーダー(実ファイル入手後)。
+1. 目的を `CLAUDE.md` に明文化。
+2. **自動経路の入力は f と Z のみ。** 形状入力は却下。「この部品は何ですか」も聞かない
+   (非専門家の誤答が探索を黙って狭めるため)。共振の有無・低域の傾き・45度枝・区別できる緩和の数
+   といった**スペクトル由来の記述子**で代替する。
+3. **データから導いた制約は候補を除外してはならず、探索順序を優先させるだけに使う。**
+   `DISCOVERY_V2_PLAN.md` §3.4(DRT はフィルタではなくシード)の一般化。除外するなら
+   `complete_up_to` の文面に必ず現れること。skeleton と違い**ユーザは狭められたことを知らない**ので、
+   より危険。
+4. objective 分割(`model` / `interpret`)。**`discover()` と `fit()` は objective を受け取らない**
+   ことで構造的に保証する。
 
-## 前セッションでやったこと(Node 20 離脱 + README リンク)
+### 実装(全 778 テスト green、`ruff check .` と `mypy` 通過)
 
-コミット `02a83f7` と `fa9505f`。**計算内容は何も変えていない。**
+- **`src/autocircuit/core/interpret.py`(新規)** — フィット済み回路を内部構造として読む。
+  全量に **invariant / form-dependent** のラベルを持たせたのが設計の芯。
+  - invariant(Z から決まる = 等価クラス全メンバーで同一):`r_dc` `r_inf` `r_polarisation`
+    `self_resonant_frequency` `esr_at_resonance` `z_min` `capacitance_at_f_min` `tan_delta`
+    `q_factor`、および **Z(s) の極・零点**(`s` の有理関数を厳密に組み立てて根を解く)。
+  - form-dependent(報告された木の性質):ブロックの `tau`・分極寄与率、R-CPE 実効容量
+    (Hsu-Mansfeld、Brug ではない旨を注記)、`capacitance_ratio`、`Ws1.D_over_L2`。
+  - CPE / Warburg が入ると Z は有理でないので**極は「無い」と言って DRT を指す**。近似しない。
+- **`tests/test_interpret.py`(新規、14テスト)** — ゲート I1。等価対応を厳密に書き下してある
+  (`R1' = R1+R2`, `R2' = R1(R1+R2)/R2`, `C1' = R2²C1/(R1+R2)²`)ので、フィッタではなく解釈を試す。
+- **CLI:`autocircuit fit --interpret`**(`--json` にも `interpretation` が入る)。
+- `core/__init__.py` に遅延エクスポート追加。
 
-- 両ワークフローの5つの action を現行メジャーへ。**対象はファイルを読むと3つ、注釈を読むと5つ**
-  だった(`upload-pages-artifact@v3` の内部の `upload-artifact@v4`、別ジョブの `deploy-pages@v4`)。
-  注釈は `gh api repos/OWNER/REPO/check-runs/<job-id>/annotations` をジョブごとに叩いて読む。
-- **押す前に「注釈3件」を実測してから押し、押した後に「0件」を実測した。**両方とも前から緑なので、
-  緑は測定にならない。
-- `upload-pages-artifact@v4` は**隠しファイルをアーティファクトに入れない**。`web/dist` の唯一の
-  ドットファイルは `.bytecode-stamp`(`scripts/precompile.mjs` 用、ブラウザは fetch しない)。
-  公開サイトで全アセット 200 / `.bytecode-stamp` のみ 404 を実測。**サイトが配信するドットファイルが
-  今後できたら `include-hidden-files: true` が要る。**
-- deploy action がメジャー更新されたので、**実ブラウザでも確認した**(Randles 例 → `generic_csv`
-  71点 → Lin-KK PASS、Voigt 16)。緑の deploy ステップは検証ではない。
-- README にサイトへのリンクと `## In the browser` 節。Install 節の「run in a browser under
-  Pyodide **later**」が公開済みのいま偽になっていたので直した。
+**Web UI と `discover` は一切触っていない。push もブラウザ確認もしていない。**
 
-## その前のセッション(ngspice CI 往復)
+## 再導出してはいけない実測(今回追加分。全文は `docs/HANDOFF.md` §21)
 
-`tests/test_spice_ngspice.py` と `.github/workflows/tests.yml`。計算内容は何も変えていない。
-netlist に「駆動する deck」のコメントが増えた(`core/spice.py` の `_how_to_drive()`)。
+- **ゲート I1 には後半がある。** 不変量が一致することだけでなく、**form-dependent が食い違うこと**も
+  試す。`R1-p(R2,C1)` は緩和ブロック1つ、その厳密な等価形 `p(R1,C1-R2)` は**0個**。後半が無いと、
+  全部を form-dependent にすれば I1 は通ってしまう。**反証できないラベルはラベルではない。**
+- **特性時定数そのものは等価クラス不変。** Z が同じなら極も同じ。形に依存するのは「ブロックの R×C
+  として読む習慣」のほう。ここは間違えやすい。
+- **グリッドは角周波数。** 最初 Hz のまま `impedance()` に渡していて SRF が 4.47e7 Hz と出た
+  (正解 7.118e6、ちょうど 2π 倍)。**間違っているのに十分もっともらしい数字**だった。極・零点側と
+  交差探索側が食い違って露見した ― 同じ量を2通りで計算する価値。
+- **数値ゼロの極限はゼロと書く。閾値は |Z| の最小値基準**(`NEGLIGIBLE_FRACTION`)。最大値基準だと
+  5000 Ω のスペクトル上の実在する 0.01 Ω の ESR を消す。
+- **見かけ容量と tan δ は容量性でない周波数でも定義されるが無意味。** `R-p(R,C)` は 1 Hz で 15.9 F、
+  tan δ 11 と読める。`-Im Z > Re Z`(`CAPACITIVE_PHASE_RATIO`)を条件にし、満たさなければ出さない。
+- **分極の 2% しか担わないブロックは、真のトポロジーを与えても 1% ノイズでは回復しない。**
+  100/5000 Ω で真の回路をフィットして `R1 = 0.09 Ω`、τ = 3e-15。データの識別性の限界。
+  往復テストは 100/500 を使い、理由をテスト内に書いてある。
 
-- 9回路を export し、実物の **ngspice 42** で AC スイープして**バイナリ raw ファイル**を読み戻す。
-- **比較相手はモデルではなく `test_spice.py` 自身の節点解析エンジン。ここが設計の核心。**
-  モデル相手だとラダー合成の誤差が ~1e-2 で居座り、その3桁下の方言バグを完全に隠す。
-  エンジン相手なら合成誤差が厳密に相殺され、残るのは「ファイルの読まれ方」だけになる。
-- netlist が自分を駆動する deck を持つようになった(このフィット自身の帯域入りの `.ac` 行と
-  DC 開放の注記)。2端子 `.subckt` だけ渡すと両方を推測させることになる。
+## 未コミット
 
-## 再導出してはいけない実測結果(今回追加分)
+前セッションの変更は**まだコミットしていない**。`git status` で確認すること。
 
-古い分は `docs/HANDOFF.md` §3 と §8〜§14、Node 20 の分は §16。ngspice 分は §15 で、特に効くもの:
-
-- **ngspice は動作点に失敗しても exit 0 を返す。** コンデンサで始まるモデルは全て DC 開放なので
-  特異行列になり、gmin stepping も source stepping も失敗する — それでも AC 解は 4.5e-12 で正しい
-  (線形回路なので動作点に依存しない)。**終了コードで判定する往復テストなら、ngspice が匙を
-  投げた deck を「合格」と呼んでいた。**だから診断メッセージ側を assert している。
-- **`.option rshunt=1e12` は警告を消すが、ここでは誤った処方。** |Z| を最大 **7.2e-7** 動かし、
-  測ろうとしている量より5桁悪い。しかも単純な |Z|/R ではない(ラダーの内部ノードも分流される
-  ため、CPE ケースはポート単独の予測の10倍)。**テスト deck は一切の助けを足さない。**
-- **未知の素子は `Error on line` / exit 1 / raw ファイルを一切書かない。** raw ファイル欠如は
-  「比較対象なし」ではなく失敗として扱うこと。
-- **一致は抵抗単体で厳密に0、他8件で 4.6e-15 〜 4.5e-12。**閾値は 1e-9。ラダーの値は
-  scipy 1.11 と 1.17 で末尾が違うが、一致度は動かない — このテストが「中身」ではなく
-  「読まれ方」の話であることの意味。
-- **skip したテストは pass に見える。** `tests.yml` の往復ステップはサマリに `skipped` があれば
-  落とす。押す前に `/usr/bin/ngspice` を隠して両方向を実測した(あり:19 passed / exit 0、
-  なし:19 skipped / **exit 1**)。この形の失敗はこのプロジェクトで既に4回起きている。
-- **壁時計テストは2回目の熱失敗を観測した。** `test_time_limit_stops_the_search` が
-  フルスイート中に 67.1 s で落ち、単独では 48.1 s で通った。**境界は広げない。**
+```
+M CLAUDE.md
+M docs/HANDOFF.md
+M src/autocircuit/cli/main.py
+M src/autocircuit/core/__init__.py
+?? src/autocircuit/core/interpret.py
+?? tests/test_interpret.py
+```
 
 ## 次の作業(候補・要相談)
 
-1. Gamry `.DTA` / BioLogic `.mpt` リーダー(実ファイルが要る。無いと仕様推測になる)。
-2. コールドスタートの続き(wheel 展開 2.2〜4.4 s と転送量 41 MB)。W3 をマシンドリフトの
-   外に出したいなら。**下調べ済み(実測)**:`web/dist` 41 MB の内訳は scipy wheel 13.36 MB
-   (展開後 **45 MB**)、`pyodide.asm.wasm` 9.15、`python_stdlib.zip` 6.73、
-   `pyodide-bytecode.zip` 5.52、numpy wheel 2.78、アプリ JS 1.34。この package が import する
-   scipy は `optimize` / `linalg` / `signal` / `special` の4つだけで、未使用の大物は
-   `stats` 1.72 MB(展開 6.59)、`spatial` 1.04(3.66)、`io` 0.49(1.76)。wheel を削るのは
-   転送量と展開時間の両方に効く唯一のレバーだが、**消えた submodule は実行時にしか出ない**ので、
-   削る前に「必要な subpackage を削ると `npm run smoke` が実際に赤くなる」ことを先に確かめる。
-3. ~~Node 20 deprecation の対応~~ **完了(§16)**。注釈を読むと対象は3つではなく5つだった
-   (`upload-pages-artifact@v3` の内部の `upload-artifact@v4` と、別ジョブの `deploy-pages@v4`)。
-   `checkout@v7` / `setup-python@v7` / `setup-node@v7` / `upload-pages-artifact@v5` /
-   `deploy-pages@v5` に更新。**注釈 3件 → 0件を実測**、実ブラウザでも確認済み。
+**A. objective の配線とゲート O1。** `model` / `interpret` を**レポート層だけ**に通す。
+`discover()` / `fit()` は受け取らない。ゲート O1 は EV5 と同じフィンガープリント方式で、両 objective
+の `DiscoveryResult` wire ペイロードがバイト一致することを試す。**実装より先にゲートを張ると、
+上流に漏れた瞬間に落ちる。**
+
+**B. `discover` のレポートに interpretation を接続。** いま `fit` にしか無いが、**トポロジーが
+「発見された」場所こそ効く**(等価クラスの但し書きが生きるのはそこ)。ブラウザ表示も未着手。
+
+**C. 既定 pool の f/Z 由来化。** 現在 CLI も Web も既定 `("R","C","L","CPE")` で、**拡散素子を
+黙って除外している**。これは「部品種別の判断が既定値に埋め込まれている」状態で、今回決めたルールに
+正面から反する。`CLAUDE.md` に**未修正違反として明記済み**。修正は小さい。上表の記述子で
+「入れるか入れないか」を決める(除外ではないので上の決定3に抵触しない。ただし入れなかったことは
+レポートに書く)。
+
+**D. Lin-KK の降格。** 主用途(セラミック等、数秒掃引)ではドリフト・非線形がほぼ起きない一方、
+共振は Lin-KK 基底が原理的に表現できず誤検出になる(実測 96.8%)。ただし**虚部の符号規約ミス**は
+KK でしか捕まらないので外さない。提案は (1) 共振で誤検出しない安価な前段チェック(周波数の単調性・
+重複、`Re Z < 0`、`|arg Z| > 90°`、点密度)、(2) 共振検出時は最初から `inconclusive`、
+(3) **掃引2本の比較**(共振があっても効く直接的なドリフト検出)、(4) KK 残差から σ(f) を推定して
+`weighting="sigma"` に流す(**σ を作る側が repo のどこにも無い**)。
+
+**E. トポロジー探索アルゴリズム。** 網羅列挙(≤5素子)は G1 30/30 で優秀、置き換えない。問題は
+**GA(6素子以上)が真値回収 1/9** であること。効果順の提案:(1) 部品カテゴリごとの**回路文法**で
+空間を狭め、6-7素子でも網羅を届かせる(skeleton が 17〜144× 効くのに対し feasibility filter は
+1.15〜1.75×、並列は 2.3× ― **空間を直すほうが桁で効く**)、(2) GA を「素子1個追加」の
+beam search に置き換える(step 3 で親のパラメータ継承が最大の勝ちだったのは、逐次成長が向いている
+証拠。交叉も変異確率も消える)、(3) `EVOLVE_SEARCH_PLAN.md` §6 が自ら書いている選択肢 ―
+「GA が正しい道具でないなら auto は under-fit な網羅結果を正直に返すべき」も真剣に検討に値する。
+着手前に docs に1本書くこと。
+
+**F. 既存の低優先残件。** Gamry `.DTA` / BioLogic `.mpt` リーダー(実ファイル要)。コールドスタート
+の続き(wheel 展開 2.2〜4.4 s、転送量 41 MB)。詳細は `docs/HANDOFF.md` §6。
 
 ## 守ること
 
-- 会話は日本語、コード・コメント・ドキュメントはすべて英語。
-- 単純な調査は haiku、単純な実装は sonnet に委任。委任時は必ず「テストが落ちたらアサーションを弱めず、
-  ライブラリのバグを疑って xfail で残し報告せよ」と指示する。**報告は信じず自分で読んで再実行する。**
+- 会話は日本語、コード・コメント・ドキュメント・コミットメッセージはすべて英語。
+- 単純な調査は haiku、単純な実装は sonnet に委任。委任時は必ず「テストが落ちたらアサーションを
+  弱めず、ライブラリのバグを疑って xfail で残し報告せよ」と指示する。**報告は信じず自分で読んで
+  再実行する。**
 - 完全性保証がモード2と discovery v2 の存在意義。フィルタや枝刈りは「疑わしきは残す」。
-- **緑のまま何も証明していない CI を疑う。**skip・0件・空集合は「合格」に見える。
-- 実測で計画やゲートが誤っていたと判明したら、**黙って解釈を緩めず**計画側を訂正するコミットを残す。
-- ステップ単位でコミットし、GitHub にプッシュする。**push = 公開**であることを忘れない。
+- **緑のまま何も証明していない CI を疑う。** skip・0件・空集合は「合格」に見える。
+- 実測で計画やゲートが誤っていたと判明したら、**黙って解釈を緩めず**計画側を訂正する。
+- ステップ単位でコミットし、GitHub にプッシュする。**push = 公開**であることを忘れない
+  (`pages.yml` が `main` への push ごとに <https://toshihiroiguchi.github.io/AutoCircuit/> を更新)。
 - **UI は必ず実ブラウザで確認する。**
 
-## 環境の癖(`docs/HANDOFF.md` §4 に全部ある。特に効くもの)
+## 環境の癖(全文は `docs/HANDOFF.md` §4)
 
 - パッケージは pip install されていない。`$env:PYTHONPATH = "C:\Users\toshi\python\AutoCircuit\src"`
-  が必須。`python -m pytest` は必ずリポジトリルートから。
+  が必須。`python -m pytest` は必ずリポジトリルートから。フルスイートは約9分。
 - **PowerShell でソースファイルを書き換えないこと。**`Get-Content -Raw` は cp932 として読むので
   `Ω` が化ける。編集ツールか、符号化を明示した Python を使う。
-- PowerShell は二重引用符を含むヒアドキュメントを壊す。コミットメッセージも一時ファイルに書いて
-  `git commit -F`。
-- CPU を専有するベンチとテストを同時に走らせない。長時間の計測はデタッチ起動。
+- **Bash ツールのヒアドキュメントはアポストロフィを含む長文で壊れることがある。** ソースファイルの
+  新規作成は Write ツール、既存ファイルの書き換えは `python - <<'EOF'` に UTF-8 明示で。
+- CI は `ruff check .` と `mypy` を回す。**`ruff format` は回していない**(`cli/main.py` は元から
+  format 非準拠)。新規ファイル以外を `ruff format` にかけると無関係な巨大 diff になる。
+- CPU を専有するベンチとテストを同時に走らせない(Core 7 150U、性能コア2)。長時間の計測は
+  デタッチ起動。**バックグラウンドのシェルコマンドは10分で殺される。**
+- **Bash ツールから `wsl` を呼んではいけない。** Git Bash が `/mnt/c/...` を書き換える。
+  PowerShell から呼ぶこと。ngspice は WSL の Ubuntu-24.04 にのみある(Windows 側では 19 件 skip)。
 
-### ngspice(今回追加)
-
-- **Windows には ngspice が無く、winget にも無い。**WSL の Ubuntu-24.04 に
-  `apt-get install ngspice` で入れてある(CI の `ubuntu-latest` と同じ ngspice 42)。
-  `python3-numpy` / `python3-scipy` / `python3-pytest` も入れてある(numpy 1.26 / scipy 1.11 で、
-  Windows 側の 2.5 / 1.17 とは別 — 第二のインタプリタとして使える)。
-- 手元で回す:
-  ```powershell
-  wsl -d Ubuntu-24.04 bash -lc "cd /mnt/c/Users/toshi/python/AutoCircuit && PYTHONPATH=`$PWD/src python3 -m pytest tests/test_spice_ngspice.py -q"
-  ```
-  約1秒。引用符が絡むものはスクリプトファイルに書いて `wsl -d Ubuntu-24.04 bash <path>` で呼ぶ。
-- **Bash ツールから `wsl` を呼んではいけない。**Git Bash が `/mnt/c/...` を
-  `C:/Program Files/Git/mnt/c/...` に書き換えてパスが見つからなくなる。PowerShell から呼ぶこと。
-
-### Web UI 特有
+### Web UI
 
 ```powershell
 cd web; npm run dev      # http://localhost:5173
-npm run smoke            # Python 側の経路を Pyodide でヘッドレス検証(overlay も適用される)
+npm run smoke            # Python 側の経路を Pyodide でヘッドレス検証
 npm run build            # -> web/dist/
 npx tsc --noEmit -p tsconfig.json
 ```
 
-- `web/public/` は生成物(約40 MB、gitignore)。`web/.build/autocircuit-source.zip` は precompile の
-  入力で、`public/autocircuit-src.zip` はその出力。**この2つを同じパスにしないこと**(同じにすると
-  2回目の `npm run assets` がバイトコードを黙って捨てる)。
-- `npm run assets` は Pyodide も起動する(約30 s)。`web/public/.bytecode-stamp` が一致すれば飛ばす。
 - **bridge の操作を増やしたら `src/autocircuit/web/bridge.py` と `web/src/worker/protocol.ts` の
-  `BRIDGE_VERSION` を両方上げる。**片方だけだとページが起動を拒否する(設計どおり)。
-- `benchmarks/pyodide/src.zip` は自動更新されない。W1 ベンチ前に `python make_zip.py` で作り直す。
+  `BRIDGE_VERSION` を両方上げる。** 片方だけだとページが起動を拒否する(設計どおり)。
 - **ブラウザ自動化のスクリーンショットとダウンロードはリポジトリ直下(`.playwright-mcp/`)に落ちる。
   終わったら消す。**
