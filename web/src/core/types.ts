@@ -37,6 +37,9 @@ export interface ValidationWire {
   max_residual: WireFloat;
   rms_residual: WireFloat;
   runs_z: WireFloat;
+  /** The resonance probe's residual and its runs z, or NaN when the probe did not run. */
+  probe_rms: WireFloat;
+  probe_runs_z: WireFloat;
   systematic: boolean;
   passed: boolean;
   /**

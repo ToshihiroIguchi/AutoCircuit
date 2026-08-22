@@ -244,9 +244,13 @@ magnitude worse, which is what the restart comparison detects.
       must still read as a pass.
     - A *series* R-L-C is exactly the basis's three series terms and passes; it is the pole,
       not the resonance, that is unreachable.
-    - The escape covers only the high-residual end. A moderately damped anti-resonance
-      (Q ≈ 2–15, residuals 1.3–24.5%) still reports as a plain failure and still blames the
-      measurement. Open; closing it means adding complex poles to the basis.
+    - The residual magnitude covers only the gross case. A moderately damped anti-resonance
+      (Q ≈ 2–15, residuals 1.3–24.5%) is caught instead by the **resonance probe**: a failing
+      spectrum is refit with a bank of fixed-frequency, fixed-Q resonances added, and if the
+      systematic residual goes away the failure was the basis's. It runs only on failures, is
+      budgeted at 15% of the data's 2N equations, and can only turn `fail` into `inconclusive`
+      — never into a pass. `docs/KK_RESONANCE_PLAN.md` records why an unbudgeted bank used as
+      the basis itself fits a 1000% drift to 0.00% residual, and gates K1–K4.
 
 ## 6. Automatic topology discovery
 

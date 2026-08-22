@@ -168,6 +168,18 @@ static-site Web UI running the same core via WASM (Pyodide).
    a count of one event against zero, and the response to a bar that cannot resolve its own
    question is more seeds, never a reworded bar.
 
+11. `docs/KK_RESONANCE_PLAN.md` — the Lin-KK test and the resonance its basis cannot express.
+   **Implemented; gates K1–K4 measured.** Its §2 is the one to read, and it is the whole point
+   of the document: the obvious fix was *built* and the measurement rejected it. Giving the
+   basis complex poles keeps the solve linear and does fix the resonator, and it **destroys the
+   test** — an uncounted 200-column resonant bank fits a 61-point spectrum drifting 1000% to
+   0.00% residual with random residual signs, because 122 equations cannot constrain 223
+   unknowns. So the bank is a *probe* asked only of spectra that already failed, budgeted at
+   15% of 2N columns, able only to turn `fail` into `inconclusive` and never into a pass —
+   which is what makes it safe to add to the check that protects every other result here.
+   §5 says what is still not fixed and does not pretend otherwise: this test cannot validate a
+   resonator, and a spectrum of pure noise still passes.
+
 Update these when decisions change.
 
 ## Stack and conventions

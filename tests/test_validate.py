@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 
@@ -197,26 +199,71 @@ def test_a_series_resonance_is_representable_and_a_parallel_one_is_not() -> None
     assert lin_kk(parallel).verdict == "inconclusive"
 
 
-def test_the_open_gap_at_moderate_damping_is_recorded_rather_than_claimed_fixed() -> None:
-    """`MODEL_FAILURE_RMS` catches an unreachable shape only when the basis misses completely.
+def test_a_half_reached_resonance_is_caught_by_the_probe_not_by_the_threshold() -> None:
+    """The band `MODEL_FAILURE_RMS` cannot see, and what closes it.
 
-    [measured] The same resonator at mechanical Q = 5 leaves a residual of about 4.6% -- well
-    under the threshold -- while the residual pattern is firmly systematic. It therefore still
-    reports as a plain failure and still blames the measurement. This asserts the *current*
-    behaviour so that the limitation is visible in the suite rather than only in prose; closing
-    it means giving the basis complex poles, which is a change with its own measurement.
+    A moderately damped anti-resonance is *half*-reached: the residual stays under the
+    threshold while its pattern is firmly systematic, so the magnitude rule alone reports it as
+    a plain failure and blames the measurement. The resonance probe is what turns that into
+    "inconclusive". Both halves are asserted, so neither the threshold nor the probe can be
+    removed without this failing.
     """
-    damped = simulate(
-        "p(C1,R1-L1-C2)",
-        log_frequencies(1.6e5, 2.6e5, points_per_decade=1500),
-        # R = 2*pi*fs*L / Q with Q = 5.
-        {"C1.C": 2e-9, "R1.R": 800.0, "L1.L": 3.2e-3, "C2.C": 2e-10},
-    )
+    for q, resistance in ((2.0, 2000.0), (5.0, 800.0), (15.0, 266.7)):
+        damped = simulate(
+            "p(C1,R1-L1-C2)",
+            log_frequencies(1.6e5, 2.6e5, points_per_decade=1500),
+            {"C1.C": 2e-9, "R1.R": resistance, "L1.L": 3.2e-3, "C2.C": 2e-10},
+            noise=0.01,
+            seed=0,
+        )
 
-    result = lin_kk(damped)
-    assert result.verdict == "fail"
-    assert result.rms_residual < MODEL_FAILURE_RMS
-    assert result.systematic
+        without = lin_kk(damped, resonance_probe=False)
+        assert without.verdict == "fail", q
+        assert without.rms_residual < MODEL_FAILURE_RMS, q
+
+        result = lin_kk(damped)
+        assert result.verdict == "inconclusive", q
+        assert result.resonance_suspected, q
+        assert "about" in result.summary(damped)
+
+
+def test_the_probe_does_not_rescue_a_genuine_violation() -> None:
+    """Gate K2, and the whole reason the probe is budgeted.
+
+    An unbudgeted resonant bank fits a drifting spectrum exactly -- 200 columns against 122
+    equations -- so this is the assertion that stops `PROBE_COLUMN_FRACTION` being raised
+    without thought. Drift is swept over two orders of magnitude and three point densities,
+    because the failure it guards against gets *easier* as the spectrum gets shorter.
+    """
+    circuit, values = _CIRCUITS[0]
+    for points_per_decade in (10, 30, 50):
+        f = log_frequencies(1.0, 1e6, points_per_decade=points_per_decade)
+        clean = simulate(circuit, f, values, noise=0.01, seed=0)
+        for drift in (0.4, 1.0, 3.0, 10.0):
+            ramp = np.linspace(1.0, 1.0 + drift, clean.n)
+            drifted = Spectrum(clean.f, clean.z * ramp, {})
+
+            result = lin_kk(drifted)
+            assert result.verdict == "fail", (points_per_decade, drift)
+            assert not result.resonance_suspected, (points_per_decade, drift)
+
+
+def test_the_probe_is_unreachable_from_a_pass() -> None:
+    """Gate K1 and K4 together: the probe can only ever weaken a verdict.
+
+    Structural rather than statistical -- a spectrum that passes must come back byte for byte
+    the same with the probe off, and no spectrum may gain a pass from it.
+    """
+    circuit, values = _CIRCUITS[0]
+    spectrum = _simulate(circuit, values, noise=0.01, seed=0)
+
+    with_probe = lin_kk(spectrum)
+    without = lin_kk(spectrum, resonance_probe=False)
+    assert with_probe.verdict == "pass"
+    assert with_probe.n_elements == without.n_elements
+    assert with_probe.rms_residual == without.rms_residual
+    assert math.isnan(with_probe.probe_rms)
+    assert not with_probe.resonance_suspected
 
 
 def test_wire_carries_the_verdict() -> None:

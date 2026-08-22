@@ -152,14 +152,26 @@ recorded in the code as a comment and in `docs/IMPLEMENTATION_PLAN.md` marked **
   is the single place that order is decided, and the browser takes it over the wire rather
   than rebuilding it. (b) *A series resonance is representable.* A series R-L-C **is** the
   three series terms of the basis and passes at 0.98% residual; it is the pole, not the
-  resonance. (c) ***The escape only covers the high-residual end, and that gap is open.*** A
-  moderately damped anti-resonance is half-reached — the same resonator at Q = 2, 3, 5, 10, 15
-  gives 1.3%, 2.6%, 4.6%, 17.6%, 24.5% RMS, all under the threshold, with runs z from −5.7 to
-  −17.3 — so those still report as a plain failure and still blame the measurement.
-  `tests/test_validate.py::test_the_open_gap_at_moderate_damping_is_recorded_rather_than_claimed_fixed`
-  pins that as current behaviour. Closing it means giving the basis complex poles (a bank of
-  parallel R-L-C blocks on a resonance grid), which changes what the test can detect at all
-  and so needs its own gate — it is not a tweak to the threshold.
+  resonance. (c) *A residual magnitude alone does not catch it.* A moderately damped
+  anti-resonance is half-reached — the same resonator at Q = 2, 3, 5, 10, 15 gives 1.3%, 2.6%,
+  4.6%, 17.6%, 24.5% RMS, all under the threshold, with runs z from −5.7 to −17.3 — so the
+  threshold reads those as a plain failure. That band is closed by the *resonance probe*; see
+  the next entry and `docs/KK_RESONANCE_PLAN.md`.
+- **The resonance probe is a probe and not a basis, and the measurement is why.** Giving the
+  Lin-KK basis complex poles works mathematically — a parallel R-L-C block with its resonance
+  and Q fixed on a grid keeps the amplitude linear, exactly as a fixed τ does — but **shipping
+  it as the test destroys the test**. [measured] With a 200-column bank, a 61-point Randles
+  spectrum drifting 1000% fits to **0.00% residual with random residual signs**: 122 equations
+  cannot constrain 223 unknowns. The bank must be counted against the same `2 * len(spectrum)`
+  budget as the Voigt elements, and even then sizing it is a two-dimensional order scan that
+  moves every Lin-KK number here — a prototype that split the budget one third to relaxations
+  was measured to *fail clean Randles data* at 14.1% residual. So the bank is used only to ask
+  a second question of spectra that have **already failed**, at `PROBE_COLUMN_FRACTION` (15%)
+  of 2N columns, and it can only ever turn `fail` into `inconclusive`. Nothing that passes is
+  reachable from it, so no recorded number moved. Gates K1–K4 in `benchmarks/kk_resonance.py`:
+  the drift family stays `fail` 12/12 across two orders of magnitude of drift and three point
+  densities, and the resonator family reads `inconclusive` at Q = 2 to 300. Do not raise
+  `PROBE_COLUMN_FRACTION` without re-running K2.
 - **`SKINW`'s asymptotic branch needs three terms**, `J0/J1 = j + 1/(2q) - 3j/(8q²)`, and a
   switch at |q| = 1e5. The Hankel series converges as 1/|q|, *not* exponentially; the leading
   term alone at |q| = 300 left a 0.17% discontinuity.

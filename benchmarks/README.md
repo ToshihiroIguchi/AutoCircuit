@@ -21,6 +21,7 @@ python benchmarks/discovery_v2.py skeleton --workers 8       # gate P1, ~20 min
 python benchmarks/discovery_v2.py wrong-skeleton --workers 8 # gate P2, ~20 min
 python benchmarks/discovery_v2.py evolve-gate --seeds 3 --time-limit 600   # gate EV1, ~2.5 h
 python benchmarks/discovery_v2.py evolve-gate --only Maxwell --seeds 10 --warm 0,inf     --time-limit 600                                          # gate EV3, ~3 h
+python benchmarks/kk_resonance.py                       # gates K1-K4, seconds
 python benchmarks/pyodide/bench.py                      # CPython baseline for the web numbers
 ```
 
@@ -392,14 +393,43 @@ give 2.5%, 4.1%, 8.0% and 15.0% RMS. Two orders of magnitude of drift, and the m
 series R-L-C **is** the basis's three series terms, and it passes at 0.98%. It is the complex
 *pole* — the anti-resonance — that is unreachable, not resonance as such.
 
-**And the escape only covers the high-residual end.** The same resonator at mechanical
+**And the residual magnitude only covers the gross case.** The same resonator at mechanical
 Q = 2, 3, 5, 10, 15 leaves 1.3%, 2.6%, 4.6%, 17.6% and 24.5% RMS — all under the threshold —
-with runs z from −5.7 to −17.3. A half-reached anti-resonance therefore still reports as a
-plain failure and still blames the measurement. That gap is open, it is asserted as current
-behaviour in `tests/test_validate.py`, and the plain-failure text names the false positive so
-a user meeting it has something to check. Closing it means giving the basis complex poles — a
-bank of parallel R-L-C blocks on a resonance grid — which changes what the test can detect at
-all, and so is a change with its own gate rather than a new threshold.
+with runs z from −5.7 to −17.3. That band is closed by the resonance probe instead; see
+`kk_resonance.py` below.
+
+### `kk_resonance.py` — gates K1–K4, the Lin-KK resonance probe
+
+The plan is `docs/KK_RESONANCE_PLAN.md`, and its section 2 is the part worth reading: the
+obvious fix was built and measured, and the measurement rejected it. Giving the basis complex
+poles keeps the solve linear and does fix the resonator — and **destroys the test**. [measured]
+A 200-column resonant bank fits a 61-point Randles spectrum drifting 1000% to **0.00% residual
+with random residual signs**, because 122 real equations cannot constrain 223 unknowns. Budget
+the bank against the same `2 * len(spectrum)` the Voigt elements are counted against and the
+trade-off comes back, but sizing it then becomes a two-dimensional order scan that moves every
+Lin-KK number in this file — and a prototype allocating a third of the budget to relaxations
+was measured to *fail clean Randles data* at 14.1% residual, by starving the part the existing
+scan already sizes correctly.
+
+So the bank is a **probe**, not a basis: it asks one further question of spectra that have
+already failed, at 15% of 2N columns, and can only turn `fail` into `inconclusive`.
+
+| family | rows | without the probe | with it |
+|--------|-----:|-------------------|---------|
+| drift 40–1000%, at 10, 30, 50 points/decade | 12 | `fail` | **`fail` 12/12** |
+| Butterworth-Van Dyke, Q = 2, 5, 15 | 3 | `fail` | **`inconclusive`** |
+| Butterworth-Van Dyke, Q = 100, 300 | 2 | `inconclusive` | `inconclusive` |
+| Randles clean at 10, 30, 50 points/decade; series L-C-R | 4 | `pass` | `pass`, untouched |
+| Randles with Im sign flipped | 1 | `inconclusive` | `inconclusive` |
+
+**All gates pass.** The probe's own residual on the rescued resonators is 0.93% at runs z
++0.90 to +1.46; on the drift family it is 2.0–11.9% at runs z −5.0 to −15.3, which is the
+separation the acceptance rule is built on. A first version of that rule also demanded a
+threefold improvement in residual magnitude and was measured to drop the Q = 2 resonator, whose
+plain residual is already 1.3% — the runs test does the work alone.
+
+What is *not* fixed: this test still cannot validate a resonator. `inconclusive` is the honest
+verdict, not a workaround for one.
 
 ### `fitting.py restarts`
 

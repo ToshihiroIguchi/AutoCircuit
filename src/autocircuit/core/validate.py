@@ -30,20 +30,21 @@ Note the limits of that sentence, both of which are measured rather than reasone
 three series terms of this basis, and it passes with a 0.98% residual. It is the pole, not the
 resonance, that the basis cannot reach.
 
-*And the escape is only complete at the high-residual end.* :data:`MODEL_FAILURE_RMS` catches
-an unreachable shape by its residual *magnitude*, which works when the basis misses completely.
-A moderately damped anti-resonance is half-reached: [measured] the same resonator at mechanical
-Q = 2, 3, 5, 10 and 15 gives residuals of 1.3%, 2.6%, 4.6%, 17.6% and 24.5% -- under the
-threshold -- while the residual pattern stays firmly systematic (runs z from -5.7 to -17.3).
-Those still report as a plain failure and still blame the measurement. **That gap is open**, and
-closing it means giving the basis complex poles (a bank of parallel R-L-C blocks on a resonance
-grid), which would change what the test can and cannot detect and so needs its own measurement.
-The plain-failure text names the possibility so that a user meeting it has something to check.
+*And a residual magnitude alone does not catch it.* :data:`MODEL_FAILURE_RMS` works when the
+basis misses completely. A moderately damped anti-resonance is half-reached: [measured] the same
+resonator at mechanical Q = 2, 3, 5, 10 and 15 gives residuals of 1.3%, 2.6%, 4.6%, 17.6% and
+24.5% -- under the threshold -- while the residual pattern stays firmly systematic (runs z from
+-5.7 to -17.3). Those read as a plain failure blaming the measurement until the *resonance
+probe* asks a second question of them; see :data:`PROBE_COLUMN_FRACTION` and
+``docs/KK_RESONANCE_PLAN.md``, whose section 2 records why the probe is a probe rather than a
+replacement basis. What remains true either way is that **this test cannot validate a
+resonator**: "inconclusive" is the honest answer, not a workaround for one.
 """
 
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -61,7 +62,8 @@ Complex = NDArray[np.complex128]
 #:
 #: 2 (2026-08-22) added ``verdict``, so that the browser's badge stops compressing a three-way
 #: outcome into pass/fail.
-WIRE_VERSION = 2
+#: 3 (2026-08-22) added the resonance probe's residual and runs z.
+WIRE_VERSION = 3
 
 #: What the test concluded. ``"fail"`` is a statement about the data; ``"inconclusive"`` is a
 #: statement about the model, and says nothing either way about the measurement.
@@ -95,6 +97,20 @@ RUNS_Z_LIMIT = -3.0
 #: healthy noisy data as untested.
 MODEL_FAILURE_RMS = 0.25
 
+#: Quality factors of the probe's resonant bank; see :func:`_resonant_columns` and
+#: ``docs/KK_RESONANCE_PLAN.md``. Four values spanning two decades of damping, because a pole
+#: pair off the grid is approximated by its neighbours and the grid only has to be dense
+#: enough, not exact.
+PROBE_Q_GRID: tuple[float, ...] = (3.0, 10.0, 30.0, 100.0)
+
+#: How many columns the probe's bank may add, as a fraction of the 2N real equations a spectrum
+#: of N points provides. **This is the number that keeps the probe from destroying the test.**
+#: [measured] An uncounted bank of 200 columns fits a 61-point spectrum drifting 1000% -- a
+#: gross KK violation -- to 0.00% residual with random residual signs, because 122 equations
+#: cannot constrain 223 unknowns. Budgeted here, the same drift stays firmly systematic at every
+#: point density tried. Do not raise this without re-running gate K2.
+PROBE_COLUMN_FRACTION = 0.15
+
 
 @dataclass(frozen=True)
 class KKResult:
@@ -122,6 +138,21 @@ class KKResult:
     systematic: bool
     passed: bool
     residual_limit: float
+    probe_rms: float = math.nan
+    """RMS residual of the resonance probe, or NaN when the probe did not run.
+
+    The probe refits at the same order with a bank of fixed resonances added, and is only ever
+    reached from a failure whose residual is small enough to be worth a second question. See
+    ``docs/KK_RESONANCE_PLAN.md``.
+    """
+    probe_runs_z: float = math.nan
+    """Runs-test z of the probe's residual, or NaN when the probe did not run.
+
+    This, not the residual magnitude, is what decides: [measured] requiring the probe to beat
+    the plain residual threefold as well dropped a Q = 2 resonator whose plain residual is
+    already 1.3%, while adding nothing -- the drift family is separated by the runs test alone,
+    at runs z from -5.0 to -15.3.
+    """
 
     @property
     def model_failed(self) -> bool:
@@ -130,6 +161,13 @@ class KKResult:
         A raw magnitude question, and rarely the one a caller wants. Use :attr:`verdict`.
         """
         return self.rms_residual >= MODEL_FAILURE_RMS
+
+    @property
+    def resonance_suspected(self) -> bool:
+        """The probe ran and removed the systematic residual, so the basis was the problem."""
+        if math.isnan(self.probe_runs_z):
+            return False
+        return self.probe_runs_z >= RUNS_Z_LIMIT and self.probe_rms < MODEL_FAILURE_RMS
 
     @property
     def verdict(self) -> Verdict:
@@ -143,7 +181,9 @@ class KKResult:
         """
         if self.passed:
             return "pass"
-        return "inconclusive" if self.model_failed else "fail"
+        if self.model_failed or self.resonance_suspected:
+            return "inconclusive"
+        return "fail"
 
     def summary(self, spectrum: Spectrum) -> str:
         headline = {"pass": "PASS", "fail": "FAIL", "inconclusive": "NO VERDICT"}[self.verdict]
@@ -160,7 +200,16 @@ class KKResult:
             worst = int(np.argmax(combined))
             lines.append(f"  Worst point     : {spectrum.f[worst]:.6g} Hz")
             lines.append("")
-            if self.verdict == "inconclusive":
+            if self.resonance_suspected:
+                lines += [
+                    "  A KK-compliant model that also carries resonances fits this data with",
+                    "  random residuals, and the Lin-KK basis cannot express an anti-resonance",
+                    "  because it has only real poles. The failure above is therefore about",
+                    "  the basis, not about the measurement, and no verdict on the data is",
+                    "  available. A resonator is the usual reason; the probe's own residual is",
+                    f"  {self.probe_rms:.4%} with runs z = {self.probe_runs_z:+.2f}.",
+                ]
+            elif self.verdict == "inconclusive":
                 # The residual is the size of the data, so the model reproduced essentially
                 # none of it and has tested nothing. Saying which of the two causes it is
                 # would be a guess, so both are named and neither is asserted.
@@ -179,11 +228,6 @@ class KKResult:
                     "  Typical causes: drift during the sweep, a non-linear excitation",
                     "  amplitude, temperature change, or a bad contact. Fitting a circuit to",
                     "  this data will produce confident but meaningless parameters.",
-                    "",
-                    "  One known false positive: a moderately damped anti-resonance. The Voigt",
-                    "  basis cannot express one, and at mechanical Q below about 15 it misses",
-                    "  it by too little to be caught above. If the spectrum turns inductive",
-                    "  over a band and back, read this verdict with that in mind.",
                 ]
         return "\n".join(lines)
 
@@ -211,6 +255,8 @@ class KKResult:
             "max_residual": encode_float(self.max_residual),
             "rms_residual": encode_float(self.rms_residual),
             "runs_z": encode_float(self.runs_z),
+            "probe_rms": encode_float(self.probe_rms),
+            "probe_runs_z": encode_float(self.probe_runs_z),
             "systematic": self.systematic,
             "passed": self.passed,
             "verdict": self.verdict,
@@ -219,8 +265,45 @@ class KKResult:
         }
 
 
+def _resonant_columns(omega: Float, w0: float, q: float) -> list[Complex]:
+    """The two numerator functions over one fixed conjugate pole pair.
+
+    A parallel R-L-C block is ``Z = A / (1 + jQ(w/w0 - w0/w))``, which in pole form is
+    ``A (w0/Q) s / (s^2 + (w0/Q) s + w0^2)``: a pole pair at real part ``-w0/(2Q)``, in the left
+    half plane for any Q > 0. Fixing ``w0`` and ``Q`` on a grid is what keeps the amplitude
+    linear -- the same trick the fixed tau grid plays for the relaxations -- and it also means
+    the sign of the amplitude cannot move the poles, so a negative one is no less causal than
+    the negative ``R_k`` a Voigt series already produces.
+
+    Both columns are Hermitian in omega, so real coefficients keep the model a real-valued
+    time-domain response. The second (low-pass) column is what lets a *fixed* pole pair carry
+    any residue, rather than only the band-pass one.
+    """
+    denominator = (w0**2 - omega**2) + 1j * omega * w0 / q
+    return [
+        np.asarray((w0 / q) * (1j * omega) / denominator, dtype=np.complex128),
+        np.asarray((w0**2) / denominator, dtype=np.complex128),
+    ]
+
+
+def _probe_grid(omega: Float, n_points: int) -> list[tuple[float, float]]:
+    """Resonance grid for the probe: log-spaced frequencies against :data:`PROBE_Q_GRID`.
+
+    Sized by :data:`PROBE_COLUMN_FRACTION` of the data rather than by anything about the
+    spectrum's shape, so the probe cannot buy flexibility from the question it is being asked.
+    """
+    budget = int(PROBE_COLUMN_FRACTION * 2 * n_points)
+    pairs = max(1, budget // (2 * len(PROBE_Q_GRID)))
+    frequencies = np.logspace(np.log10(omega.min()), np.log10(omega.max()), pairs)
+    return [(float(w0), float(q)) for q in PROBE_Q_GRID for w0 in frequencies]
+
+
 def _design_matrix(
-    omega: Float, tau: Float, add_inductance: bool, add_capacitance: bool
+    omega: Float,
+    tau: Float,
+    add_inductance: bool,
+    add_capacitance: bool,
+    resonances: Sequence[tuple[float, float]] = (),
 ) -> Complex:
     """Columns of the KK-compliant linear model, evaluated at each angular frequency."""
     columns: list[Complex] = [np.ones_like(omega, dtype=np.complex128)]
@@ -230,6 +313,8 @@ def _design_matrix(
         columns.append(np.asarray(1.0 / (1j * omega), dtype=np.complex128))
     for t in tau:
         columns.append(np.asarray(1.0 / (1.0 + 1j * omega * t), dtype=np.complex128))
+    for w0, q in resonances:
+        columns.extend(_resonant_columns(omega, w0, q))
     return np.stack(columns, axis=1)
 
 
@@ -241,6 +326,7 @@ def _solve(
     w_im: Float,
     add_inductance: bool,
     add_capacitance: bool,
+    resonances: Sequence[tuple[float, float]] = (),
 ) -> tuple[Float, Complex]:
     """Weighted linear least squares for the Voigt resistances and the series terms.
 
@@ -250,7 +336,7 @@ def _solve(
     and ``lstsq`` truncates the solution into nonsense. Scaling each column to unit norm
     (Jacobi preconditioning) leaves the solution unchanged but makes it computable.
     """
-    design = _design_matrix(omega, tau, add_inductance, add_capacitance)
+    design = _design_matrix(omega, tau, add_inductance, add_capacitance, resonances)
     a = np.vstack([design.real * w_re[:, None], design.imag * w_im[:, None]])
     b = np.concatenate([z.real * w_re, z.imag * w_im])
 
@@ -272,6 +358,7 @@ def lin_kk(
     add_capacitance: bool = True,
     weighting: Weighting = "modulus",
     residual_limit: float = DEFAULT_RESIDUAL_LIMIT,
+    resonance_probe: bool = True,
 ) -> KKResult:
     """Run the Lin-KK test on a spectrum.
 
@@ -286,6 +373,11 @@ def lin_kk(
         weighting: Weighting used in the linear least squares; see
             :func:`autocircuit.core.weighting.weight_vectors`.
         residual_limit: Residual magnitude (relative to |Z|) that passes unconditionally.
+        resonance_probe: On a *failing* spectrum whose residual is small enough to be worth a
+            second question, refit with a bank of fixed resonances added and check whether the
+            systematic residual was the basis's fault. It can only ever turn a failure into
+            ``"inconclusive"``; nothing that passes is touched. Off, the verdict is the
+            two-question one this module had before ``docs/KK_RESONANCE_PLAN.md``.
 
     Returns:
         A :class:`KKResult`. ``passed`` is False when a KK-compliant model tracks the data
@@ -334,6 +426,26 @@ def lin_kk(
     systematic = bool(runs_z < RUNS_Z_LIMIT)
     passed = bool(max_residual <= residual_limit or not systematic)
 
+    # Only from a failure, and only from one the model did follow: above MODEL_FAILURE_RMS the
+    # verdict is already "inconclusive" and a second solve would answer a question nobody asked.
+    probe_rms = math.nan
+    probe_runs_z = math.nan
+    if resonance_probe and not passed and rms_residual < MODEL_FAILURE_RMS:
+        _, z_probe = _solve(
+            omega,
+            z,
+            tau,
+            w_re,
+            w_im,
+            add_inductance,
+            add_capacitance,
+            _probe_grid(omega, len(spectrum)),
+        )
+        probe_re = (z.real - z_probe.real) / magnitude
+        probe_im = (z.imag - z_probe.imag) / magnitude
+        probe_rms = float(np.sqrt(np.mean(np.concatenate([probe_re, probe_im]) ** 2)))
+        probe_runs_z = min(_runs_z(probe_re), _runs_z(probe_im))
+
     return KKResult(
         n_elements=m,
         mu=mu,
@@ -351,6 +463,8 @@ def lin_kk(
         systematic=systematic,
         passed=passed,
         residual_limit=residual_limit,
+        probe_rms=probe_rms,
+        probe_runs_z=probe_runs_z,
     )
 
 
