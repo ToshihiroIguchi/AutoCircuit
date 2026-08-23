@@ -36,6 +36,7 @@ from autocircuit.core.circuit import (
     subtree_paths,
 )
 from autocircuit.core.discover import (
+    _breeding_pool,
     _next_generation,
     _screening_score,
     _unique_best,
@@ -173,6 +174,14 @@ def arm_ga_bounded(table: Table, rng: np.random.Generator, pool: tuple[str, ...]
     `_evolve` breeds from the entire history, so `_tournament` draws 3 of N with N rising every
     generation -- the 8.2x pressure collapse of `EVOLVE_SEARCH_PLAN.md` section 1.2. Here the
     pool is the Pareto front plus the best `population` by score, and nothing else changes.
+
+    Since the measurement that this arm won, the rule has shipped as `discover._breeding_pool`
+    and this arm **calls it** rather than restating it -- the same reason `current` drives
+    `_next_generation` instead of copying it. Two differences from the arm as first measured,
+    both of them the library's: the archive is no longer truncated to the pool (it is what the
+    report's shortlist is drawn from, and the pool provably contains the whole history's front
+    and top `population` anyway), and equal scores break on the canonical form rather than on
+    insertion order. The re-measured number is in `docs/SEARCH_ALGORITHM_SCREENING.md`.
     """
     trees: list[tuple[Node, Ind | None]] = [
         (random_topology(rng, pool, int(rng.integers(2, max_elements + 1))), None)
@@ -193,11 +202,7 @@ def arm_ga_bounded(table: Table, rng: np.random.Generator, pool: tuple[str, ...]
             trees = [(random_topology(rng, pool, int(rng.integers(2, max_elements + 1))), None)
                      for _ in range(population)]
             continue
-        front = pareto_front(alive_all, CRITERION)
-        ranked = sorted(alive_all, key=lambda c: c.score(CRITERION))[:population]
-        keys = {id(c) for c in front}
-        alive = front + [c for c in ranked if id(c) not in keys]
-        scored = list(alive)
+        alive = _breeding_pool(alive_all, population, CRITERION)
         pressure.append(1.0 - (1.0 - 1.0 / len(alive)) ** 3)
         trees = _next_generation(alive, rng, pool, max_elements, population, CRITERION)
         generation += 1

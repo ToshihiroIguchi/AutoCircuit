@@ -21,6 +21,7 @@ python benchmarks/discovery_v2.py skeleton --workers 8       # gate P1, ~20 min
 python benchmarks/discovery_v2.py wrong-skeleton --workers 8 # gate P2, ~20 min
 python benchmarks/discovery_v2.py evolve-gate --seeds 3 --time-limit 600   # gate EV1, ~2.5 h
 python benchmarks/discovery_v2.py evolve-gate --only Maxwell --seeds 10 --warm 0,inf     --time-limit 600                                          # gate EV3, ~3 h
+python benchmarks/ev4_diversity.py --reference three-block --seeds 3   # gate EV4, ~35 min
 python benchmarks/ev5_fingerprint.py --out before.txt    # gate EV5, ~4 min per side
 python benchmarks/kk_resonance.py                       # gates K1-K4, seconds
 python benchmarks/pyodide/bench.py                      # CPython baseline for the web numbers

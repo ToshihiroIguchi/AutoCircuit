@@ -369,19 +369,55 @@ nearly lost the truth to a cheaper screen, and how `METRICS_AND_UX_PLAN.md` §1.
 
 For §1.2 and §1.3, in that order of importance.
 
-- **Bounded selection pool.** Breeding draws from a fixed-size population (current generation
-  plus the Pareto-front elite, oldest evicted) rather than from the whole history. The
-  `_Evaluator` cache stays global — dedup must not be thrown away with the archive.
-- **Selection pressure held constant.** Tournament size scales with the pool
-  (`max(3, round(TOURNAMENT_FRACTION * len(pool)))`) so that §1.2's 8.2× decay cannot recur if
-  the pool size is later changed.
-- **Islands.** `populations: int`, each with its own RNG stream derived from `seed`, exchanging a
-  fraction of members per generation. Note one thing this port gets for free that PySR does not:
-  the evaluator cache is shared across islands, so two islands converging on the same topology
-  cost one fit, not two.
+- **Bounded selection pool. [implemented]** Breeding draws from `_breeding_pool` — the Pareto
+  front plus the best `population` by score — rather than from the whole history. **It costs diversity and the cost is measured**: the per-generation cache-hit rate rises 26 points across a run against the control's 6, which is EV4's first clause failed (see §4). The
+  `_Evaluator` cache stays global; so, and this is a change from the sketch below, does the
+  **archive**. The screening-round arm assigned its bounded pool back over the history, which is
+  free there because a table walk has no report to produce; here the archive is what
+  `_shortlist_candidates` draws tier 2 from, and it costs nothing to keep, because the pool
+  provably contains the whole history's front and its top `population` anyway. So the search
+  breeds from a bounded set and the report still selects from everything that was fitted.
+- **Selection pressure held constant. [not done, and now unmotivated as written]** The sketch
+  scaled the tournament with the pool (`max(3, round(TOURNAMENT_FRACTION * len(pool)))`). With
+  `len(pool)` no longer growing, a fixed tournament of 3 *is* a fixed pressure, and
+  `TOURNAMENT_FRACTION` has no measurement behind it. [measured] On the frozen landscape the
+  bounded arm's pressure goes 0.103 → 0.065 over a run where the incumbent's goes 0.103 → 0.003:
+  the 8.2× collapse §1.2 measured becomes 1.6×. Left alone unless something measures a need.
+- **Islands. [not done]** `populations: int`, each with its own RNG stream derived from `seed`,
+  exchanging a fraction of members per generation. Note one thing this port gets for free that
+  PySR does not: the evaluator cache is shared across islands, so two islands converging on the
+  same topology cost one fit, not two.
 
 Measured target: cache-hit rate per generation stops rising, and EV1 does not regress. Both, not
 either.
+
+#### 3.4.1 What the bounded pool is worth, and where that number comes from
+
+The evidence is `docs/SEARCH_ALGORITHM_SCREENING.md`, whose whole point is that this question
+cannot be afforded at gate prices: `evolve-gate` costs 2.5–3 h per arm because its budget is
+wall-clock and it fits as it goes. The round screens every topology in the space *once* into a
+frozen table, after which a topology search is a lookup-table walk budgeted in **fits**, and 120
+seeds are free.
+
+**[measured] 120/120 [0.97,1.00] at a median of 308 fits, against the incumbent's 87/120
+[0.64,0.80] at 451** — the truth's verified equivalence class, 21,057-topology `R,C,L,CPE` arena,
+900 fits per run, `benchmarks/screening_round/arms.py --arms current,ga_bounded`. The intervals
+do not touch. Two things about that number:
+
+* **It was re-measured against the shipped rule rather than inherited.** `arm_ga_bounded` now
+  calls `discover._breeding_pool` instead of restating it, so the arm cannot drift from the
+  library — the same reason the incumbent arm drives `_next_generation` directly. The two
+  differences that introduced (the archive is no longer truncated; equal scores break on the
+  canonical form rather than on insertion order) moved neither figure: 120/120 and 308 again.
+* **It is not a gate and does not claim to be.** The frozen landscape abstracts the tier-1 fit
+  away, so it measures the *topology search* and nothing else. What it predicts transferred once
+  already (§4.6 of that document), and EV1 below is where it is asked to transfer again.
+
+Two of the round's other arms also reach 120/120 — NSGA-II at a median of 256 fits and a
+MAP-Elites archive at 418 — and what all three share is not their operators but that they bound
+the set they breed from. This is the smallest of the three, so it goes first; NSGA-II is worth
+its selection rewrite only if this is not enough. **ALPS age layering must not be added**: on top
+of MAP-Elites it measured 24/30, the one addition in the round that made things worse.
 
 ### 3.5 Step 5 — adaptive parsimony, and the mutation weights
 
@@ -444,12 +480,42 @@ Last, because they are tuning and the steps above are structure.
     of this plan may report fewer than **1/9 truth-reported, 1/9 on-front, 0/9 recommended**.
     Steps 3–5 are changes to a search that is nearly blind here; the one thing they must not do
     is make it blinder while looking faster.
-  - *Ceiling.* **1/9 is also the largest claim this project may make for `mode="auto"` above
-    five elements.** The exhaustive stage passes G1 30/30; the fallback it hands off to recovers
-    one truth in nine and recommends none. Those two numbers must never be reported as one
-    capability, and §6's clause — that the honest outcome may be for `auto` to report an
-    under-fitted exhaustive front rather than hand off at all — is now a live decision rather
-    than a hypothetical, to be taken with steps 3–5's measurements in hand.
+  - *Ceiling.* **The baseline's 1/9 is also the largest claim this project may make for
+    `mode="auto"` above five elements** — a number that moves only when a measurement moves it,
+    and it has: see the step-4 reading below, which raises the ceiling to **6/9 reported and 3/9
+    recommended**. The shape of the rule does not change with the number. The exhaustive stage
+    passes G1 30/30; the fallback it hands off to now recovers six truths in nine and recommends
+    three. Those two must never be reported as one capability, and §6's clause — that the honest
+    outcome may be for `auto` to report an under-fitted exhaustive front rather than hand off at
+    all — stays live, because one of the three references is still 0/3.
+
+  **[measured] Step 4's first half — the bounded breeding pool — on the same three references,
+  the same seeds 0–2 and the same 600 s.**
+
+  | reference | elem | truth reported | on the front | is the recommendation | topologies | min | best err |
+  |---|---:|---:|---:|---:|---:|---:|---:|
+  | three-block Maxwell-Wagner | 6 | **3/3** | 3/3 | 3/3 | 541–594 | 3.7–4.5 | 1.24–1.34% |
+  | capacitor + interfacial block | 6 | **3/3** | 1/3 | 0/3 | 648–734 | 5.3–11.7 | 1.25–1.33% |
+  | Randles + ESL + second block | 7 | **0/3** | 0/3 | 0/3 | 725–737 | 11.4–12.4 | 1.24–1.65% |
+  | **all three** | | **6/9** | **4/9** | **3/9** | | | |
+
+  **The ratchet holds on all three of its clauses** (1/9, 1/9, 0/9 floors) and every one of them
+  rises. Against the nearest same-code control — the interleaved `warm on` arm of EV3's ratchet
+  check, which is this search one step earlier on these exact references and seeds — reported
+  goes **3/9 → 6/9**, on-front **1/9 → 4/9**, recommended **1/9 → 3/9**. The capacitor reference
+  went 0/3 → 3/3 reported, and its own note in `LARGE_REFERENCES` predicted exactly the shape it
+  now has: reported without being recommended, because a 10 mΩ ESR at 1% noise is a parameter
+  the parsimony rule is right to decline.
+
+  **Two things this run may not be read as saying.** It was **not interleaved against a same-day
+  control**, and the budget is wall-clock on a machine §4 measures as drifting by a factor of two
+  within an hour — so the recovery counts stand (they are absolute floors, which is why the bar
+  was written as absolute floors) while *topologies evaluated* and *minutes* are indicative only.
+  The gate-grade comparative evidence for this change is not here at all: it is
+  `docs/SEARCH_ALGORITHM_SCREENING.md` §5's 120 seeds counted in **fits**, where the arms cannot
+  measure the machine. And Randles is still **0/3** — its best relative error improved from
+  2.09–5.42% to 1.24–1.65%, so the search now returns a *good fit* of the wrong topology where it
+  used to return neither, but on the seven-element reference the truth is still not found.
 
   Step 2 moved the quantity EV1 measures, which is why the two halves of the baseline are
   comparable at all: reporting tier-2 only makes `reported` a claim about the *refitted* list,
@@ -566,6 +632,41 @@ Last, because they are tuning and the steps above are structure.
 - **EV4 — diversity.** Per-generation cache-hit rate does not rise across a run, and the
   best-known candidate's probability of entering a tournament does not fall with generation
   number. EV1 must not regress.
+
+  **[measured] Step 4's first half meets the second clause and the third, and FAILS the first.**
+  `benchmarks/ev4_diversity.py`, three-block Maxwell-Wagner, seeds 0–2, 600 s, the two arms
+  interleaved seed by seed with the control produced by neutralising `_breeding_pool` rather
+  than by an older copy of the code. The hit rate is the mean of the first third of the
+  generations against the mean of the last third:
+
+  | arm | hit rate | set bred from | P(best enters a tournament) | unique topologies |
+  |---|---|---|---|---|
+  | unbounded (control) | 39→46, 38→42, 37→43 (**+5.7 pt**) | 25–32 → **596–636** | 0.091–0.115 → **0.005** | 692, 717, 722 |
+  | bounded | 38→67, 39→67, 38→60 (**+26.3 pt**) | 25–32 → **45–46** | 0.091–0.115 → **0.065** | 541, 562, 594 |
+
+  *Clause 2 passes by a factor of 13* — §1.2's decay is what this step was for, and at the end of
+  a run the best-known candidate is 13x likelier to be drawn into a tournament than it was.
+  *Clause 3 passes:* EV1 rose on all three counts (above). *Clause 1 fails:* two thirds of the
+  bounded arm's late proposals are topologies it has already fitted, against a control that
+  reaches 42–46%.
+
+  **Two things that measurement says which are not in the clause, and neither is a reason to
+  reword it.** The **control fails clause 1 as well** — every unbounded run also rises, by
+  5.7 points — so "does not rise" was already unmet by the search this plan started from, and it
+  cannot be a bar that only the new code has to clear. And the **outcome the clause is a proxy
+  for moved the other way**: the bounded arm fits fewer distinct topologies (541–594 against
+  692–722) and recovers the truth far more often (EV1 3/3 against a control of 1/3 on this same
+  reference). Re-proposal under a bounded pool is refinement — the cache is best-wins, so a
+  second visit improves that topology's fit — rather than the stall the clause assumes. The
+  counts also still vary with the seed, so nothing has closed one neighbourhood and stopped.
+
+  **So this step ships with EV4 open, and says so.** The clause is not withdrawn and not
+  reinterpreted: it is recorded as failed, with the two measurements above beside it, and the
+  remedies are already in this plan — islands (step 4's second half) and adaptive parsimony in
+  selection (step 5), both of which attack exactly the concentration that produces the number.
+  What a future session must not do is rewrite the clause to something the build already does;
+  what it may do is measure whether a *cheap* re-proposal is a cost at all, which this run
+  suggests and does not establish (541 fits in 5.5 min against 692 in 7.1).
   (EV5 is stated above, next to the baseline it corrects.) Its full form: `mode="exhaustive"`
   and `mode="auto"` below the fallback threshold produce identical results for a fixed seed
   before and after every step; the full test suite stays green; `npm run check` is untouched
@@ -578,7 +679,7 @@ Last, because they are tuning and the steps above are structure.
 | 1 | 6–7 element references + `evolve-gate` benchmark mode; run it; write EV1's bar from the result | M | — | **done, baseline partial** — mode and references landed and measured; 4 of 9 runs completed before the machine stopped them twice (§4) |
 | 2 | tier-2-only reporting in `_evolve`; shared per-size quota helper; `REFINE_DEFAULT["evolve"]`; EV2 test; withdraw G5 in `DISCOVERY_V2_PLAN.md` | M | 1 | **done** — EV2 and EV5 both measured; see §3.2.1. **Reopened once**: the deadline this step added had no refit *order* behind it and lost a first-ranked candidate (§3.2.1, fourth bullet); fixed and re-gated |
 | 3 | structural parameter inheritance, two-stage evaluation, best-wins cache; sweep `WARM_ACCEPT_FACTOR`; EV3 | L | 2 | **done** — EV3 passes both halves (§4); §3.3.1 records the polish budget that decided it, and the two readings that nearly got it wrong |
-| 4 | bounded selection pool, scaled tournament, islands with shared cache; EV4 | M | 3 | planned |
+| 4 | bounded selection pool, scaled tournament, islands with shared cache; EV4 | M | 3 | **first half done, EV4 open** — `_breeding_pool`: 120/120 against 87/120 on the frozen landscape (§3.4.1) and EV1 1/9 → 6/9, but EV4's first clause **fails** and is recorded rather than reworded (§4). The scaled tournament is unmotivated once the pool is bounded; islands are not done and are now the named remedy |
 | 5 | adaptive parsimony in selection only; mutation-weight sweep | M | 4 | planned |
 | 6 | docs: this file marked implemented with its corrections, `CLAUDE.md` "Start here" entry 10, `benchmarks/README.md`, `DISCOVERY_V2_PLAN.md` §4 G5 withdrawal note | S | 5 | planned |
 

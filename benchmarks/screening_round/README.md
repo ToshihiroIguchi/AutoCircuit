@@ -19,7 +19,9 @@ Screen every plausible topology in the space once, keep the table, and a topolog
 a lookup-table walk: milliseconds a run, hundreds of seeds free, and the budget counted in
 **fits** rather than seconds — so the comparison does not measure the machine. `arms.py` drives
 `discover._next_generation`, `mutate`, `crossover`, `_tournament` and `_unique_best` directly, so
-the incumbent arm is the real search and not a copy of it.
+the incumbent arm is the real search and not a copy of it. The same now goes for the arm that
+won: `ga_bounded` calls `discover._breeding_pool`, which shipped after this round, so re-running
+`--arms current,ga_bounded` re-measures the library rather than a description of it.
 
 ## The generated tables are not committed
 

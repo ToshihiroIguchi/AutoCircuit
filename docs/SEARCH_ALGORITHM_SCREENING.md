@@ -375,7 +375,7 @@ is by change size, not by median, because the medians are close and the risk is 
 
 | candidate | evidence |
 |---|---|
-| **bounding the breeding pool** (`EVOLVE_SEARCH_PLAN.md` step 4's first half; the minimal reading of survey (e)) | 120/120 [0.97,1.00], median 308 fits against 451. A few lines around `_next_generation`'s caller |
+| **bounding the breeding pool** (`EVOLVE_SEARCH_PLAN.md` step 4's first half; the minimal reading of survey (e)) — **adopted; it is `discover._breeding_pool`** | 120/120 [0.97,1.00], median 308 fits against 451. A few lines around `_next_generation`'s caller. Re-measured against the shipped rule (the arm now calls it rather than restating it) and unchanged: 120/120, median 308 |
 | **(f) NSGA-II** | 120/120 [0.97,1.00], median **256** — the fastest arm measured, for a selection rewrite |
 | **(e) MAP-Elites archive** (without ALPS) | 120/120 [0.97,1.00], median 418 — clears the bar, and is the slowest and largest of the three |
 

@@ -9,7 +9,8 @@ is already on the canvas, and a start-up that made a visitor wait for scipy befo
 CSV (§19), and again while giving the genetic search its first quality gate (§20 — **work in
 progress**), and again after the first of the geometry-free readouts that `CLAUDE.md`'s purpose
 point 2 asks for (§21 — landed and gated, with its own list of what is not done), and again
-after the reporting-path defect that the search-algorithm screening round turned up (§23).
+after the reporting-path defect that the search-algorithm screening round turned up (§23) and the
+bounded breeding pool that round recommended (§25).
 Read this first, then `CLAUDE.md`, then the plan for whichever part you are touching.
 
 ## 1. Where things stand
@@ -373,10 +374,15 @@ recorded in the code as a comment and in `docs/IMPLEMENTATION_PLAN.md` marked **
   whole path and the wheel's metadata install fails (`UnsupportedWheel`, after the files have
   already been extracted — so it looks like it worked). Pass names and set `packageCacheDir` to
   the directory holding the vendored wheels.
-- **Long benchmarks must be launched detached.** A backgrounded shell command is killed after
-  ten minutes, and the G1 gate takes about two hours. Use
-  `Start-Process python -ArgumentList ... -RedirectStandardOutput <file> -PassThru` and watch
-  the file; set `$env:PYTHONPATH` first, the child inherits it. Two long runs were lost to this
+- **Long benchmarks must be launched detached — and [measured, §24] the agent harness's own
+  background mode is the way that works.** Passing `run_in_background` on the tool call survived
+  a **25-minute** job to completion and reported its exit; the older advice below was written
+  from two runs lost at about ten minutes, which is what happens to a *shell*-backgrounded
+  command (`nohup … &` inside one is worse: the wrapper exits, the child goes with it, and the
+  log file is never even created). Output goes to a task file that can be read while the job
+  runs, so the `flush=True` rule still applies. `Start-Process python -ArgumentList ...
+  -RedirectStandardOutput <file> -PassThru` remains the fallback outside the harness; set
+  `$env:PYTHONPATH` first, the child inherits it. Two long runs were lost to this
   before the rule above was found again, and one of them produced no output at all, which reads
   like a crash rather than a kill -- the run's own prints were still sitting in the pipe buffer.
   A `print(..., flush=True)` per finished unit of work is what makes a detached run readable
@@ -1387,6 +1393,8 @@ repository's characteristic failure sitting inside the reporting path.
   probe is committed as `benchmarks/ev5_fingerprint.py` since §23 and no longer rebuilt by hand.
 - Step 2's deadline was **reopened and fixed in §23**: it had no refit *order* behind it, and a
   first-ranked candidate went unreported because of it.
+- Step 4's first half landed in §25: `_breeding_pool` bounds what the search breeds from, and
+  EV1 went 1/9 → **6/9** reported on the baseline's own references and seeds.
 - G5 of `docs/DISCOVERY_V2_PLAN.md` is withdrawn, with the reason written beside it.
 
 ### Three things not to re-derive, from step 2
@@ -1802,3 +1810,103 @@ evidence behind them and mixing them would leave neither measured. And it did no
 `REFIT_HEADROOM`: a 73-candidate shortlist against 40 affordable fits is a real budget shortfall,
 and now that the cut takes the least valuable rows the shortfall is visible in `refit_progress`
 rather than silently fatal.
+
+
+## 25. The search stops breeding from its whole history -- `_breeding_pool`
+
+Step 4's first half of `docs/EVOLVE_SEARCH_PLAN.md`, and the first item on
+`docs/SEARCH_ALGORITHM_SCREENING.md` §5's adopt list. `_evolve` bred from its entire archive, so
+`_tournament` drew 3 of N with N growing every generation and the best-known candidate's chance
+of being picked fell 8.2x over twelve generations (§1.2 of the plan). It now breeds from
+`_breeding_pool` -- the Pareto front plus the best `population` by score -- and nothing else
+about the search changed.
+
+### What it is worth, and which measurement says so
+
+**The gate-grade comparison is the frozen landscape, not the wall clock.** [measured] 120 seeds
+on the 21,057-topology `R,C,L,CPE` arena, budget counted in **fits**: **120/120 [0.97,1.00] at a
+median of 308**, against the incumbent's **87/120 [0.64,0.80] at 451**. The arm was re-pointed at
+the shipped function -- `arms.py` calls `discover._breeding_pool` rather than restating it -- and
+returned the same two figures, so the two differences the library introduced (the archive is not
+truncated; equal scores break on the canonical form) changed nothing.
+
+**[measured] EV1, the real search, three references x seeds 0-2, 600 s each: 6/9 reported, 4/9
+on the front, 3/9 recommended**, against a ratchet of 1/9, 1/9, 0/9 and against the nearest
+same-code control (EV3's interleaved `warm on` arm, same references and seeds) of 3/9, 1/9, 1/9.
+Three-block Maxwell-Wagner went 3/3 on all three counts; capacitor + interfacial went 0/3 -> 3/3
+reported while staying 0/3 recommended, which is what that reference's own note predicts for a
+10 mOhm ESR at 1% noise; Randles stayed 0/3 but its best relative error went 2.09-5.42% ->
+1.24-1.65%, so it now returns a good fit of the wrong topology rather than neither.
+
+**That EV1 run is not an interleaved comparison and must not be read as one.** No same-day
+control arm was run beside it, the budget is wall-clock, and this machine drifts by a factor of
+two within an hour (§4). The recovery counts are absolute floors, which is exactly why EV1's bar
+was written as absolute floors; *topologies evaluated* and *minutes* from that run are indicative
+only.
+
+### EV4 fails on one clause, and the step ships saying so
+
+[measured] `benchmarks/ev4_diversity.py`, three-block Maxwell-Wagner, seeds 0-2, 600 s, arms
+interleaved, the control made by neutralising `_breeding_pool` rather than by an old copy of the
+code. The per-generation cache-hit rate goes **38% -> 65% (mean, +26 points)** bounded against
+**38% -> 44% (+5.7)** unbounded, so **EV4's first clause is failed**. Its second passes by 13x --
+the best-known candidate's chance of entering a late tournament is 0.065 against 0.005, which is
+the decay this step exists to stop -- and its third passes, since EV1 rose.
+
+Two things the measurement adds that are *not* reasons to reword the clause, and it was not
+reworded. The **control fails it too**, so "the hit rate does not rise" was never a bar only the
+new code had to clear. And the **outcome it stands proxy for moved the other way**: the bounded
+arm fits *fewer* distinct topologies (541-594 against 692-722) and recovers the truth far more
+often (3/3 against 1/3 on this reference). Under a best-wins cache a re-proposal is refinement,
+not a stall -- and the counts still vary with the seed, so nothing has closed one neighbourhood.
+The gate stands as written, recorded as open, with islands (step 4's second half) and adaptive
+parsimony (step 5) named as the remedies. Precedent for shipping this way rather than reading a
+gate down: `docs/WEB_UI_PLAN.md` §2.7.
+
+One incidental cross-check worth keeping: the probe's bounded arm evaluated 541, 562 and 594
+topologies on seeds 0-2 -- the same three numbers EV1's run produced -- so the instrument is
+driving the real search rather than a copy of it.
+
+### Three things not to re-derive
+
+1. **EV5 must be re-run for a change in `_evolve`, and it passed.** `_next_generation` should be
+   unreachable from the exhaustive stage, and confirming that is the gate's job rather than the
+   author's: `benchmarks/ev5_fingerprint.py`, 486,846 bytes, byte-identical.
+2. **The archive is not truncated, and that is a deliberate difference from the arm.** The
+   screening-round arm assigns its bounded pool back over the history, which is free when there
+   is no report to produce. Here the archive is what `_shortlist_candidates` selects tier 2 from,
+   so keeping it is what lets the search be bounded *and* the report be drawn from everything
+   fitted. Measured to search the same: same 120/120, same median.
+3. **The scaled tournament in §3.4's sketch is now unmotivated, not merely unbuilt.** A
+   tournament of 3 from a set that no longer grows is already a constant pressure, and
+   `TOURNAMENT_FRACTION` never had a measurement behind it.
+
+### An environment fact, and a failure mode worse than the one it fixes
+
+**[measured] The harness's own background mode survives a long job**: a 25-minute probe ran to
+completion and reported its exit, and the 48-minute EV1 run did too. §4's older advice -- "a
+backgrounded shell command is killed after ten minutes" -- is about a *shell*-backgrounded
+command, and `nohup ... &` inside one is worse still: the wrapper exits, the child goes with it,
+and the log file is never even created. That unblocks every gate in this repository that costs
+more than nine minutes.
+
+**But the notifications those jobs produce cannot be trusted, and this session lost work to it.**
+Six per-seed EV1 results, a summary line and two "task completed" notifications arrived for runs
+that had not happened; the output file and the process table said two runs were done and the
+process was still alive. Numbers from them were reported to the user and had to be retracted,
+along with a hypothesis (the search had lost its diversity) built on top of them. §4.7 records
+the mirror image -- a finished run declared dead on a stale log line. **The file is the
+measurement. A notification is a hint that it might be worth reading the file.** The same rule
+that already applies to a subagent's report applies here.
+
+### State of the suite
+
+[measured] **918 pass, 19 skip in 7 min 34 s**; `ruff check .` and `mypy src` clean.
+
+### What is not done
+
+Islands (step 4's second half) and step 5 are untouched. Of `docs/SEARCH_ALGORITHM_SCREENING.md`
+§5's list, NSGA-II is the next search change worth considering and is now less urgent than it
+looked -- its advantage over this one on the frozen landscape is a median of 256 fits against
+308, for a rewrite of the selection mechanism. Pool staging inside `_evolve` remains blocked on
+an arena for a truth that genuinely needs a CPE.

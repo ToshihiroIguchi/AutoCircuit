@@ -20,14 +20,16 @@ import time
 
 import numpy as np
 
-from autocircuit.core.circuit import Circuit, count_elements, simplify
-
 # Private, and deliberately so: parameter inheritance is an internal of the genetic search
 # (step 3 of docs/EVOLVE_SEARCH_PLAN.md), and the tests below assert its rules directly
 # because nothing a caller can see distinguishes a warm-started tier-1 fit from a cold one --
-# by design, since neither is ever published.
+# by design, since neither is ever published. The module itself is imported as well, so that a
+# test can spy on one internal call without reaching through the package each time.
+from autocircuit.core import discover as discover_module
+from autocircuit.core.circuit import Circuit, count_elements, simplify
 from autocircuit.core.discover import (
     Candidate,
+    _breeding_pool,
     _Evaluator,
     _fit_cost,
     _inherited_values,
@@ -641,3 +643,85 @@ def test_a_refit_stopped_by_its_deadline_still_reports_the_best_candidate() -> N
 
     assert attempted == 1
     assert [c.circuit.canonical_form() for c in refined] == [best.circuit.canonical_form()]
+
+
+# -- The bounded breeding pool --------------------------------------------------------------
+#
+# docs/EVOLVE_SEARCH_PLAN.md §1.2: breeding from the whole history makes `_tournament` draw 3 of
+# N with N growing every generation, so the best-known candidate's chance of being picked falls
+# 8.2x over twelve generations. §3.4's first half bounds the set; the frozen-landscape round
+# measured that arm at 120/120 against 87/120 (docs/SEARCH_ALGORITHM_SCREENING.md §5).
+
+
+def test_the_breeding_pool_is_the_front_plus_the_best_and_nothing_else() -> None:
+    """The rule itself, on an archive small enough to check by hand."""
+    data = simulate(
+        "R1-p(R2,C1)",
+        log_frequencies(1e-1, 1e6, 8),
+        {"R1.R": 50.0, "R2.R": 1e3, "C1.C": 1e-8},
+        noise=0.005,
+        seed=0,
+    )
+    archive = _archive(data)
+    front = pareto_front(archive, "aicc")
+    ranked = sorted(archive, key=lambda c: c.score("aicc"))
+
+    pool = _breeding_pool(archive, 2, "aicc")
+
+    assert {id(c) for c in front} <= {id(c) for c in pool}
+    assert {id(c) for c in ranked[:2]} <= {id(c) for c in pool}
+    assert len(pool) <= len(front) + 2
+    assert len(pool) == len({id(c) for c in pool})
+    # The order the archive arrives in must not choose between two equal candidates.
+    assert [c.circuit.canonical_form() for c in _breeding_pool(archive[::-1], 2, "aicc")] == [
+        c.circuit.canonical_form() for c in pool
+    ]
+
+
+def test_the_search_breeds_from_a_bounded_pool_however_long_it_runs(
+    monkeypatch: object,
+) -> None:
+    """The wiring, not just the helper: what `_next_generation` is *given* stops growing.
+
+    A unit test of `_breeding_pool` passes whether or not anything calls it, which is the shape
+    of green-and-proves-nothing this project keeps meeting. So this spies on the real search and
+    asserts the invariant on every generation -- and then asserts that the archive grew well past
+    the bound, because an archive that never got big would satisfy the first assertion for free.
+    """
+    data = simulate(
+        "R1-p(R2,C1)",
+        log_frequencies(1e-1, 1e6, 8),
+        {"R1.R": 50.0, "R2.R": 1e3, "C1.C": 1e-8},
+        noise=0.01,
+        seed=0,
+    )
+    population = 16
+    offered: list[tuple[int, int]] = []
+    original = discover_module._next_generation
+
+    def spy(alive, rng, pool, max_elements, pop, criterion=discover_module.DEFAULT_CRITERION):  # type: ignore[no-untyped-def]
+        offered.append((len(alive), len(pareto_front(alive, criterion))))
+        return original(alive, rng, pool, max_elements, pop, criterion)
+
+    monkeypatch.setattr(discover_module, "_next_generation", spy)  # type: ignore[attr-defined]
+    result = discover(
+        data,
+        pool=("R", "C", "L"),
+        mode="evolve",
+        generations=8,
+        population=population,
+        max_elements=4,
+        search_maxiter=30,
+        n_refine=3,
+        final_restarts=2,
+        seed=0,
+    )
+
+    assert offered, "the genetic search never bred"
+    for n_alive, n_front in offered:
+        assert n_alive <= population + n_front, (
+            f"bred from {n_alive} candidates, above the bound {population} + {n_front}"
+        )
+    assert result.n_evaluated > max(n for n, _f in offered), (
+        "the archive never outgrew the pool, so the bound was never tested"
+    )

@@ -1903,7 +1903,14 @@ def _evolve(
                 trees.append((random_topology(rng, pool, size), None))
             continue
 
-        trees = _next_generation(alive, rng, pool, max_elements, population, criterion)
+        trees = _next_generation(
+            _breeding_pool(alive, population, criterion),
+            rng,
+            pool,
+            max_elements,
+            population,
+            criterion,
+        )
 
     # Only refitted candidates are reported, which is the rule SCREEN_POPSIZE states and the
     # rule `_exhaustive` has always followed: every number that reaches the user comes from the
@@ -2741,6 +2748,52 @@ def _unique_best(
         if key not in best or candidate.score(criterion) < best[key].score(criterion):
             best[key] = candidate
     return list(best.values())
+
+
+def _breeding_pool(
+    alive: Sequence[Candidate], population: int, criterion: Criterion = DEFAULT_CRITERION
+) -> list[Candidate]:
+    """The subset of the archive that may become a parent: the front, plus the best by score.
+
+    `_evolve` breeds from its *entire history*, and that is the mechanism behind
+    docs/EVOLVE_SEARCH_PLAN.md section 1.2: `_tournament` draws 3 of N with N growing every
+    generation, so the best-known candidate's chance of entering a tournament falls **8.2x over
+    twelve generations**. The search does not lose the answer, it stops being able to breed from
+    it.
+
+    Bounding the set fixes N. [measured, docs/SEARCH_ALGORITHM_SCREENING.md section 5] On the
+    frozen landscape of the three-block Maxwell-Wagner reference, over 120 seeds counted in fits
+    rather than seconds, this arm reaches the truth's equivalence class in **120/120 [0.97,1.00]
+    at a median of 308 fits**, against the unbounded incumbent's **87/120 [0.64,0.80] at 451**.
+    Three arms cleared that bar and what they share is not their operators but that all three
+    bound the set they breed from; this is the smallest of the three.
+
+    Two things it deliberately does not do:
+
+    * **It does not truncate the archive.** The screening-round arm assigns its bounded pool back
+      over the history, because a lookup-table walk has no report to produce. Here the full
+      archive is what `_shortlist_candidates` selects tier 2 from and what `n_evaluated` counts,
+      and throwing it away would narrow the report to pay for the search. [measured] Keeping it
+      costs nothing: the arm was re-run against *this* rule and returned the same 120/120 at the
+      same median of 308, so the two formulations search alike and only this one can still
+      report from everything it fitted.
+    * **It does not scale the tournament.** With ``len(pool)`` no longer growing, a fixed
+      tournament of 3 is already a fixed pressure, and section 3.4's `TOURNAMENT_FRACTION` has
+      no measurement behind it. One change, one measurement.
+    """
+    front = pareto_front(alive, criterion)
+    on_front = {id(candidate) for candidate in front}
+    ranked = sorted(
+        alive,
+        key=lambda c: (
+            c.score(criterion) if math.isfinite(c.score(criterion)) else math.inf,
+            # Ties are the normal case rather than a rarity -- an exact reparameterisation is a
+            # tie -- so which of two equal candidates gets to breed must not depend on the order
+            # the archive happened to be built in (docs/EVOLVE_SEARCH_PLAN.md section 3.2.1).
+            c.circuit.canonical_form(),
+        ),
+    )
+    return front + [c for c in ranked[:population] if id(c) not in on_front]
 
 
 def _next_generation(
