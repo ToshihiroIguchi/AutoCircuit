@@ -21,11 +21,22 @@ python benchmarks/discovery_v2.py skeleton --workers 8       # gate P1, ~20 min
 python benchmarks/discovery_v2.py wrong-skeleton --workers 8 # gate P2, ~20 min
 python benchmarks/discovery_v2.py evolve-gate --seeds 3 --time-limit 600   # gate EV1, ~2.5 h
 python benchmarks/discovery_v2.py evolve-gate --only Maxwell --seeds 10 --warm 0,inf     --time-limit 600                                          # gate EV3, ~3 h
+python benchmarks/ev5_fingerprint.py --out before.txt    # gate EV5, ~4 min per side
 python benchmarks/kk_resonance.py                       # gates K1-K4, seconds
 python benchmarks/pyodide/bench.py                      # CPython baseline for the web numbers
 ```
 
-`benchmarks/pyodide/` additionally needs Node; see its own README.
+`benchmarks/pyodide/` additionally needs Node; see its own README. `benchmarks/screening_round/`
+holds the frozen-landscape instruments behind `docs/SEARCH_ALGORITHM_SCREENING.md` and has one
+too.
+
+**`ev5_fingerprint.py` is a comparison, not a report.** Run it once against the unchanged
+sources and once against the changed ones and `diff` the two files; a difference is the gate
+failing, and identity is also what says the publication path is still deterministic. Extract the
+"before" side with `git archive HEAD src | tar -x -C <somewhere>` and point `PYTHONPATH` at it
+rather than stashing, so an interrupted run cannot leave the working tree in a state nobody
+expected. It is the instrument that caught the lost tiebreak that the whole test suite missed
+(`docs/EVOLVE_SEARCH_PLAN.md` §3.2.1).
 
 `evolve-gate` is the slow one and it is budgeted in **wall-clock**, which changes how it must be
 run. Three rules, each of them a measurement that was lost before it was learned:

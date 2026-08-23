@@ -1921,6 +1921,7 @@ def _evolve(
         final_restarts,
         seed,
         deadline=None if time_limit is None else started + time_limit * REFIT_HEADROOM,
+        criterion=criterion,
     )
     # Tier 2 is authoritative even when it scores worse than the reduced fit did: a full-budget
     # refit that lands in a different basin is the better estimate of that topology, and keeping
@@ -2231,6 +2232,51 @@ def _shortlist(
             )
         )
     return _quota_by_size(ranked, n_refine)
+
+
+def _refit_order(
+    candidates: Sequence[Candidate], criterion: Criterion = DEFAULT_CRITERION
+) -> list[Candidate]:
+    """The shortlist in the order a *bounded* tier 2 should walk it: best of every size first.
+
+    :func:`_quota_by_size` chooses *which* candidates are worth a full-budget refit and says
+    nothing about the order, because the exhaustive stage refits all of them. The genetic
+    search's tier 2 does not: it answers to a deadline (:data:`REFIT_HEADROOM`) and stops
+    wherever it has got to, so for that caller the order decides what is reported.
+
+    [measured, docs/SEARCH_ALGORITHM_SCREENING.md section 4.6] Walking it in the order the
+    quota happens to build -- grouped by element count, the groups in whatever order the
+    archive first mentioned them -- lost the answer. At element cap 9, seed 0, the truth's
+    equivalence class was ranked **1 of 270** in the archive and sat at position 53 of a
+    73-candidate shortlist whose deadline cut fell at 40; sizes 6 and 8 were never attempted at
+    all, and the report contained no six-element row while the best thing the search had found
+    was one. Nothing was wrong with the search or with the shortlist. The report simply walked
+    away from the answer.
+
+    So the order is a round robin over the size groups, taking each group's best before any
+    group's second, and ordering within a round by the score itself. Two properties follow, and
+    they are the two the quota exists for: the archive's best-scoring candidate is always
+    attempted first, and any cut that leaves room for one refit per size leaves a Pareto front
+    that still spans the complexities -- rather than however many sizes fitted inside the clock.
+    """
+    by_size: dict[int, list[Candidate]] = {}
+    for candidate in candidates:
+        by_size.setdefault(len(candidate.circuit.leaves), []).append(candidate)
+
+    def key(candidate: Candidate) -> tuple[float, float, str]:
+        score = candidate.score(criterion)
+        return (
+            score if math.isfinite(score) else math.inf,
+            candidate.result.statistics.ssr,
+            candidate.circuit.canonical_form(),
+        )
+
+    ordered: list[tuple[int, tuple[float, float, str], Candidate]] = []
+    for group in by_size.values():
+        group.sort(key=key)
+        ordered.extend((rank, key(candidate), candidate) for rank, candidate in enumerate(group))
+    ordered.sort(key=lambda item: (item[0], item[1]))
+    return [candidate for _rank, _key, candidate in ordered]
 
 
 def _shortlist_candidates(
@@ -2751,6 +2797,7 @@ def _refine(
     restarts: int,
     seed: int,
     deadline: float | None = None,
+    criterion: Criterion = DEFAULT_CRITERION,
 ) -> tuple[list[Candidate], int]:
     """Refit the shortlist at full budget, since the search used a reduced one.
 
@@ -2766,10 +2813,15 @@ def _refine(
     already has an implementation -- :attr:`DiscoveryResult.refit_progress` and
     :meth:`DiscoveryResult._with_refit_note` -- so this reports into that rather than inventing
     a second way to say it.
+
+    A tier that can stop early owes an order to stop *in*, which is :func:`_refit_order`: the
+    shortlist arrives grouped by element count and is walked best-of-each-size first. Without
+    it a deadline drops whichever sizes the archive happened to mention last, first-ranked
+    candidate included.
     """
     out: list[Candidate] = []
     attempted = 0
-    for candidate in candidates:
+    for candidate in _refit_order(candidates, criterion):
         # The first is always attempted: a report with no rows in it cannot be read at all, and
         # one full-budget fit is the least that can honestly be published. Everything after it
         # answers to the clock.

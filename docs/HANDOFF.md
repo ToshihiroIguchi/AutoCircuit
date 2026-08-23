@@ -8,7 +8,8 @@ questions the deployed site raised — what the Discover→Fit hand-off carries,
 is already on the canvas, and a start-up that made a visitor wait for scipy before it would read a
 CSV (§19), and again while giving the genetic search its first quality gate (§20 — **work in
 progress**), and again after the first of the geometry-free readouts that `CLAUDE.md`'s purpose
-point 2 asks for (§21 — landed and gated, with its own list of what is not done).
+point 2 asks for (§21 — landed and gated, with its own list of what is not done), and again
+after the reporting-path defect that the search-algorithm screening round turned up (§23).
 Read this first, then `CLAUDE.md`, then the plan for whichever part you are touching.
 
 ## 1. Where things stand
@@ -1382,7 +1383,10 @@ repository's characteristic failure sitting inside the reporting path.
 - `_evolve` reports **tier-2 only**, shortlisting through `_quota_by_size`, which both searches
   now share. Gate EV2 passes: 0/5 tier-1 rows where it was 3/4, all 34 reported candidates at
   full budget. The front *gained* a row the old top-8-by-score rule never refitted.
-- Gate EV5 passes: an exhaustive-mode fingerprint is **byte-identical** before and after.
+- Gate EV5 passes: an exhaustive-mode fingerprint is **byte-identical** before and after. The
+  probe is committed as `benchmarks/ev5_fingerprint.py` since §23 and no longer rebuilt by hand.
+- Step 2's deadline was **reopened and fixed in §23**: it had no refit *order* behind it, and a
+  first-ranked candidate went unreported because of it.
 - G5 of `docs/DISCOVERY_V2_PLAN.md` is withdrawn, with the reason written beside it.
 
 ### Three things not to re-derive, from step 2
@@ -1717,3 +1721,84 @@ The widening is not disabled under a skeleton and should work, since `_exhaustiv
 nothing tests it. And `CC`, `HN`, `SKINF` and `SKINW` are outside `WIDENING_CANDIDATES` because
 nothing has measured whether the default pool already expresses them -- the same unmeasured
 guess this section removes, one level up, named rather than left implicit.
+
+
+## 23. A report that walked away from the answer -- the refit order
+
+The shortlisting round (`docs/SEARCH_ALGORITHM_SCREENING.md`) ended with one row of its §4.6
+marked as a defect rather than a measurement, and this section is that row confirmed, diagnosed
+and fixed. It came first, ahead of every search improvement on that document's list, for the
+reason the list gives: **no search improvement is worth anything while the report can drop a
+first-ranked candidate.**
+
+### The defect, and it was not either of the two suspects
+
+[measured] `_evolve` on the three-block Maxwell-Wagner reference, pool `R,C,L`, element cap 9,
+seed 0, 180 s, `warm_accept=0`: the truth's equivalence class was reached, its best member
+**ranked 1 of 270 in the archive**, four verified class members were shortlisted, and **none of
+them were reported**.
+
+The handoff named `_shortlist_candidates` and `_refine` as the two candidates. Neither was
+wrong. The per-size quota kept the answer and `REFIT_HEADROOM` did what it was written to do.
+What was missing is that **a tier that can stop early needs an order to stop in**, and nobody
+had ever said what it was: `_quota_by_size` returns its selection grouped by element count, the
+groups in whatever order the archive first mentioned them. That is correct for the exhaustive
+stage, which refits every one of them. Under a deadline it decides what the user sees. The
+rank-1 member sat at position 53 of a 73-candidate shortlist whose cut fell at 40; sizes 6 and 8
+were never attempted at all, so the report carried no six-element row while the best thing the
+search had found was one.
+
+`_refine` now walks `_refit_order`: a round robin over the size groups, best of every size
+before any size's second, ordered within a round by score. Its two properties are the quota's
+own two, extended to a list that gets cut -- the best-scoring candidate is never cut, and a
+truncated front still spans the complexities instead of collapsing to whichever sizes fitted
+inside the clock. [measured] Same run, same seed, same 40 fits: **4 of 4 shortlisted class
+members reported**, the rank-1 member refitted first.
+
+### Four things not to re-derive
+
+1. **An instrument that can see "not reported" cannot see *where*.** `evolve_probe.py` reports
+   visited-versus-reported and had already established both halves; it took a second probe
+   (`benchmarks/screening_round/report_probe.py`, which wraps both stages and prints each class
+   member's archive rank, its shortlist position and where the deadline cut fell) to separate
+   *shortlisted and dropped* from *never shortlisted*. The two-suspect hypothesis in the handoff
+   was wrong in a way no amount of reading the code produced -- the answer was a third thing,
+   the interaction between them.
+2. **The class must come from `targets.py`, and `targets_rcl7.json` is enough.** Membership is a
+   response test, never cost proximity (that over-counts 7.6x and has already flipped a verdict
+   once). The committed file covers the class only up to seven elements, so it is a *superset*
+   test for a drop: good enough to prove a member was lost, not to count how many exist.
+3. **The fix must not touch the exhaustive path, and saying so is EV5's job.** It is confined to
+   `_refine`, which only `_evolve` calls -- but that is exactly the kind of reasoning the lost
+   tiebreak survived, so it was measured: `benchmarks/ev5_fingerprint.py`, three references,
+   `mode="exhaustive"` and `mode="auto"`, `exhaustive_limit=4`, 486,846 bytes **byte-identical**
+   between `HEAD`'s sources and the changed ones. Extract the "before" side with `git archive
+   HEAD src | tar -x -C <dir>` and point `PYTHONPATH` at it; do not stash. Identity across two
+   separate processes is also what re-establishes that the path is deterministic at `workers=4`,
+   which the comparison silently depends on.
+4. **Both new tests were shown to fail against the code they replace.** A test written after a
+   fix proves nothing until the fix is reverted under it. The deadline test catches the old
+   `for candidate in candidates`; the order test catches a plain global score sort, which is the
+   other obvious way to write `_refit_order` and the one that throws the per-size spread away.
+
+### State of the suite
+
+[measured] **916 pass, 19 skip in 7 min 32 s** (`python -m pytest -q`, whole suite, machine
+otherwise idle), up two tests from the previous count. `ruff check .` and `mypy src` are clean.
+The skips are still the ngspice round-trip.
+
+### What is not done
+
+The next items are `docs/SEARCH_ALGORITHM_SCREENING.md` §5 in its own order: **B**, bounding
+`_evolve`'s breeding pool (120/120 against 87/120 on the frozen landscape, a few lines around
+`_next_generation`'s caller, and EV5 must be re-run because the point of the gate is to confirm
+that `_next_generation` really is unreachable from the exhaustive stage); then NSGA-II only if B
+is not enough; then pool staging, which must not be adopted until it is measured on a truth that
+genuinely needs a CPE.
+
+Two things this section deliberately did not do. It did not change *which* candidates the quota
+selects -- only the order they are refitted in -- because the two questions have different
+evidence behind them and mixing them would leave neither measured. And it did not touch
+`REFIT_HEADROOM`: a 73-candidate shortlist against 40 affordable fits is a real budget shortfall,
+and now that the cut takes the least valuable rows the shortfall is visible in `refit_progress`
+rather than silently fatal.

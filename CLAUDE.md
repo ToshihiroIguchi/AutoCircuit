@@ -290,7 +290,11 @@ static-site Web UI running the same core via WASM (Pyodide).
    replaced, and the gate first read +39% at 120 s and +7% at 600 s because of it. The same
    section records the other way a two-sided gate nearly went wrong — it was read as *failed* on
    a count of one event against zero, and the response to a bar that cannot resolve its own
-   question is more seeds, never a reworded bar.
+   question is more seeds, never a reworded bar. §3.2.1's fourth bullet is the newest and the
+   cheapest to re-learn the hard way: step 2's refit deadline had **no order behind it**, so the
+   report walked past a candidate ranked *1 of 270* and published forty others. The quota says
+   which candidates deserve a refit and says nothing about the sequence; a tier that can stop
+   early needs both.
 
 11. `docs/KK_RESONANCE_PLAN.md` — the Lin-KK test and the resonance its basis cannot express.
    **Implemented; gates K1–K4 measured.** Its §2 is the one to read, and it is the whole point

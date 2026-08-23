@@ -317,6 +317,41 @@ That is `EVOLVE_SEARCH_PLAN.md` §1.4's family — a loss inside the reporting p
 search — and confirming it comes before any search work, because no search improvement is worth
 anything while the shortlist can drop a first-ranked candidate.
 
+#### 4.6.1 Confirmed, and it was the third stage rather than either of the two suspected
+
+`evolve_probe.py` can see that the class was visited and not reported; it cannot see which stage
+lost it. `report_probe.py` wraps `_shortlist_candidates` and `_refine` and prints, for the same
+run, the archive rank of every verified class member, its position in the shortlist, and where
+the deadline cut fell.
+
+**The shortlist kept it. The refit never got to it.** Four of the six class members in the
+archive were shortlisted, including the rank-1 member, and the deadline cut fell at 40 of 73:
+
+```
+shortlist sizes in the order _refine walked them:
+  3,3,3,3,3,3,3,3,3,3, 2,2,2,2,2, 1,1,1, 5,5,5,5,5,5,5,5,5,5, 4,4,4,4,4, 9,9,9,9,9,9,9 | 9,9,9, 7×10, 6×10, 8×10
+                                                                        cut at 40 ────┘
+  rank    1 of 270  size 6  shortlist position 53  -- PAST THE CUT  reported=False
+  rank    4 of 270  size 7  shortlist position 43  -- PAST THE CUT  reported=False
+  rank    5 of 270  size 7  shortlist position 44  -- PAST THE CUT  reported=False
+  rank    7 of 270  size 7  shortlist position 46  -- PAST THE CUT  reported=False
+```
+
+`_quota_by_size` returns its selection **grouped by element count, the groups in whatever order
+the archive first mentioned them**. That is right for the exhaustive stage, which refits all of
+them, and it is not an order at all for a tier that stops when the clock runs out: sizes 6 and 8
+were never attempted, so the report contained no six-element row while the best thing the search
+had found was one. Neither of the two candidates the handoff named was to blame — the per-size
+quota did its job and `REFIT_HEADROOM` did its job. The missing piece was that nobody had said
+what order a *bounded* tier 2 should walk in.
+
+`_refine` now walks `_refit_order`: a round robin over the size groups, best of every size before
+any size's second, ordered within a round by score. On the same run, same seed, same 40 fits:
+**4 of 4 shortlisted class members reported**, the rank-1 member refitted first. Two tests in
+EV2's shape pin it, both shown to fail against the previous code, and `benchmarks/ev5_fingerprint.py`
+(now committed, where the EV5 probe used to be rebuilt by hand) says the exhaustive path is
+byte-identical across the change.
+
 ### 4.7 One measurement that was nearly lost, and how
 
 The first version of the instrumented probe reported "class members visited: **0**" on runs whose

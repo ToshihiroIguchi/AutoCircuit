@@ -62,7 +62,13 @@ python profile_eval.py                                    # KPI-4: where one eva
 python kpi0_sample.py --pool R,C,L,CPE --per-size 400     # KPI-0 by sampling — see the warning below
 python evolve_probe.py --seeds 2 --pool R,C,L --warm 0    # the real search, instrumented
 python reach_probe.py --seeds 3 --pool R,C,L --warm 0     # the same question, 100x cheaper
+python report_probe.py --max-elements 9 --time-limit 180  # which reporting stage drops it, ~5 min
 ```
+
+`report_probe.py` is the follow-up to the one row of §4.6 that was a defect rather than a
+measurement. `evolve_probe.py` can see that the truth's class was visited and not reported;
+this one wraps `_shortlist_candidates` and `_refine` and says which of them lost it — the
+answer was neither, and §4.6.1 has it.
 
 ## Three traps this directory walked into, so the next person does not
 

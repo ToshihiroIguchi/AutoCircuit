@@ -233,6 +233,26 @@ validates it. Its replacement is EV5, which pins the *exhaustive* results instea
   on top (`REFIT_HEADROOM = 1.5`), the first candidate is always attempted so that a report is
   never empty, and a tier that does run out reports through `refit_progress`, which already
   existed for this and had no producer in the library until now.
+- **And a tier that stops early needs an *order* to stop in — which the quota does not supply.**
+  Found afterwards, by `docs/SEARCH_ALGORITHM_SCREENING.md` §4.6, and it is the two bullets above
+  interacting. `_quota_by_size` chooses *which* candidates deserve a refit and returns them
+  grouped by element count, the groups in whatever order the archive first mentioned them —
+  which is exactly right for the exhaustive stage, whose tier 2 refits all of them. Under
+  `REFIT_HEADROOM`'s deadline it decides what is *reported*. [measured] `_evolve` on the
+  three-block Maxwell-Wagner reference at element cap 9, pool `R,C,L`, seed 0, 180 s: the truth's
+  equivalence class was reached, its best member **ranked 1 of 270 in the archive**, and it sat
+  at **position 53 of a 73-candidate shortlist whose deadline cut fell at 40**. Sizes 6 and 8
+  were never attempted at all, so the report carried no six-element row while the best thing the
+  search had found was one; four verified class members were shortlisted and **none were
+  reported**. Nothing was wrong with the search, the criterion or the shortlist — the report
+  walked away from the answer. `_refine` now walks `_refit_order`: a round robin over the size
+  groups, best of every size before any size's second, ordered within a round by score. The same
+  run then reports **4 of 4** shortlisted class members, the first-ranked candidate first, at the
+  same 40 fits. The properties are the quota's own two, extended to the case where the list is
+  cut: the best-scoring candidate is never cut, and a front that is cut still spans the
+  complexities instead of shrinking to whichever sizes fitted inside the clock. Fixed by
+  `benchmarks/screening_round/report_probe.py`, which separates *shortlisted and dropped* from
+  *never shortlisted* — `evolve_probe.py` could see only that the class was not reported.
 
 ### 3.3 Step 3 — inherit the parent's parameters (the largest expected win)
 
@@ -461,9 +481,19 @@ Last, because they are tuning and the steps above are structure.
   duplicated literals — so this run is what says the publication path's numbers did not move a
   digit. This is what
   caught the lost tiebreak in §3.2.1; the test suite passed with that bug in place.
+  **Re-measured after the refit-order fix, and the probe is now committed** as
+  `benchmarks/ev5_fingerprint.py` rather than being rebuilt by hand each time: three references,
+  `mode="exhaustive"` and `mode="auto"`, `exhaustive_limit=4`, every float at `repr` precision
+  and every clock stripped — 486,846 bytes, **byte-identical** between `HEAD`'s sources and the
+  changed ones. Identity across two separate processes also re-establishes that the publication
+  path is deterministic at `workers=4`, which the comparison silently depends on.
 - **EV2 — provenance.** Every candidate in `DiscoveryResult.candidates` and `.pareto` from
   `mode="evolve"` was refit at full budget. A test, not an inspection: it asserts on the
-  returned object, so the §1.4 table cannot come back.
+  returned object, so the §1.4 table cannot come back. **Two tests were added to it in the same
+  shape** (`test_the_refit_order_takes_the_best_of_every_size_before_any_size_twice`,
+  `test_a_refit_stopped_by_its_deadline_still_reports_the_best_candidate`), for §3.2.1's fourth
+  bullet: an expired deadline makes tier 2 exactly one fit long, and *which* topology that is is
+  the whole question. Both were shown to fail against the code they replace.
   **[measured] PASSES.** Re-running §1.4's exact case: tier-1 rows on the front **0/5, was 3/4**;
   all 34 reported candidates at `n_restarts=5`. The front also *gained* a row — a four-element
   `p(CPE1-W1,R1-C1)` that the old top-8-by-score shortlist never refitted — which is the per-size
@@ -546,7 +576,7 @@ Last, because they are tuning and the steps above are structure.
 | step | contents | size | depends on | status |
 |------|----------|------|-----------|--------|
 | 1 | 6–7 element references + `evolve-gate` benchmark mode; run it; write EV1's bar from the result | M | — | **done, baseline partial** — mode and references landed and measured; 4 of 9 runs completed before the machine stopped them twice (§4) |
-| 2 | tier-2-only reporting in `_evolve`; shared per-size quota helper; `REFINE_DEFAULT["evolve"]`; EV2 test; withdraw G5 in `DISCOVERY_V2_PLAN.md` | M | 1 | **done** — EV2 and EV5 both measured; see §3.2.1 |
+| 2 | tier-2-only reporting in `_evolve`; shared per-size quota helper; `REFINE_DEFAULT["evolve"]`; EV2 test; withdraw G5 in `DISCOVERY_V2_PLAN.md` | M | 1 | **done** — EV2 and EV5 both measured; see §3.2.1. **Reopened once**: the deadline this step added had no refit *order* behind it and lost a first-ranked candidate (§3.2.1, fourth bullet); fixed and re-gated |
 | 3 | structural parameter inheritance, two-stage evaluation, best-wins cache; sweep `WARM_ACCEPT_FACTOR`; EV3 | L | 2 | **done** — EV3 passes both halves (§4); §3.3.1 records the polish budget that decided it, and the two readings that nearly got it wrong |
 | 4 | bounded selection pool, scaled tournament, islands with shared cache; EV4 | M | 3 | planned |
 | 5 | adaptive parsimony in selection only; mutation-weight sweep | M | 4 | planned |

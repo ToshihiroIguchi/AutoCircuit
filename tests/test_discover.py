@@ -16,6 +16,7 @@ Exhaustive and auto mode have their own file, ``test_discover_exhaustive.py``.
 from __future__ import annotations
 
 import math
+import time
 
 import numpy as np
 
@@ -30,6 +31,8 @@ from autocircuit.core.discover import (
     _Evaluator,
     _fit_cost,
     _inherited_values,
+    _refine,
+    _refit_order,
     crossover,
     discover,
     is_plausible,
@@ -551,3 +554,90 @@ def test_warm_accept_zero_switches_inheritance_off() -> None:
     revisited = warm.evaluate(tree, 1, parent)
     assert revisited is not None
     assert _fit_cost(revisited.result) <= _fit_cost(seeded.result)
+
+
+# -- The bounded tier 2 ---------------------------------------------------------------------
+#
+# docs/SEARCH_ALGORITHM_SCREENING.md section 4.6 measured the genetic search finding the truth's
+# equivalence class, scoring it 1 of 270, and reporting none of it: the shortlist arrives grouped
+# by element count and `_refine`'s deadline fell in the middle of the groups. These two assert
+# the order that fixes it, on the return values rather than on a run's luck -- gate EV2's shape.
+
+
+def _archive(data: Spectrum) -> list[Candidate]:
+    """Two fitted candidates at each of three element counts, worst group first.
+
+    The order is adversarial on purpose: it is what `_quota_by_size` hands over -- grouped by
+    size, the groups in whatever order the archive first mentioned them -- and the group holding
+    the best candidate is last, which is the case that lost the answer.
+    """
+    return [
+        _fitted(text, data)
+        for text in (
+            "R1-C1-L1",
+            "p(R1,C1)-p(R2,C2)",
+            "R1-p(R2,C1)-C2",
+            "R1-C1",
+            "p(R1,C1)",
+            "R1-p(R2,C1)",
+        )
+    ]
+
+
+def test_the_refit_order_takes_the_best_of_every_size_before_any_size_twice() -> None:
+    """A round robin over the element counts, best first within each round.
+
+    Both halves matter and they are the two things the per-size quota exists for. The archive's
+    best-scoring candidate has to be refitted first, because a tier that stops early must not
+    stop before the answer; and one refit per size has to come before any size's second, because
+    a front cut down to the sizes that fitted inside the clock is not a trade-off curve.
+    """
+    data = simulate(
+        "R1-p(R2,C1)",
+        log_frequencies(1e-1, 1e6, 8),
+        {"R1.R": 50.0, "R2.R": 1e3, "C1.C": 1e-8},
+        noise=0.005,
+        seed=0,
+    )
+    archive = _archive(data)
+    best = min(archive, key=lambda c: c.score("aicc"))
+
+    order = _refit_order(archive, "aicc")
+
+    assert order[0] is best, "the best-scoring candidate is not refitted first"
+    first_round = [len(c.circuit.leaves) for c in order[:3]]
+    assert sorted(first_round) == [2, 3, 4], f"a size was refitted twice first: {first_round}"
+    assert len(order) == len(archive)
+    assert {id(c) for c in order} == {id(c) for c in archive}
+
+
+def test_a_refit_stopped_by_its_deadline_still_reports_the_best_candidate() -> None:
+    """The defect itself, reduced to one fit: an expired deadline must keep the answer.
+
+    `_refine` always attempts its first candidate -- a report with no rows cannot be read -- so
+    a deadline already in the past makes the tier exactly one fit long, and which topology that
+    is is the whole question. Before the fix it was whichever element count the caller's list
+    happened to start with.
+    """
+    data = simulate(
+        "R1-p(R2,C1)",
+        log_frequencies(1e-1, 1e6, 8),
+        {"R1.R": 50.0, "R2.R": 1e3, "C1.C": 1e-8},
+        noise=0.005,
+        seed=0,
+    )
+    archive = _archive(data)
+    best = min(archive, key=lambda c: c.score("aicc"))
+
+    refined, attempted = _refine(
+        archive,
+        data,
+        "modulus",
+        restarts=1,
+        seed=0,
+        deadline=time.perf_counter() - 1.0,
+        criterion="aicc",
+    )
+
+    assert attempted == 1
+    assert [c.circuit.canonical_form() for c in refined] == [best.circuit.canonical_form()]
