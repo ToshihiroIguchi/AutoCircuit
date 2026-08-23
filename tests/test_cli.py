@@ -228,6 +228,41 @@ def test_discover_mode_exhaustive_json_payload_has_mode_and_complete_up_to(
     assert report["complete_up_to"] == 3
 
 
+def test_discover_interpret_reads_the_class_and_not_only_the_recommendation(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`CLAUDE.md` purpose point 2, on the mode that is the project's headline.
+
+    A discovery report interpreting only its recommendation would state a form-dependent number
+    -- how many relaxations the part shows -- as if the measurement had decided it. So the
+    reading is checked against the recommendation's whole equivalence class, and the report says
+    what the class agreed on. Asserted on both the printed report and the JSON one.
+    """
+    data = _simulate_discover_csv(tmp_path)
+    report_path = tmp_path / "discover.json"
+
+    rc = main(
+        ["discover", str(data), "--mode", "exhaustive", "--interpret", "--no-drt",
+         "--json", str(report_path)]
+        + _DISCOVER_KWARGS
+    )
+    assert rc == 0
+
+    out = capsys.readouterr().out
+    assert "From the spectrum (the same for every equivalent topology):" in out
+    assert "r_polarisation" in out
+
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    reading = report["interpretation"]
+    assert reading["circuit"] == report["recommended"]["circuit"]
+    # The class is carried, and so is the per-quantity agreement it was checked with -- a claim
+    # of invariance nothing measures is the label this whole module exists to avoid.
+    assert reading["class_members"][0] == reading["circuit"]
+    invariant = [s for s in reading["class_spread"] if s["invariant"]]
+    assert invariant, "nothing was marked invariant, so the check proved nothing"
+    assert all(s["spread"] < 1e-6 for s in invariant), invariant
+
+
 def test_discover_mode_evolve_does_not_claim_completeness(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

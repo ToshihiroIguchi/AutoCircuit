@@ -26,7 +26,8 @@ import pytest
 
 from autocircuit.core.circuit import Circuit
 from autocircuit.core.fit import fit
-from autocircuit.core.interpret import interpret, interpret_values
+from autocircuit.core.interpret import interpret, interpret_class, interpret_values
+from autocircuit.core.simulate import log_frequencies, simulate
 from autocircuit.core.spectrum import Spectrum
 
 
@@ -101,6 +102,53 @@ def test_i1_form_dependent_quantities_are_allowed_to_disagree() -> None:
     b = interpret_values(cb, np.array(vb), spectrum)
     assert len(a.relaxations) == 1
     assert len(b.relaxations) == 0
+
+
+def test_a_class_of_independently_fitted_topologies_agrees_where_it_should() -> None:
+    """Gate I1 again, but on *fits* rather than on exact algebra -- which is the realistic case.
+
+    The I1 pair above shares one set of exact values by construction. Here the two members are
+    fitted separately to the same noisy data, which is what a discovery report actually holds,
+    and the question is whether the invariant/form-dependent split survives that. Both halves
+    are asserted, because a split that only ever agrees is a label nothing can falsify.
+    """
+    data = simulate(
+        "R1-p(R2,C1)",
+        log_frequencies(1e0, 1e6, 10),
+        {"R1.R": 50.0, "R2.R": 1e3, "C1.C": 1e-8},
+        noise=0.005,
+        seed=0,
+    )
+    a = fit("R1-p(R2,C1)", data, restarts=3, seed=0)
+    b = fit("p(R1,C1-R2)", data, restarts=3, seed=0)
+
+    out = interpret_class([a, b], data)
+
+    assert out.members == ("R1-p(R2,C1)", "p(R1,C1-R2)")
+    invariant = [s for s in out.spreads if s.invariant]
+    assert invariant, "nothing marked invariant, so this asserts nothing"
+    for spread in invariant:
+        assert spread.reported_by == 2, spread.name
+        assert spread.spread < 1e-6, (spread.name, spread.values)
+    # The falsifiable half: the two forms disagree about how many relaxations the part shows.
+    assert out.relaxation_counts == (1, 0)
+    assert "not of the measurement" in out.summary()
+
+
+def test_a_class_of_one_says_so_rather_than_claiming_agreement() -> None:
+    """A single member agrees with itself, which is not evidence and must not read as any."""
+    data = simulate(
+        "R1-C1",
+        log_frequencies(1e0, 1e6, 10),
+        {"R1.R": 10.0, "C1.C": 1e-7},
+        noise=0.005,
+        seed=0,
+    )
+    out = interpret_class([fit("R1-C1", data, restarts=2, seed=0)], data)
+
+    assert out.members == ("R1-C1",)
+    assert all(s.spread == 0.0 for s in out.spreads)
+    assert "nothing here can be checked against a second form" in out.summary()
 
 
 # -- 2. Analytic values ---------------------------------------------------------------------

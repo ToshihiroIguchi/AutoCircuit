@@ -28,7 +28,7 @@ from autocircuit.core.discover import (
 from autocircuit.core.drt import DRTResult, drt
 from autocircuit.core.elements import DEFAULT_POOL, POOLS, REGISTRY
 from autocircuit.core.fit import FitResult, fit, report_dict
-from autocircuit.core.interpret import Interpretation, interpret
+from autocircuit.core.interpret import Interpretation, interpret, interpret_class
 from autocircuit.core.simulate import log_frequencies, simulate
 from autocircuit.core.spectrum import Spectrum
 from autocircuit.core.spice import to_netlist
@@ -319,6 +319,20 @@ def cmd_discover(args: argparse.Namespace) -> int:
         print(f"\nWhat the skeleton excluded (screened in {excluded.elapsed_s:.1f} s):")
         print(f"  {excluded.summary()}")
 
+    # What the recommended circuit says is inside the part -- and, because this is discovery
+    # rather than a fit of a circuit the user wrote down, what the rest of its equivalence class
+    # says about the same reading. `CLAUDE.md`: under the `interpret` objective the class *is*
+    # the question, since whether a resistance is a grain boundary or an electrode interface is
+    # exactly a difference of form and the spectrum does not contain the answer.
+    reading = None
+    if args.interpret:
+        if result.recommended is None:
+            raise SystemExit("error: no candidate was fitted, so there is nothing to interpret")
+        family = [result.recommended, *result.equivalents_of(result.recommended)]
+        reading = interpret_class([c.result for c in family], spectrum)
+        print()
+        print(reading.summary())
+
     probe = None if args.no_drt else _probe_structure(spectrum)
     if probe is not None:
         print("\nStructure probe (independent of the search above):")
@@ -327,6 +341,8 @@ def cmd_discover(args: argparse.Namespace) -> int:
 
     if args.json:
         payload = result.to_dict(top=args.top, excluded=excluded)
+        if reading is not None:
+            payload["interpretation"] = reading.to_dict()
         Path(args.json).write_text(json.dumps(payload, indent=2), encoding="utf-8")
         print(f"\nWrote discovery report to {args.json}")
 
@@ -626,6 +642,14 @@ def build_parser() -> argparse.ArgumentParser:
         "which parameters the data resolves; 'ftest' is a test rather than a score, so it "
         "ranks by AIC and then tests each step up the front. 'autocircuit criteria' explains "
         "each one",
+    )
+    p_disc.add_argument(
+        "--interpret",
+        action="store_true",
+        help="also read the recommended circuit as internal structure, and check that reading "
+        "against every other topology the data cannot tell it apart from: what they agree on "
+        "is a property of the measurement, what they do not is a property of the form that was "
+        "reported",
     )
     p_disc.add_argument("--time-limit", type=float, help="wall-clock budget in seconds")
     p_disc.add_argument("--no-validate", action="store_true")

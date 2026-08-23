@@ -1566,11 +1566,11 @@ to mark everything form-dependent.
 
 ### What is not done
 
-The discovery report does not carry an interpretation -- which is where it would matter most,
-since that is where the topology was found rather than asserted and where the equivalence-class
-caveat lives. The browser does not show one. And the `model`/`interpret` objective split that
-`CLAUDE.md` now defines is written down but not wired anywhere; gate O1 (both objectives produce
-a byte-identical `DiscoveryResult`) is unimplemented.
+~~The discovery report does not carry an interpretation.~~ **Done in §27**, and the
+equivalence-class caveat turned out to be the substance of it rather than a footnote. The
+browser does not show one. And the `model`/`interpret` objective split that `CLAUDE.md` now
+defines is written down but not wired anywhere; gate O1 (both objectives produce a byte-identical
+`DiscoveryResult`) is unimplemented.
 
 ## 22. The default pool stops being a decision about the part -- `core/descriptors.py`
 
@@ -1963,3 +1963,57 @@ timing anything.
 The Fit screen has no pool control and needs none. What the browser still cannot do is show the
 *structured* `pool_choice` -- it is on the wire and in the downloaded JSON, but the UI reads the
 sentence only, which is the honest minimum rather than the whole of it.
+
+
+## 27. The discovery report says what is inside the part -- and what the class will not let it say
+
+`CLAUDE.md`'s purpose point 2 -- the circuit is a means and the inside of the part is the end --
+reached only `autocircuit fit --interpret`, which is the mode where the user already wrote the
+circuit down. Discovery, the mode this project is actually for, stopped at a Pareto front.
+`autocircuit discover --interpret` now reads the recommended circuit as internal structure, and
+`interpretation` is in the `--json` report.
+
+### The equivalence class is the substance, not a caveat
+
+Interpreting the recommendation and stopping would have been the obvious build and it would have
+been wrong, for the reason `CLAUDE.md`'s Objectives section gives: under `interpret` the classes
+*are* the question, because whether a resistance is a grain boundary or an electrode interface is
+exactly a difference of form. So `interpret_class` reads the recommendation **and every other
+topology the data cannot tell it apart from**, and *measures* which numbers the class agrees on
+instead of asserting the invariant flag. Each quantity carries a `spread`
+(`max|v - median| / |median|` over the members) and a `reported_by` count.
+
+[measured] Two independently fitted members of one class -- `R1-p(R2,C1)` and `p(R1,C1-R2)`, same
+noisy data, separate global fits -- agree on every invariant quantity to **2e-11**. That is gate
+I1's first half re-established on *fits* rather than on exact algebra, which is the case a
+discovery report actually holds.
+
+And the second half is what the report now says out loud. On the `p(R1,C1)` reference at a
+three-element limit the recommendation is `p(R1-C1,R2)`, which shows **0** relaxations, while the
+topology beside it in the same class shows **1**:
+
+```
+they do not agree on how many relaxations this part shows: p(R1-C1,R2) says 0,
+p(R1,C1)-R2 says 1 -- that count is a property of the form, not of the measurement
+```
+
+"How many processes does this part have" is the single most misleading thing a non-expert can
+take out of a discovery report, and it is form-dependent. A class of one says so instead of
+claiming agreement with itself.
+
+### Two things not to re-derive
+
+1. **`interpret_class` takes the class, it does not find it.** Deciding what an equivalence class
+   is belongs to the search (`DiscoveryResult.equivalents_of`, by response), and putting that
+   rule in the interpretation module would be a second implementation of it.
+2. **A tooling hazard that cost three edits, this section included.** A backslash-n written
+   inside a `python - <<'EOF'` heredoc through the Bash tool arrives as a *real newline*, which
+   silently breaks any string literal containing one. Build such a literal with `chr(10)`/`chr(92)`, or use the Write tool.
+   §4's note about heredocs and apostrophes is the same family.
+
+### What is not done
+
+The browser still shows no interpretation. The bridge has no operation for it, so the Report
+screen cannot ask -- that is the next step, and the honest minimum there is to render
+`summary()` verbatim the way `completeness` already is, rather than re-composing the sentences
+in TypeScript.

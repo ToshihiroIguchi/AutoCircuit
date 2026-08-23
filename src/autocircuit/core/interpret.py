@@ -40,7 +40,7 @@ function of the parameters.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -802,4 +802,188 @@ def interpret(
         stderr=result.statistics.stderr,
         correlation=result.statistics.correlation,
         drt_peaks=drt_peaks,
+    )
+
+
+@dataclass(frozen=True)
+class ClassSpread:
+    """One quantity as the *whole equivalence class* answers it.
+
+    ``spread`` is ``max|v - median| / |median|`` over the members that report the quantity. For
+    an invariant quantity it is a measurement of how well the claim holds on real fits rather
+    than an assertion that it does; for a form-dependent one it is the size of the disagreement
+    the reader is being warned about.
+    """
+
+    name: str
+    unit: str
+    invariant: bool
+    values: tuple[float, ...]
+    spread: float
+    reported_by: int
+    """How many members produce this quantity at all. Below the class size is itself a finding:
+    a quantity one member has and another does not cannot be a property of the measurement."""
+
+
+@dataclass(frozen=True)
+class ClassInterpretation:
+    """One candidate read as internal structure, and what its equivalence class does to that.
+
+    Discovery does not return *a* circuit. It returns a Pareto front and, within it, classes of
+    topologies that produce the same response -- and `CLAUDE.md` says the reason the `interpret`
+    objective exists at all is that under it those classes *are* the question: whether a
+    resistance is a grain boundary or an electrode interface is exactly a difference of form,
+    and the spectrum does not contain the answer.
+
+    So a discovery report may not simply interpret its recommendation and stop. This reads the
+    recommendation, reads every other member of its class, and **measures** which numbers the
+    class agrees on. The invariant/form-dependent split is then not a label the reader has to
+    trust: the spread beside each number is what the class actually did.
+    """
+
+    reading: Interpretation
+    members: tuple[str, ...]
+    spreads: tuple[ClassSpread, ...]
+    relaxation_counts: tuple[int, ...] = ()
+    """How many relaxation blocks each member shows, in ``members`` order.
+
+    The bluntest form-dependent quantity there is, and the one gate I1's second half is built
+    on: ``R1-p(R2,C1)`` presents one relaxation and its exact equivalent ``p(R1,C1-R2)``
+    presents none, on identical data with identical Z. When these counts differ, "how many
+    processes does this part have" is a question the reported *form* answered and the
+    measurement did not -- which is the single most misleading thing a non-expert can take from
+    a discovery report, so the summary says it in those words.
+    """
+
+    @property
+    def worst_invariant(self) -> ClassSpread | None:
+        """The invariant quantity the class agreed on least well. None if there are none."""
+        invariant = [s for s in self.spreads if s.invariant and math.isfinite(s.spread)]
+        return max(invariant, key=lambda s: s.spread) if invariant else None
+
+    @property
+    def disagreeing(self) -> tuple[ClassSpread, ...]:
+        """Form-dependent quantities the class does not agree on, worst first."""
+        out = [s for s in self.spreads if not s.invariant and s.spread > 0.0]
+        return tuple(sorted(out, key=lambda s: -s.spread))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            **self.reading.to_dict(),
+            "class_members": list(self.members),
+            "class_relaxation_counts": list(self.relaxation_counts),
+            "class_spread": [
+                {
+                    "name": s.name,
+                    "unit": s.unit,
+                    "invariant": s.invariant,
+                    "values": list(s.values),
+                    "spread": s.spread,
+                    "reported_by": s.reported_by,
+                }
+                for s in self.spreads
+            ],
+        }
+
+    def summary(self) -> str:
+        lines = [self.reading.summary()]
+        if len(self.members) < 2:
+            lines.append("")
+            lines.append(
+                "No other topology in this report reproduces the same response, so nothing "
+                "here can be checked against a second form."
+            )
+            return "\n".join(lines)
+        lines.append("")
+        lines.append(
+            f"Checked against the {len(self.members) - 1} other topolog"
+            f"{'y' if len(self.members) == 2 else 'ies'} the data cannot tell this one apart "
+            "from:"
+        )
+        for member in self.members[1:]:
+            lines.append(f"  {member}")
+        worst = self.worst_invariant
+        if worst is not None:
+            lines.append(
+                f"  the quantities above marked as the measurement's agree across all of them "
+                f"to {worst.spread:.2%} (worst: {worst.name})"
+            )
+        partial = [s for s in self.spreads if s.reported_by < len(self.members)]
+        if partial:
+            lines.append(
+                "  reported by only some of them, so not a property of the measurement: "
+                + ", ".join(s.name for s in partial)
+            )
+        counts = set(self.relaxation_counts)
+        if len(counts) > 1:
+            lines.append(
+                "  they do not agree on how many relaxations this part shows: "
+                + ", ".join(
+                    f"{circuit} says {n}"
+                    for circuit, n in zip(self.members, self.relaxation_counts, strict=True)
+                )
+                + " -- that count is a property of the form, not of the measurement"
+            )
+        if self.disagreeing:
+            worst_form = self.disagreeing[0]
+            lines.append(
+                f"  the form-dependent quantities differ between them by up to "
+                f"{worst_form.spread:.0%} ({worst_form.name}) -- choosing between those "
+                "topologies is physical knowledge you have, not something this fit measured"
+            )
+        return "\n".join(lines)
+
+
+def interpret_class(
+    results: Sequence[FitResult], spectrum: Spectrum, *, drt_peaks: int | None = None
+) -> ClassInterpretation:
+    """Interpret ``results[0]``, and measure what the rest of its equivalence class says.
+
+    ``results`` is one equivalence class, the topology to report first. The caller decides what
+    a class is -- :meth:`~autocircuit.core.discover.DiscoveryResult.equivalence_classes` does it
+    by comparing responses -- because that decision belongs with the search and not here.
+    """
+    if not results:
+        raise ValueError("interpret_class needs at least one fitted result")
+    readings = [
+        interpret_values(
+            r.circuit,
+            r.values,
+            spectrum,
+            stderr=r.statistics.stderr,
+            correlation=r.statistics.correlation,
+            drt_peaks=drt_peaks if r is results[0] else None,
+        )
+        for r in results
+    ]
+    by_name: dict[str, list[Quantity]] = {}
+    for reading in readings:
+        for q in reading.quantities:
+            by_name.setdefault(q.name, []).append(q)
+
+    spreads: list[ClassSpread] = []
+    for name, quantities in by_name.items():
+        values = tuple(q.value for q in quantities)
+        finite = [v for v in values if math.isfinite(v)]
+        median = float(np.median(finite)) if finite else math.nan
+        if not finite or median == 0.0 or len(finite) < len(values):
+            spread = math.inf if len(values) > 1 else 0.0
+        else:
+            spread = max(abs(v - median) for v in finite) / abs(median)
+        spreads.append(
+            ClassSpread(
+                name=name,
+                unit=quantities[0].unit,
+                invariant=quantities[0].invariant,
+                values=values,
+                spread=spread,
+                reported_by=len(quantities),
+            )
+        )
+    spreads.sort(key=lambda s: (not s.invariant, s.name))
+    return ClassInterpretation(
+        reading=readings[0],
+        members=tuple(r.circuit.to_string() for r in results),
+        spreads=tuple(spreads),
+        relaxation_counts=tuple(len(reading.relaxations) for reading in readings),
     )
