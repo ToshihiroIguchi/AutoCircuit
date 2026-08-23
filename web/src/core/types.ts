@@ -202,10 +202,48 @@ export type ScreenTaskWire = [circuit: string, abandonAbove: number | null];
 /** One refit job: the topology, and the full-budget fit settings to run it with. */
 export type RefitTaskWire = [circuit: string, restarts: number, seed: number];
 
+/**
+ * The pool selection that means "no pool": the spectrum chooses.
+ *
+ * Not one of the catalogue's named pools, and it must not become one. Naming a pool is an
+ * assertion about the part -- `CLAUDE.md` rules out asking a non-expert to make it, so this is
+ * the default -- and the search widens the default pool itself only when its own completed fit
+ * says the data needs an element it lacks (`docs/POOL_FROM_SPECTRUM_PLAN.md`).
+ */
+export const AUTO_POOL = "auto";
+
 /** How many topologies of each size the search is about to look at. */
 export interface SearchLevelWire {
   n_elements: number;
   candidates: number;
+}
+
+/**
+ * Why the pool being searched is the pool being searched, when the spectrum chose it.
+ *
+ * The two readings behind it disagree on purpose and both are carried: a *shape* reading of the
+ * spectrum, and whether the base pool's own completed fit left a systematic residual. Neither
+ * is sufficient alone (`docs/POOL_FROM_SPECTRUM_PLAN.md` §5), so the report states what fired.
+ */
+export interface PoolChoiceWire {
+  /** What the search started from. */
+  base: string[];
+  /** What it ended up searching: `base` plus `added`. */
+  pool: string[];
+  /** Element codes the data asked for. Empty means asked and nothing to add. */
+  added: string[];
+  /** Codes considered and declined, each with the reason it was declined. */
+  rejected: Array<{ code: string; reason: string }>;
+  /** The decade band the low-frequency reading looked at; null where unconstrained. */
+  low_band: Array<number | null>;
+  /** How many decades of 45-degree branch the shape reading found. */
+  diffusion_decades: WireFloat;
+  /** Runs-test z of the base pool's best completed fit; null when it could not be computed. */
+  residual_runs_z: number | null;
+  /** Which reading fired, as a three-state label rather than a boolean. */
+  triggered: string;
+  /** The report's own wording, rendered rather than paraphrased. */
+  sentence: string;
 }
 
 /** What `discover_start` committed to, before anything is fitted. */
@@ -216,6 +254,14 @@ export interface SearchPlanWire {
   limit: number;
   floor: number;
   pool: string[];
+  /**
+   * Whether that pool is the caller's assertion or the search's starting point.
+   *
+   * True when nobody named a pool: the search then screens the default pool, and only if *that
+   * pool's own completed fit* still leaves a systematic residual does it widen and screen again
+   * (`docs/POOL_FROM_SPECTRUM_PLAN.md`). So the plan shown here is the first of up to two.
+   */
+  derive_pool: boolean;
   skeleton: string | null;
   mode: string;
   screen_chunk: number;
@@ -229,6 +275,12 @@ export interface ScreenStepWire {
   total: number;
   /** Best-scoring topology so far, without its score -- a screening cost is not reportable. */
   best: string | null;
+  /** True on the second pass, over a wider pool. `screened` and `total` restart with it. */
+  widened: boolean;
+  /** The pool being screened right now. */
+  pool: string[];
+  /** The per-size breakdown of the space being screened now, which a widening replaces. */
+  levels: SearchLevelWire[];
 }
 
 /**
@@ -274,6 +326,14 @@ export interface RefitStepWire {
   refitted: number;
   shortlisted: number;
   front: CandidateRowWire[];
+  /**
+   * Whether the search has another pass after this tier.
+   *
+   * Tier 2 running out is not necessarily the end: under a derived pool the completed fit is
+   * the evidence the pool question needs, so a widening starts here and the driver goes back to
+   * screening. A driver that stopped at the first `tasks: null` would report the narrow pool.
+   */
+  more: boolean;
 }
 
 /**
@@ -307,6 +367,17 @@ export interface ReportWire {
   skeleton_placements: Record<string, number> | null;
   n_evaluated: number;
   complete_up_to: number | null;
+  /**
+   * The pool the spectrum chose, or null when the caller named one.
+   *
+   * Null and an untriggered choice are different answers: null means a pool was *asserted*, and
+   * a choice with an empty `added` means the data was asked and had nothing to add. `sentence`
+   * is the report's own wording and is rendered rather than paraphrased, for the same reason
+   * `completeness` is -- and `completeness` already contains it.
+   */
+  pool_choice: PoolChoiceWire | null;
+  /** Coverage reached before the pool was widened. Widening costs a completeness level. */
+  base_complete_up_to: number | null;
   elapsed_s: WireFloat;
   pool: string[];
   mode: string;

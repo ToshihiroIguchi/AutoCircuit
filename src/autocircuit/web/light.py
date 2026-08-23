@@ -44,7 +44,11 @@ from autocircuit.core.validate import WIRE_VERSION as VALIDATE_WIRE_VERSION
 #: 8 (2026-08-16): the load is staged, so ``version`` answers what is knowable without scipy and
 #: the new ``runtime`` answers the rest; ``discover_report`` carries the weighting, seed and
 #: restart count its rows were refitted under; ``edit`` gains the ``move`` action.
-BRIDGE_VERSION = 8
+#: 9 (2026-08-23): ``discover_start`` takes ``pool: null`` -- the spectrum chooses, as
+#: ``--pool auto`` does on the command line -- so the search can widen its own pool mid-run;
+#: ``discover_screen`` says whether it is on the widened pass and ``discover_refit`` whether
+#: there is more to do after it, and ``discover_report`` carries ``pool_choice``.
+BRIDGE_VERSION = 9
 
 #: One operation: a request payload in, a JSON-safe result out.
 Operation = Callable[[dict[str, Any]], Any]

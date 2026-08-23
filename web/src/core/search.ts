@@ -22,6 +22,7 @@
 import type {
   CandidateRowWire,
   ReportWire,
+  SearchLevelWire,
   SearchPlanWire,
   SpectrumWire,
 } from "./types";
@@ -51,6 +52,18 @@ export interface SearchProgress {
   shortlisted: number;
   /** The Pareto front of everything refitted so far, straight from the plan. */
   front: CandidateRowWire[];
+  /**
+   * True once the search is on its second pass, over a pool the spectrum asked to widen.
+   *
+   * `screened` and `toScreen` both restart there, because it is a second, larger space. A bar
+   * that went backwards without saying why would read as a bug rather than as the search
+   * finding out that the data needs an element the default pool does not have.
+   */
+  widened: boolean;
+  /** The pool being searched right now, which is not the one the plan started with if widened. */
+  pool: string[];
+  /** Per-size counts for the space being screened now; empty until the first batch lands. */
+  levels: SearchLevelWire[];
   elapsedMs: number;
 }
 
@@ -64,11 +77,17 @@ const IDLE: SearchProgress = {
   refitted: 0,
   shortlisted: 0,
   front: [],
+  widened: false,
+  pool: [],
+  levels: [],
   elapsedMs: 0,
 };
 
 /** How often progress is pushed at the UI while a batch is in flight. */
 const PROGRESS_INTERVAL_MS = 100;
+
+/** A guard against a hang, not a statement about the search: it does at most two passes. */
+const MAX_PASSES = 4;
 
 export function idleProgress(): SearchProgress {
   return { ...IDLE };
@@ -111,8 +130,16 @@ export class SearchRun {
     this.emit({ stage: "screening", plan, toScreen: plan.candidates }, true);
 
     try {
-      await this.screen(job);
-      if (!this.cancelled) await this.refit(job);
+      // Up to two passes, and which it is comes from the search rather than from a count kept
+      // here: under a derived pool the completed tier-2 fit is the evidence `choose_pool`
+      // reads, so tier 2 running out is not necessarily the end. `MAX_PASSES` is a guard
+      // against a bug on either side turning into a hang, not a statement about the search.
+      for (let pass = 0; pass < MAX_PASSES; pass += 1) {
+        await this.screen(job);
+        if (this.cancelled) break;
+        if (!(await this.refit(job))) break;
+        this.emit({ stage: "screening" }, true);
+      }
     } catch (error) {
       // A pool torn down under a running batch is how cancelling works, not a failure.
       if (!(error instanceof PoolAborted) && !this.cancelled) throw error;
@@ -146,7 +173,17 @@ export class SearchRun {
     let costs: Array<number | null> | null = null;
     for (;;) {
       const step = await this.client.discoverScreen(job, costs);
-      this.emit({ screened: step.screened, toScreen: step.total, best: step.best }, true);
+      this.emit(
+        {
+          screened: step.screened,
+          toScreen: step.total,
+          best: step.best,
+          widened: step.widened,
+          pool: step.pool,
+          levels: step.levels ?? [],
+        },
+        true,
+      );
       const tasks = step.tasks;
       if (tasks === null || this.cancelled) return;
       const base = step.screened;
@@ -162,7 +199,8 @@ export class SearchRun {
     }
   }
 
-  private async refit(job: string): Promise<void> {
+  /** Runs tier 2 to its end. True when the search has another pass to do after it. */
+  private async refit(job: string): Promise<boolean> {
     let results: Array<Awaited<ReturnType<BridgeClient["refitTask"]>>> | null = null;
     this.emit({ stage: "refitting" }, true);
     for (;;) {
@@ -172,7 +210,8 @@ export class SearchRun {
         true,
       );
       const tasks = step.tasks;
-      if (tasks === null || this.cancelled) return;
+      if (tasks === null) return step.more && !this.cancelled;
+      if (this.cancelled) return false;
       const base = step.refitted;
       results = await this.pool.map(
         tasks.length,
@@ -180,7 +219,7 @@ export class SearchRun {
           client.refitTask(this.spectrum, tasks[index] as [string, number, number], this.options),
         (completed) => this.emit({ refitted: base + completed }),
       );
-      if (this.cancelled) return;
+      if (this.cancelled) return false;
     }
   }
 

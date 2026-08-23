@@ -3,6 +3,7 @@
 // an interactive request, so the button toggles into Cancel instead of just showing "busy".
 
 import type { CriterionWire } from "../core/types";
+import { AUTO_POOL } from "../core/types";
 import { MAX_WORKERS } from "../worker/pool";
 
 export interface SearchPanelProps {
@@ -51,7 +52,7 @@ export function SearchPanel(props: SearchPanelProps) {
           >
             {props.poolNames.map((name) => (
               <option key={name} value={name}>
-                {name}
+                {name === AUTO_POOL ? "auto — the spectrum chooses" : name}
               </option>
             ))}
           </select>

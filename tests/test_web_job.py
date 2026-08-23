@@ -114,6 +114,20 @@ class Driver:
                 for text, restarts, seed in step["tasks"]
             ]
 
+    def run(self) -> None:
+        """Both tiers, and again for every further pass the search asks for.
+
+        The loop is what a derived pool needs: tier 2 running out is no longer the end of the
+        search, because the completed fit is the evidence `choose_pool` reads. How many passes
+        there are is the core's decision, so the driver asks (`more`) rather than counting.
+        """
+        for _ in range(4):  # a bound, so a driver bug cannot hang the suite
+            self.screen()
+            self.refit()
+            if not self.refit_steps[-1]["more"]:
+                return
+        raise AssertionError("the search asked for more passes than it can have")
+
     def cancel(self) -> dict[str, Any]:
         return _call("discover_cancel", job=self.id)
 
@@ -816,3 +830,107 @@ def test_the_json_export_includes_the_excluded_pass_only_when_one_was_run() -> N
     )
     assert after["excluded_equivalents"]["summary"] == driver.report()["summary"]
     assert after["excluded_equivalents"]["screened"] == driver.report()["screened"]
+
+
+# =============================================================================================
+# 8. The pool the spectrum chose
+# =============================================================================================
+#
+# `CLAUDE.md`: the automatic path takes the spectrum and nothing else, and the software must not
+# ask what kind of part this is. The browser used to require a pool and default to `DEFAULT_POOL`
+# -- so its search could never widen, whatever the residuals said -- while the CLI had defaulted
+# to `--pool auto` since docs/POOL_FROM_SPECTRUM_PLAN.md. These are that difference closed, and
+# they assert it the only way that means anything: the two paths produce the same report.
+
+
+def _diffusion() -> Spectrum:
+    """A finite-length diffusion spectrum: a transmission line no R/C/L/CPE tree reproduces.
+
+    Swept down to 0.01 Hz because `tau = 1 s` puts the transition near 0.16 Hz and it is the DC
+    limit below it that tells `Ws` from `Wo` (docs/POOL_FROM_SPECTRUM_PLAN.md).
+    """
+    return simulate(
+        "R1-Ws1",
+        log_frequencies(1e-2, 1e3, 6),
+        {"R1.R": 10.0, "Ws1.R": 100.0, "Ws1.tau": 1.0},
+        noise=0.01,
+        seed=0,
+    )
+
+
+def test_a_derived_pool_widens_in_the_browser_exactly_as_it_does_on_the_command_line() -> None:
+    """The whole point of the wiring, asserted against `discover(pool=None)` row for row.
+
+    Not "the browser also widens": the same widened pool, the same lost completeness level, the
+    same candidates at the same AICc, and the same sentence -- which is the one the UI renders
+    verbatim rather than paraphrasing.
+    """
+    spectrum = _diffusion()
+    driver = Driver(spectrum, exhaustive_limit=3, screen_chunk=1)
+    assert driver.plan["derive_pool"] is True
+    driver.run()
+    report = driver.report()
+
+    reference = discover(spectrum, pool=None, mode="exhaustive", exhaustive_limit=3, seed=0)
+
+    # Not a vacuous pass: this spectrum has to be one that actually asks for a wider pool.
+    assert reference.pool_choice is not None
+    assert reference.pool_choice.added
+    assert report["pool_choice"] == reference.pool_choice.to_dict()
+    assert report["pool"] == list(reference.pool)
+    assert report["complete_up_to"] == reference.complete_up_to
+    assert report["base_complete_up_to"] == reference.base_complete_up_to
+    assert report["completeness"] == reference.completeness()
+    assert report["n_evaluated"] == reference.n_evaluated
+    assert [row["circuit"] for row in report["candidates"]] == [
+        c.circuit.to_string() for c in reference.candidates
+    ]
+    assert [row["aicc"] for row in report["candidates"]] == [
+        c.aicc for c in reference.candidates
+    ]
+    assert reference.recommended is not None
+    assert report["recommended"] == reference.recommended.circuit.to_string()
+    assert report["refit_progress"] is None
+
+
+def test_the_widening_is_a_second_pass_and_the_progress_says_so() -> None:
+    """A driver that stopped at the first `tasks: null` would report the narrow pool.
+
+    That is the failure this wiring has to avoid, so it is asserted directly: tier 2 ends with
+    `more`, screening starts again over a larger space, and the second pass is marked as one.
+    """
+    driver = Driver(_diffusion(), exhaustive_limit=3, screen_chunk=1)
+    driver.screen()
+    driver.refit()
+
+    assert driver.refit_steps[-1]["more"] is True
+    assert driver.screen_steps[0]["widened"] is False
+    first_total = driver.screen_steps[0]["total"]
+
+    driver.screen()
+    driver.refit()
+
+    assert driver.screen_steps[-1]["widened"] is True
+    assert driver.screen_steps[-1]["total"] > first_total
+    assert driver.refit_steps[-1]["more"] is False
+    assert driver.report()["pool"] != list(driver.plan["pool"])
+
+
+def test_a_named_pool_is_an_assertion_and_is_never_widened() -> None:
+    """`pool_choice` is null when the caller named one, which is not the same as "not triggered".
+
+    The distinction is the report's, not a nicety: a derived pool that found nothing to add
+    still says the data was asked, and a pool the user named says the user chose. A browser that
+    silently derived on top of a named pool would take that choice back.
+    """
+    driver = Driver(_diffusion(), pool=["R", "C"], exhaustive_limit=3, screen_chunk=1)
+    assert driver.plan["derive_pool"] is False
+    driver.run()
+    report = driver.report()
+
+    assert report["pool"] == ["R", "C"]
+    assert report["pool_choice"] is None
+    assert report["base_complete_up_to"] is None
+    assert len(driver.screen_steps) == len(
+        [step for step in driver.screen_steps if step["widened"] is False]
+    )

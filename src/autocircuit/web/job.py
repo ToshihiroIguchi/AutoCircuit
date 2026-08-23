@@ -34,6 +34,7 @@ from collections.abc import Generator, Sequence
 from typing import Any, cast
 
 from autocircuit.core.circuit import Circuit
+from autocircuit.core.descriptors import PoolChoice, choose_pool
 from autocircuit.core.discover import (
     REFINE_DEFAULT,
     WORKER_CHUNK,
@@ -45,6 +46,8 @@ from autocircuit.core.discover import (
     RefitBatch,
     RefitOutcome,
     ScreenTask,
+    _best_runs_z,
+    _unique_best,
     enumerate_candidates,
     excluded_plan,
     excluded_target,
@@ -105,7 +108,7 @@ class DiscoveryJob:
         self,
         spectrum: Spectrum,
         *,
-        pool: tuple[str, ...] = tuple(DEFAULT_POOL),
+        pool: Sequence[str] | None = None,
         skeleton: str | None = None,
         exhaustive_limit: int | None = None,
         exhaustive_min: int = 1,
@@ -120,12 +123,20 @@ class DiscoveryJob:
         screen_chunk: int = SCREEN_CHUNK,
         refit_chunk: int = REFIT_CHUNK,
     ) -> None:
-        unknown = [code for code in pool if code not in REGISTRY]
+        unknown = [code for code in pool or () if code not in REGISTRY]
         if unknown:
             raise ValueError(f"unknown element codes in pool: {', '.join(unknown)}")
         self.id = f"job-{next(_COUNTER)}"
         self.spectrum = spectrum
-        self.pool = tuple(pool)
+        # ``None`` means the spectrum chooses, and it has to travel this far as None rather
+        # than being resolved by the caller: the moment a driver names a pool on the user's
+        # behalf, the report can no longer say whether a pool was asserted or derived. This is
+        # the browser's half of docs/POOL_FROM_SPECTRUM_PLAN.md; the CLI's ``--pool auto`` does
+        # exactly the same thing by passing None down to ``discover``.
+        self.derive_pool = pool is None
+        self.pool = tuple(DEFAULT_POOL if pool is None else pool)
+        self.pool_choice: PoolChoice | None = None
+        self.base_complete_up_to: int | None = None
         self.weighting: Weighting = weighting
         self.seed = seed
         if criterion not in CRITERIA:
@@ -136,6 +147,11 @@ class DiscoveryJob:
         self.n_refine = REFINE_DEFAULT["exhaustive"] if n_refine is None else n_refine
         self.frame = None if skeleton is None else Circuit.parse(skeleton)
         self.floor = max(1, exhaustive_min)
+        # Kept because a widening re-enumerates, and it must re-enumerate under exactly the
+        # constraints the first pass ran under -- only the pool may differ between the two.
+        self.max_candidates = max_candidates
+        self.feasibility_filter = feasibility_filter
+        self.feasibility_budget = feasibility_budget
         self.limit = exhaustive_limit_for(
             None if self.frame is None else len(self.frame.leaves), exhaustive_limit
         )
@@ -174,6 +190,12 @@ class DiscoveryJob:
         self._outcomes: list[RefitOutcome] | None = None
         self._candidates: list[Candidate] = []
         self._shortlisted = 0
+        # Set once the widening question has been *asked*, which is not the same as answered
+        # yes: a run that asked and was told the base pool suffices is finished, and one that
+        # has not asked yet is not.
+        self._considered_widening = False
+        self._base_candidates: list[Candidate] = []
+        self._base_screened = 0
 
     # -- Tier 1 ------------------------------------------------------------------------------
 
@@ -238,6 +260,11 @@ class DiscoveryJob:
         if self._refit is None:
             self._open_refit()
         if not self._refit_open or self._refit is None:
+            # A tier that had nothing to do is a tier that ran out of work, so the widening
+            # question is due here too -- otherwise a search whose shortlist was empty would
+            # report a pool it never asked the data about.
+            if self._refit_done:
+                self._consider_widening()
             return None
         if self._batch is None:
             if self._outcomes is None:
@@ -248,6 +275,7 @@ class DiscoveryJob:
                 self._refit_open = False
                 self._refit_done = True
                 self._candidates = list(done.value)
+                self._consider_widening()
                 return None
             self._outcomes = None
             self._absorb(self._batch)
@@ -321,6 +349,70 @@ class DiscoveryJob:
             self._refit.close()
             self._refit_open = False
 
+    # -- The pool the spectrum chose ---------------------------------------------------------
+
+    def _consider_widening(self) -> None:
+        """Ask the completed search whether its own vocabulary was too small, and re-run if so.
+
+        The browser's half of docs/POOL_FROM_SPECTRUM_PLAN.md §5, and the same two-stage shape
+        :func:`~autocircuit.core.discover.discover` runs: screen and refit the default pool,
+        then ask :func:`~autocircuit.core.descriptors.choose_pool` whether *that pool's own
+        completed fit* still leaves a systematic residual, and only then widen. The evidence has
+        to come from a finished fit, which is why this cannot be asked before the search and why
+        the browser could not simply pass a wider pool: widening costs a completeness level, and
+        a level is not spent on a suspicion.
+
+        What it must not do is decide anything the core does not. `choose_pool` chooses; this
+        re-opens both tiers on the answer and keeps the first pass's candidates, exactly as
+        `discover` merges them -- they were fitted against the same data at the same budget and
+        every one of them is in the wider pool's space too, so dropping them would lose the
+        sizes the wider enumeration can no longer afford. That is what `base_complete_up_to`
+        records and what the coverage sentence then says out loud.
+        """
+        if self._considered_widening or not self.derive_pool:
+            return
+        self._considered_widening = True
+        self.pool_choice = choose_pool(
+            self.spectrum, residual_runs_z=_best_runs_z(self._candidates), base=self.pool
+        )
+        if not self.pool_choice.added:
+            return
+
+        self.base_complete_up_to = self.enumeration.coverage(len(self._scored))
+        self._base_candidates = list(self._candidates)
+        self._base_screened = len(self._scored)
+        self.pool = self.pool_choice.pool
+        self.enumeration = enumerate_candidates(
+            self.spectrum,
+            pool=self.pool,
+            skeleton=None if self.frame is None else self.frame.root,
+            limit=self.limit,
+            floor=self.floor,
+            max_candidates=self.max_candidates,
+            feasibility_filter=self.feasibility_filter,
+            feasibility_budget=self.feasibility_budget,
+        )
+        self._screen = screen_plan(self.enumeration.texts, chunk=self.screen_chunk)
+        self._screen_open = True
+        self._screen_done = False
+        self._issued = None
+        self._costs = None
+        self._scored = []
+        self._best = None
+        self._refit = None
+        self._refit_open = False
+        self._refit_done = False
+        self._batch = None
+        self._issued_refits = 0
+        self._outcomes = None
+        self._candidates = []
+        self._shortlisted = 0
+
+    @property
+    def widened(self) -> bool:
+        """True once a second pass over a wider pool is under way or done."""
+        return bool(self._base_candidates)
+
     @property
     def finished(self) -> bool:
         """True once both tiers ran out of work of their own accord.
@@ -329,7 +421,11 @@ class DiscoveryJob:
         report that could not tell the difference would present a stopped search as a
         finished one.
         """
-        return self._screen_done and self._refit_done
+        return (
+            self._screen_done
+            and self._refit_done
+            and (self._considered_widening or not self.derive_pool)
+        )
 
     def candidate(self, text: str | None = None) -> Candidate:
         """One of this search's refitted topologies, by circuit text; the recommended one by
@@ -361,16 +457,26 @@ class DiscoveryJob:
             # Nothing was refitted, not even opened -- but the shortlist size is knowable
             # without fitting, and "0 of 37" is a far more useful thing to report than "0".
             self._open_refit()
-        candidates = sorted(self._candidates, key=lambda c: c.score(self.criterion))
+        # After a widening there are two passes' worth of candidates and they are merged, not
+        # replaced: see `_consider_widening`. `_unique_best` is what `discover` uses for the
+        # same merge, so a topology screened in both pools is reported once, at its better fit.
+        merged = (
+            _unique_best(self._base_candidates + self._candidates, self.criterion)
+            if self._base_candidates
+            else self._candidates
+        )
+        candidates = sorted(merged, key=lambda c: c.score(self.criterion))
         return DiscoveryResult(
             candidates=candidates,
             pareto=pareto_front(candidates, self.criterion),
-            n_evaluated=len(self._scored),
+            n_evaluated=self._base_screened + len(self._scored),
             generations=0,
             elapsed_s=time.perf_counter() - self.started,
             pool=self.pool,
             mode="exhaustive",
             complete_up_to=self.enumeration.coverage(len(self._scored)),
+            base_complete_up_to=self.base_complete_up_to,
+            pool_choice=self.pool_choice,
             skeleton=None if self.frame is None else self.frame.to_string(),
             refit_progress=(
                 None if self.finished else (len(candidates), self._shortlisted)
@@ -604,6 +710,20 @@ def candidate_row(
     }
 
 
+def levels_of(job: DiscoveryJob) -> list[dict[str, int]]:
+    """How many topologies of each element count the *current* enumeration holds.
+
+    Current rather than initial: a widened search enumerates a second, larger space, and a
+    breakdown left over from the first one would describe work nobody is doing.
+    """
+    levels: list[dict[str, int]] = []
+    previous = 0
+    for n, end in job.enumeration.boundaries:
+        levels.append({"n_elements": n, "candidates": end - previous})
+        previous = end
+    return levels
+
+
 def plan_summary(job: DiscoveryJob) -> dict[str, Any]:
     """What the search is about to do, before a single topology is fitted.
 
@@ -611,18 +731,17 @@ def plan_summary(job: DiscoveryJob) -> dict[str, Any]:
     limit one higher can be forty times the work -- and lower the limit before waiting rather
     than after.
     """
-    levels: list[dict[str, int]] = []
-    previous = 0
-    for n, end in job.enumeration.boundaries:
-        levels.append({"n_elements": n, "candidates": end - previous})
-        previous = end
     return {
         "job": job.id,
         "candidates": len(job.enumeration.texts),
-        "levels": levels,
+        "levels": levels_of(job),
         "limit": job.limit,
         "floor": job.floor,
         "pool": list(job.pool),
+        # Whether that pool is an assertion or a starting point. Under ``derive_pool`` the
+        # search may widen it once its own fit says the data asks for an element it lacks, so
+        # the plan the user is looking at is the *first* of up to two.
+        "derive_pool": job.derive_pool,
         "skeleton": None if job.frame is None else job.frame.to_string(),
         "mode": "exhaustive",
         "screen_chunk": job.screen_chunk,
@@ -668,6 +787,12 @@ def report_payload(job: DiscoveryJob) -> dict[str, Any]:
         ),
         "n_evaluated": result.n_evaluated,
         "complete_up_to": result.complete_up_to,
+        # The pool the spectrum chose, or null when the caller named one. ``completeness``
+        # above already carries its sentence -- this is the structured form, the same one the
+        # CLI's --json file has, so the browser can show the widening as a fact rather than
+        # only inside prose.
+        "pool_choice": None if result.pool_choice is None else result.pool_choice.to_dict(),
+        "base_complete_up_to": result.base_complete_up_to,
         "elapsed_s": encode_float(result.elapsed_s),
         "pool": list(result.pool),
         "mode": result.mode,

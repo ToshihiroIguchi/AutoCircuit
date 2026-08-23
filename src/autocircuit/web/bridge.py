@@ -53,7 +53,7 @@ from autocircuit.core.circuit import (
 from autocircuit.core.discover import RefitTask, ScreenTask, run_refit, run_screen
 from autocircuit.core.drt import DEFAULT_POINTS_PER_DECADE, drt
 from autocircuit.core.drt import WIRE_VERSION as DRT_WIRE_VERSION
-from autocircuit.core.elements import DEFAULT_POOL, POOLS, REGISTRY
+from autocircuit.core.elements import POOLS, REGISTRY
 from autocircuit.core.fit import WIRE_VERSION as FIT_WIRE_VERSION
 from autocircuit.core.fit import FitResult, Weighting, fit, relative_error, search_space
 from autocircuit.core.spectrum import Spectrum
@@ -276,9 +276,17 @@ def _op_discover_start(payload: dict[str, Any]) -> dict[str, Any]:
     The answer says how much work was just committed to, per element count, which is the
     number worth seeing before a search that takes minutes rather than after.
     """
+    # ``None`` -- an absent key, an explicit null, or "auto" -- means the spectrum chooses, and
+    # it is passed on as None rather than resolved here. Naming `DEFAULT_POOL` at this line was
+    # the browser's standing violation of `CLAUDE.md`'s rule that the automatic path takes the
+    # spectrum and nothing else: the search would then report a pool the user never asserted
+    # and never widen it, whatever the residuals said.
+    requested = payload.get("pool")
+    if isinstance(requested, str):
+        requested = None if requested == "auto" else [requested]
     started = job.DiscoveryJob(
         Spectrum.from_wire(payload["spectrum"]),
-        pool=tuple(payload.get("pool") or DEFAULT_POOL),
+        pool=None if not requested else tuple(requested),
         skeleton=payload.get("skeleton"),
         exhaustive_limit=(
             None if payload.get("exhaustive_limit") is None
@@ -315,6 +323,16 @@ def _op_discover_screen(payload: dict[str, Any]) -> dict[str, Any]:
         "screened": running.screened,
         "total": len(running.enumeration.texts),
         "best": running.best_screened,
+        # A widened search screens a second, larger space, so ``screened`` and ``total`` both
+        # restart. Saying which pass they belong to is what keeps a progress bar that goes
+        # backwards from looking like a bug -- and it is also the first moment the user can be
+        # told that the data asked for more elements than the default pool has.
+        "widened": running.widened,
+        "pool": list(running.pool),
+        # The per-size breakdown of the space being screened *now*. It is on every step rather
+        # than only the first because a widening replaces the enumeration mid-run, and a
+        # breakdown of the space the search has moved on from is worse than none.
+        "levels": job.levels_of(running),
     }
 
 
@@ -339,6 +357,11 @@ def _op_discover_refit(payload: dict[str, Any]) -> dict[str, Any]:
         "refitted": running.refitted,
         "shortlisted": running.shortlisted,
         "front": [job.candidate_row(c, running.criterion) for c in running.front],
+        # Tier 2 running out is no longer the end of the search: under ``pool: null`` the
+        # completed fit is the evidence the pool question needs, so a widening starts here and
+        # the driver has to go back to screening. It asks this rather than being told to loop a
+        # fixed number of times, because how many passes there are is the core's decision.
+        "more": not running.finished,
     }
 
 

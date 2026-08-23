@@ -1,7 +1,7 @@
 # The default pool, and why it may not be a decision about the part
 
-Status: **implemented in the core and the CLI; gates C1-C6 measured; the browser is not
-wired.** Written 2026-08-22.
+Status: **implemented in the core, the CLI and the browser; gates C1-C6 measured.** Written
+2026-08-22; the browser was wired 2026-08-23 (section 8).
 
 `CLAUDE.md` states the rule this document exists to repair:
 
@@ -395,10 +395,6 @@ that could not check says exactly that.
 
 ## 7. What is not done
 
-- **The browser.** `web/bridge.py` and `web/job.py` take a concrete pool and default to
-  `DEFAULT_POOL`, so the deployed site still commits the exact violation this document repairs.
-  Wiring it means the two-stage flow inside `DiscoveryJob`, which is resumable and cancellable,
-  so it is not a one-line change.
 - **`R1-p(R2,C1)-Ws1` is the weakest case in the table and the one the whole second threshold
   exists for.** The shape reading covers it 17/24 and the residual 3/3, but only between -1.5
   and -3.0, so it is the single case standing between the two bars. If this feature ever needs a
@@ -414,3 +410,51 @@ that could not check says exactly that.
   them. That is the same unmeasured guess this document exists to remove, one level up, and it
   is named here rather than left implicit.
 - **`final_restarts=5` is not always enough once diffusion is in the pool** (section 4).
+
+## 8. The browser, wired
+
+Until this section the deployed site committed the exact violation the document repairs: its
+Discover screen made the user pick a pool from a menu of three -- `default`, `component`,
+`electrochemical` -- which is the question `CLAUDE.md` rules out asking, and `web/bridge.py`
+resolved an absent choice to `DEFAULT_POOL`, so the browser's search could never widen whatever
+its residuals said.
+
+**What it took, and why it was not one line.** `DiscoveryJob` is a resumable, cancellable state
+machine driven from JavaScript a batch at a time, and the pool question can only be asked *after*
+tier 2, because the evidence is the base pool's own completed fit. So the job gained a second
+pass: when tier 2 runs out under a derived pool it calls `choose_pool`, and if anything was
+added it re-enumerates, re-opens both tiers, and keeps the first pass's candidates to merge --
+the same merge `discover` does, for the same reason. Three consequences reach the wire, and
+`BRIDGE_VERSION` goes 8 -> 9 for them:
+
+* `discover_start` takes `pool: null` and means it. The driver passes *no* pool rather than
+  resolving one, so "the spectrum chose" stays a fact about the call.
+* `discover_refit` answers `more`, because tier 2 running out is no longer the end of the
+  search. A driver that stopped at the first `tasks: null` would report the narrow pool -- which
+  is exactly what the browser did before, and what the second of the new tests pins.
+* `discover_screen` answers `widened`, the pool being screened, and the *current* per-size
+  breakdown. All three exist because the second pass restarts the counters over a larger space:
+  a progress bar that goes backwards with no explanation reads as a bug, and a level table left
+  over from the first enumeration describes work nobody is doing.
+
+**Gate: the browser's report equals the CLI's, row for row.** Not "the browser also widens" --
+`tests/test_web_job.py` drives the whole thing through `bridge.handle` as JavaScript does and
+asserts the same widened pool, the same lost completeness level, the same candidates at the same
+AICc, the same recommendation and the same coverage sentence as `discover(pool=None)` on the same
+spectrum. It also asserts the run is not vacuous: the spectrum has to be one that really asks for
+a wider pool.
+
+[measured, in Chrome against the dev server] The thin-layer-cell example (`R1-p(CPE1,R2-Ws1)`) at
+a three-element limit: the pool control now reads *auto -- the spectrum chooses*, the first pass
+screens 75 topologies over the default pool, the notice appears, the second pass screens 244 with
+the level table updating 2/12/61 -> 2/24/218, and the report's coverage sentence carries the
+whole story -- runs z -5.74, a 0.90-decade 45-degree branch, `Ws, G` added, `Wo` and `W` left out
+with the reason for each.
+
+**One thing the browser build makes easy to get wrong.** `npm run dev` packages the Python
+*once*, at start-up (`npm run assets && vite`), so a change to `src/autocircuit/web/` after the
+server is running is not in the worker. This produced a white screen whose cause was a field the
+worker's older bridge did not send -- and note that `BRIDGE_VERSION` did not catch it, because
+the version had been bumped in the same edit that the packaging had already captured. Restart the
+dev server after touching the Python; the driver now also defaults the field rather than
+crashing, which is a driver normalising a wire response and not the UI hiding a fault.

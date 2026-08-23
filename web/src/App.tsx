@@ -42,6 +42,7 @@ import type {
   SpectrumWire,
   VersionsWire,
 } from "./core/types";
+import { AUTO_POOL } from "./core/types";
 import { ExcludedRun, idleExcluded, type ExcludedProgress } from "./core/excluded";
 import { idleProgress, SearchRun, type SearchProgress } from "./core/search";
 import { ThemeContext, useTheme } from "./core/theme";
@@ -480,7 +481,14 @@ export function App() {
   const startSearch = useCallback(
     async (spectrum: LoadedSpectrum, skeleton: string | null) => {
       const options: SearchOptions = {
-        pool: catalogue?.pools[settings.poolName],
+        // `undefined` is the request that carries no pool at all, which is what makes the
+        // search derive one. Spelled out rather than relying on `pools["auto"]` being absent:
+        // an "auto" entry appearing in the catalogue one day must not quietly turn the
+        // automatic path into a named one.
+        pool:
+          settings.poolName === AUTO_POOL
+            ? undefined
+            : catalogue?.pools[settings.poolName],
         skeleton: settings.useSkeleton ? skeleton : null,
         exhaustiveLimit: settings.exhaustiveLimit,
         weighting: settings.weighting,

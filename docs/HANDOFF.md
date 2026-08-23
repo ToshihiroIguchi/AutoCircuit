@@ -1716,10 +1716,8 @@ nothing on the path they exist for, and the suite was green. Caught by reading, 
 
 ### What is not done
 
-The browser is unwired: `web/bridge.py` and `web/job.py` still take a concrete pool and default
-to `DEFAULT_POOL`, so the browser reproduces the exact violation this section fixes. Wiring it
-means the two-stage flow inside `DiscoveryJob`, which is resumable and cancellable, so it is not
-a one-line change.
+~~The browser is unwired.~~ **Done in §26**, and it was the two-stage flow inside
+`DiscoveryJob` that made it more than a one-line change.
 
 `R1-p(R2,C1)-Ws1` is the weakest case in the table and neither instrument is comfortable on it:
 the shape covers it 17/24 and the residual reads -2.58 at one seed, unmeasured across seeds. If
@@ -1910,3 +1908,58 @@ Islands (step 4's second half) and step 5 are untouched. Of `docs/SEARCH_ALGORIT
 looked -- its advantage over this one on the frozen landscape is a median of 256 fits against
 308, for a rewrite of the selection mechanism. Pool staging inside `_evolve` remains blocked on
 an arena for a truth that genuinely needs a CPE.
+
+
+## 26. The browser stops asking what kind of part this is
+
+`docs/POOL_FROM_SPECTRUM_PLAN.md` §8, which is the section to read; this is what a later session
+needs on top of it.
+
+The deployed site had a **Pool** menu offering `default`, `component`, `electrochemical` -- the
+question `CLAUDE.md` rules out asking, because a non-expert's wrong answer to it silently narrows
+the search -- and `web/bridge.py` turned an absent choice into `DEFAULT_POOL`, so the browser
+could never widen. It now defaults to *auto -- the spectrum chooses*, passes **no** pool, and
+runs the same two-stage search the CLI runs.
+
+### Four things not to re-derive
+
+1. **The pool question can only be asked after tier 2, so the job needed a second pass.** The
+   evidence `choose_pool` reads is the base pool's *own completed fit*. `DiscoveryJob` therefore
+   re-enumerates and re-opens both tiers when the answer adds anything, and merges the first
+   pass's candidates with `_unique_best` exactly as `discover` does -- they were fitted against
+   the same data at the same budget, and dropping them would lose the sizes the wider
+   enumeration can no longer afford.
+2. **The driver had to learn that tier 2 running out is not the end.** `discover_refit` answers
+   `more`. A driver that stops at the first `tasks: null` reports the narrow pool, silently, with
+   a healthy-looking report -- which is what the browser did before, and what one of the new
+   tests pins.
+3. **`npm run dev` packages the Python once, at start-up.** Editing `src/autocircuit/web/` while
+   the server runs leaves the worker on the old bridge. This cost a white screen, and note the
+   part that matters: **`BRIDGE_VERSION` did not catch it**, because the version bump was in the
+   edit the packaging had already captured. Restart the dev server after touching the Python.
+4. **The gate is not "the browser also widens".** `tests/test_web_job.py` drives the whole search
+   through `bridge.handle` and asserts the browser's report equals `discover(pool=None)`'s row
+   for row -- same widened pool, same lost completeness level, same AICc, same sentence -- and
+   asserts the spectrum really does ask for a wider pool, so the test cannot pass vacuously.
+
+### Verified in a real browser
+
+[measured] Chrome against the dev server, thin-layer-cell example, three-element limit: the
+control reads *auto -- the spectrum chooses*; the first pass screens 75 topologies; the notice
+appears; the second pass screens 244 with the level table updating 2/12/61 -> 2/24/218; the
+report's coverage sentence carries runs z -5.74, a 0.90-decade 45-degree branch, `Ws, G` added,
+and `Wo` and `W` left out with a reason each. No console errors.
+
+### State of the suite
+
+[measured] **921 pass, 19 skip**; `ruff check .`, `mypy src`, `npm run check` and `npm run smoke`
+all clean. The wall-clock time of that run (22 min against the usual 9.5) is not a regression in
+the tests: a Playwright Chrome with the app and its Pyodide workers was still open beside it,
+which is §4's two-benchmarks-at-once rule showing up somewhere new. Close the browser before
+timing anything.
+
+### What is not done
+
+The Fit screen has no pool control and needs none. What the browser still cannot do is show the
+*structured* `pool_choice` -- it is on the wire and in the downloaded JSON, but the UI reads the
+sentence only, which is the honest minimum rather than the whole of it.

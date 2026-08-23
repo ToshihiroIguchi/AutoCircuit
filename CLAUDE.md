@@ -310,7 +310,8 @@ static-site Web UI running the same core via WASM (Pyodide).
 
 12. `docs/POOL_FROM_SPECTRUM_PLAN.md` — the default element pool, which used to be a decision
    about the part rather than about the data. **Implemented in the core and the CLI (`--pool
-   auto`); gates C1–C5 measured; the browser is not wired.** Two of its sections are the ones to
+   auto`); gates C1–C5 measured; the browser is wired too (§8 of
+   that document), with its report measured equal to the CLI's row for row.** Two of its sections are the ones to
    read. §3 is where the obvious detector — find a 45-degree branch, add the diffusion elements —
    was built and *rejected by its own measurement*: it separates a pure diffusion spectrum from a
    pure relaxation one completely and lands `R1-p(R2,CPE1)-Wo1` at 0.20–0.60 decades against a

@@ -21,6 +21,7 @@ import type {
   CriterionWire,
   LoadedSpectrum,
 } from "../core/types";
+import { AUTO_POOL } from "../core/types";
 import { decodeArray, decodeComplexArray } from "../core/wire";
 import type { SearchState } from "../App";
 import { BridgeClient } from "../worker/client";
@@ -108,7 +109,12 @@ export interface SearchSettings {
 
 export function defaultSearchSettings(): SearchSettings {
   return {
-    poolName: "default",
+    // "auto" is not one of the catalogue's pools and deliberately so: it means *no* pool, which
+    // is what makes the spectrum choose one (`CLAUDE.md`, and docs/POOL_FROM_SPECTRUM_PLAN.md).
+    // It is the default here for the same reason `--pool auto` is the default on the command
+    // line -- "what kind of part is this?" is the expert judgement this project exists to
+    // remove, and a non-expert's wrong answer to it silently narrows the search.
+    poolName: AUTO_POOL,
     exhaustiveLimit: 4,
     useSkeleton: false,
     workers: defaultPoolSize(),
@@ -191,7 +197,9 @@ export function DiscoverScreen({
         criteria={criteria}
         criterion={criterion}
         onCriterion={(value) => onSettings({ criterion: value })}
-        poolNames={catalogue === null ? [poolName] : Object.keys(catalogue.pools)}
+        poolNames={
+          catalogue === null ? [poolName] : [AUTO_POOL, ...Object.keys(catalogue.pools)]
+        }
         poolName={poolName}
         onPoolName={(value) => onSettings({ poolName: value })}
         exhaustiveLimit={exhaustiveLimit}

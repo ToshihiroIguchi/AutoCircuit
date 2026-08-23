@@ -1719,6 +1719,23 @@ body {
   color: var(--text-primary);
 }
 
+/* Said in the content column rather than as a badge, because it is a change to what the search
+   is doing and to what the counters below mean -- the second pass restarts them. */
+.search-progress__widened {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-left: 3px solid var(--series-1);
+  background: var(--surface-2);
+  border-radius: 0 4px 4px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.search-progress__widened code {
+  color: var(--text-primary);
+}
+
 /* One row per tier, all of them on screen at once. A tier that has not started is dimmed rather
    than hidden, so the reader knows how many bars there are before the first one fills -- which is
    the whole point of showing them together (see the component's header comment). */

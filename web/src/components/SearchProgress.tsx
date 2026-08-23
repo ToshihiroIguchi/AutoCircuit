@@ -140,6 +140,10 @@ export function SearchProgressPanel({ progress, poolSize }: SearchProgressPanelP
   // they are named in the heading and fold into the neighbouring rows below.
   const screening = stateOf(progress.stage, "screening");
   const refitting = stateOf(progress.stage, "refitting");
+  // The plan's breakdown until the first batch of a pass lands, and the pass's own after that:
+  // a widening replaces the enumeration, and the old breakdown would describe a space nobody is
+  // screening any more.
+  const levels = progress.levels.length > 0 ? progress.levels : (progress.plan?.levels ?? []);
 
   return (
     <section className="search-progress">
@@ -155,6 +159,15 @@ export function SearchProgressPanel({ progress, poolSize }: SearchProgressPanelP
         total={poolSize}
         unit="workers ready"
       />
+      {progress.widened && (
+        <p className="search-progress__widened">
+          The default pool&rsquo;s own completed fit still left a systematic residual, so the
+          search widened its pool to <code>{progress.pool.join(", ")}</code> and is screening the
+          larger space. The counts below start again with it, and the report will say which
+          element counts the wider pool could still cover.
+        </p>
+      )}
+
       <Row
         step="Stage 1 of 2"
         label="Screening candidates"
@@ -180,7 +193,7 @@ export function SearchProgressPanel({ progress, poolSize }: SearchProgressPanelP
         unit="shortlisted topologies refitted"
       />
 
-      {progress.plan !== null && (
+      {levels.length > 0 && (
         <table className="search-progress__levels">
           <thead>
             <tr>
@@ -189,7 +202,7 @@ export function SearchProgressPanel({ progress, poolSize }: SearchProgressPanelP
             </tr>
           </thead>
           <tbody>
-            {progress.plan.levels.map((level) => (
+            {levels.map((level) => (
               <tr key={level.n_elements}>
                 <td>{level.n_elements}</td>
                 <td className="num">{level.candidates}</td>
