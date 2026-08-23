@@ -2011,9 +2011,29 @@ claiming agreement with itself.
    silently breaks any string literal containing one. Build such a literal with `chr(10)`/`chr(92)`, or use the Write tool.
    §4's note about heredocs and apostrophes is the same family.
 
+### The browser shows it too
+
+`discover_interpret` (`BRIDGE_VERSION` 9 -> 10) answers the structured reading *and* the rendered
+`summary`, and the Report screen's `InterpretationPanel` shows both: a table of the quantities
+with a "Holds for" column, and the CLI's own text behind a disclosure. The sentences are not
+re-composed in TypeScript, for the same reason `completeness` is not.
+
+Two things the panel has to get right, and both were wrong in the first version until a browser
+showed them:
+
+* **A class of one must not report agreement with itself.** The table said "all 1 agree to 0.0%",
+  which is the vacuous claim the whole module is arranged against. It now says "unchecked: only
+  one form found", and the heading says there is no second form to disagree with it.
+* **The disagreement is the headline, not a footnote.** When the members differ on how many
+  relaxations the part shows, that is an alert above the table, naming each form and its count.
+
+[measured, in Chrome] Tissue (Cole) at a three-element limit: the panel reads "checked against
+the 1 other topology this search could not tell apart from it", warns that `p(R1,CPE1)-R2` says 1
+relaxation and `p(R1-CPE1,R2)` says 0, and reports the four invariant quantities as agreeing to
+2e-9 to 5e-9 percent. No console errors.
+
 ### What is not done
 
-The browser still shows no interpretation. The bridge has no operation for it, so the Report
-screen cannot ask -- that is the next step, and the honest minimum there is to render
-`summary()` verbatim the way `completeness` already is, rather than re-composing the sentences
-in TypeScript.
+The Fit screen shows no interpretation -- a manual fit has no equivalence class to check against,
+so it would be the weaker half of the same panel, and `fit --interpret` already covers it on the
+command line. The `model`/`interpret` objective split is still unwired, and gate O1 with it.

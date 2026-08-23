@@ -79,10 +79,9 @@ Consequences that follow from those three, and that outrank local convenience:
   or **form-dependent** (a feature of the tree that was reported, such as a block's `R*C`).
   Gate I1 has both halves: the invariant quantities must agree across an exact
   reparameterisation, *and* the form-dependent ones must be seen to disagree, because a label
-  nothing can falsify is not a label. Still missing: the browser does not show an interpretation and the
-  `objective` split below is not wired anywhere. The **discovery** report does carry one
-  (`discover --interpret`), and it reads the recommendation's *whole equivalence class* rather
-  than the recommendation alone -- [measured] the class agrees on the invariant quantities to
+  nothing can falsify is not a label. Still missing: the `objective` split below is not wired anywhere. The **discovery** report carries one on both front ends
+  (`discover --interpret`, and the Report screen's panel), and it reads the recommendation's
+  *whole equivalence class* rather than the recommendation alone -- [measured] the class agrees on the invariant quantities to
   2e-11 across independently fitted members, and disagrees about how many relaxations the part
   shows, which is exactly the reading a non-expert would otherwise take as a finding.
 - **Honest reporting outranks a satisfying answer**, because point 3 removes the expert who

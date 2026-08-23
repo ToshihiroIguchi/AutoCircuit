@@ -35,6 +35,7 @@ from autocircuit.core.discover import (
     run_refit,
     run_screen,
 )
+from autocircuit.core.interpret import interpret_class
 from autocircuit.core.simulate import log_frequencies, simulate
 from autocircuit.core.spectrum import Spectrum
 from autocircuit.web import job as job_module
@@ -841,6 +842,33 @@ def test_the_json_export_includes_the_excluded_pass_only_when_one_was_run() -> N
 # -- so its search could never widen, whatever the residuals said -- while the CLI had defaulted
 # to `--pool auto` since docs/POOL_FROM_SPECTRUM_PLAN.md. These are that difference closed, and
 # they assert it the only way that means anything: the two paths produce the same report.
+
+
+def test_the_browser_can_read_a_reported_circuit_as_internal_structure() -> None:
+    """`discover_interpret`, and the thing that makes it honest: it carries the class.
+
+    The same rule the CLI follows (`docs/HANDOFF.md` §27) -- interpret the recommendation *and*
+    every topology the data cannot tell it apart from, so the report can say which numbers the
+    class agreed on. Asserted against `interpret_class` on the same fits rather than against a
+    transcription of what it should say.
+    """
+    spectrum = _semicircle()
+    driver = Driver(spectrum, pool=list(POOL), exhaustive_limit=LIMIT, screen_chunk=1)
+    driver.run()
+    answer = _call("discover_interpret", job=driver.id)
+
+    running = job_module.current(driver.id)
+    chosen = running.candidate(None)
+    family = [chosen, *running.report().equivalents_of(chosen)]
+    expected = interpret_class([c.result for c in family], spectrum)
+
+    assert answer["summary"] == expected.summary()
+    assert answer["interpretation"] == expected.to_dict()
+    assert answer["interpretation"]["class_members"][0] == chosen.circuit.to_string()
+    invariant = [
+        row for row in answer["interpretation"]["class_spread"] if row["invariant"]
+    ]
+    assert invariant, "nothing marked invariant, so the answer asserts nothing"
 
 
 def _diffusion() -> Spectrum:

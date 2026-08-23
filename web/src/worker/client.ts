@@ -13,6 +13,7 @@ import type {
   ExportArtifactWire,
   FitResultWire,
   FitWire,
+  InterpretationAnswer,
   PreviewWire,
   RefitStepWire,
   RefitTaskWire,
@@ -453,6 +454,24 @@ export class BridgeClient {
    */
   async discoverCandidate(job: string, circuit?: string | null): Promise<FitWire> {
     return this.call<FitWire>({ op: "discover_candidate", job, circuit: circuit ?? null });
+  }
+
+  /**
+   * One reported circuit read as internal structure, checked against its equivalence class.
+   *
+   * Nothing is fitted: every member is a tier-2 result the job still holds. `summary` arrives
+   * rendered, like `completeness`, because the sentence that says what may not be claimed is
+   * the part a second implementation would get subtly wrong.
+   */
+  async discoverInterpret(
+    job: string,
+    circuit?: string | null,
+  ): Promise<InterpretationAnswer> {
+    return this.call<InterpretationAnswer>({
+      op: "discover_interpret",
+      job,
+      circuit: circuit ?? null,
+    });
   }
 
   /** Stop handing out work. The report stays readable afterwards, and says it was stopped. */

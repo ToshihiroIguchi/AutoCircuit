@@ -48,7 +48,9 @@ from autocircuit.core.validate import WIRE_VERSION as VALIDATE_WIRE_VERSION
 #: ``--pool auto`` does on the command line -- so the search can widen its own pool mid-run;
 #: ``discover_screen`` says whether it is on the widened pass and ``discover_refit`` whether
 #: there is more to do after it, and ``discover_report`` carries ``pool_choice``.
-BRIDGE_VERSION = 9
+#: 10 (2026-08-24): ``discover_interpret`` -- the recommended circuit read as internal
+#: structure, checked against every topology the data cannot tell it apart from.
+BRIDGE_VERSION = 10
 
 #: One operation: a request payload in, a JSON-safe result out.
 Operation = Callable[[dict[str, Any]], Any]

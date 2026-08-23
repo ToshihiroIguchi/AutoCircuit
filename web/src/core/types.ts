@@ -212,6 +212,50 @@ export type RefitTaskWire = [circuit: string, restarts: number, seed: number];
  */
 export const AUTO_POOL = "auto";
 
+/**
+ * One reported circuit read as internal structure, and what its equivalence class says about it.
+ *
+ * The numbers are geometry-free by decision, not by omission: `Z(f)` fixes a capacitance and
+ * cannot fix a permittivity, so nothing here needs an area or a thickness. `invariant` marks the
+ * ones every member of the class agrees on -- and `class_spread` is the *measurement* of that
+ * agreement rather than a restatement of the flag, so a claim of invariance can be checked
+ * against what the class actually did.
+ */
+export interface InterpretationWire {
+  circuit: string;
+  quantities: Array<{
+    name: string;
+    value: WireFloat;
+    unit: string;
+    invariant: boolean;
+    stderr?: WireFloat;
+    note?: string;
+  }>;
+  modes: Array<Record<string, unknown>>;
+  modes_available: boolean;
+  relaxations: Array<Record<string, unknown>>;
+  notes: string[];
+  /** The class, the interpreted circuit first. */
+  class_members: string[];
+  /** How many relaxations each member shows, in `class_members` order. Differing is the point. */
+  class_relaxation_counts: number[];
+  class_spread: Array<{
+    name: string;
+    unit: string;
+    invariant: boolean;
+    values: WireFloat[];
+    spread: WireFloat;
+    reported_by: number;
+  }>;
+}
+
+/** `discover_interpret`'s answer: the structured reading and the rendered sentences. */
+export interface InterpretationAnswer {
+  interpretation: InterpretationWire;
+  /** Rendered by the core and shown verbatim, exactly as `completeness` is. */
+  summary: string;
+}
+
 /** How many topologies of each size the search is about to look at. */
 export interface SearchLevelWire {
   n_elements: number;

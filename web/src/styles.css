@@ -1712,6 +1712,45 @@ body {
   gap: 8px;
 }
 
+/* The interpretation: a reading of one circuit, bounded by what its class agrees on. The
+   form-dependent rows are dimmed rather than hidden -- they are the ones a reader is most likely
+   to take as a measurement, so they have to be visible and marked at the same time. */
+.interpretation {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.interpretation__intro {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.interpretation__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.interpretation__table th,
+.interpretation__table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.interpretation__table th.num,
+.interpretation__table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.interpretation__table tr.interpretation__form td {
+  color: var(--text-muted);
+}
+
 .search-progress__stage {
   margin: 0;
   font-size: 12px;
