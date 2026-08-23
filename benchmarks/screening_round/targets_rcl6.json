@@ -1,0 +1,1 @@
+{"landscape": "land_rcl6.json", "targets": ["p(C,R,[C-R-p(C,R)])", "[p(C,R)-p(C,R,[C-R])]", "p(C,R,[R-p(C,[C-R])])", "[p(C,R)-p(R,[C-p(C,R)])]", "p(R,[C-p(C,R,[C-R])])", "p(R,[C-p(C,R)-p(C,R)])", "p(R,[C-p(C,[R-p(C,R)])])", "p(C,[p(C,R)-p(R,[C-R])])", "[p(C,R)-p(C,R)-p(C,R)]", "p(C,[C-R],[R-p(C,R)])", "p(C,[R-p(C,[R-p(C,R)])])", "p(C,R,[C-p(R,[C-R])])"]}

@@ -323,6 +323,26 @@ static-site Web UI running the same core via WASM (Pyodide).
    of R, C, L and CPE reproduces, and the default pool's best answer for them is 4x to 17x the
    noise floor.
 
+13. `docs/SEARCH_ALGORITHM_SURVEY.md` and `docs/SEARCH_ALGORITHM_SCREENING.md` — what could
+   replace the topology search, and what a cheap round of measurement says about it. The survey
+   is a map with no measurement in it; the screening round is the measurement, and **it
+   contradicts the survey's own top recommendation**, so read them in that order and trust the
+   second. Its method is the part to reuse: `evolve-gate` costs 2.5–3 h per arm because its
+   budget is wall-clock and it fits as it goes, so the round screens every topology in the space
+   *once* into a frozen table and then compares searches in **fits** rather than seconds
+   (`benchmarks/screening_round/`). Four things it settled, all against expectations. **The
+   criterion is not the problem** — the truth's class ranks 1–17 on every arena built. **The
+   element cap is not the problem** — 6 against 7 changes nothing. **A compiled kernel cannot be
+   the answer** — the impedance kernel is 36–47% of a screen's own time, so Amdahl caps C/C++/
+   numba at 1.4–1.7x against a 13x gap. And what *is* the problem is CPE, in two ways at once:
+   1.77 s against 0.87 s per fit, and a truth-class density falling 0.55% → 0.085% because the
+   pool multiplies the space by 10 and the exact equivalents by 1.5. §4.2 is the section to read
+   before trusting any A/B in this repo: **every arm ties on the 11,033-topology arena and they
+   separate on the 21,057 one**, so a round that had stopped at the cheap arena would have
+   reported "nothing beats the incumbent" and been wrong — the same shape as `screen` versus
+   `screen-rank`. Three arms do beat it (120/120 against 87/120), and what they share is not
+   their operators but that they **bound the set they breed from**.
+
 Update these when decisions change.
 
 ## Stack and conventions

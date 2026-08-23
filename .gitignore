@@ -33,3 +33,12 @@ web/.build/
 web/dist/
 # Scratch output of the browser automation used to check the web UI by hand.
 .playwright-mcp/
+
+# Frozen fitness landscapes for benchmarks/screening_round: 3.4 MB of screening costs that
+# `landscape.py` rebuilds from the reference in about an hour, and the results live in
+# docs/SEARCH_ALGORITHM_SCREENING.md. The small targets_*.json files ARE committed -- they are
+# expensive (the CPE one is ~50 min of full-budget refits) and they define what counts as the
+# truth for every later run.
+benchmarks/screening_round/land_*.json
+benchmarks/screening_round/sample_*.json
+benchmarks/screening_round/*.jsonl
