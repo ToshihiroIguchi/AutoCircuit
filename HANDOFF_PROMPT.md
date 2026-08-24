@@ -1,4 +1,4 @@
-# 引き継ぎプロンプト(2026-08-24、探索の有界化・pool 自動選択・discovery の解釈 時点)
+# 引き継ぎプロンプト(2026-08-24、objective 軸の配線とゲート O1 時点)
 
 このファイルは次セッションの冒頭にそのまま貼るための作業メモ。用が済んだら更新するか削除してよい。
 (注:このファイルは **git 管理下**。commit すると履歴に入る。)
@@ -13,77 +13,64 @@ AutoCircuit プロジェクト(`C:\Users\toshi\python\AutoCircuit`)の作業を�
    - 目的3点(データから回路を探す / 回路は手段で目的は部品の中身 / 専門家が要った2工程の自動化)
    - 帰結:**入力は周波数とインピーダンスだけ**。形状も型番も部品種別も受け取らない・聞かない。
    - 帰結:**幾何不要な量は対象、絶対的な材料定数は対象外(永久に)**。
-   - objective はレポートだけを変え、数値には絶対に触れない。ゲート O1 は**未実装**。
-2. **`docs/HANDOFF.md`** — 現状。今回追加は §23(refit の順序)・§25(繁殖プールの有界化)・
-   §26(ブラウザの pool 自動選択)・§27(discovery レポートの解釈)。§3 と §4 は
-   **再導出してはいけない実測と環境の癖**。
-3. 触る部分の plan doc(`CLAUDE.md` の「Start here」1〜13)。
+   - objective はレポートだけを変え、数値には絶対に触れない。**ゲート O1 は実装・実測済み**。
+2. **`docs/HANDOFF.md`** — 現状。今回追加は §28(objective の配線とゲート O1)。
+   §3 と §4 は**再導出してはいけない実測と環境の癖**。
+3. 触る部分の plan doc(`CLAUDE.md` の「Start here」1〜14)。
 
-## 直近セッション(2026-08-23〜24)でやったこと
+## 直近セッション(2026-08-24)でやったこと
 
-**コミット7本、HEAD は `d1e6ecd`(7本目はこのファイル自身の更新)。すべて push 済み
-(= <https://toshihiroiguchi.github.io/AutoCircuit/> も更新済み)。CI・Pages ともに success。**
+**コミット2本、HEAD は `099da43`。push 済み(= <https://toshihiroiguchi.github.io/AutoCircuit/>
+も更新)。CI は push 直後で未確認 —— 次セッションは `gh run list` から始めること。**
 
-- `84684b9` **報告経路の欠陥を確認して直した。** 真値クラスが archive で1位に採点されながら1件も
-  報告されない事象(`SEARCH_ALGORITHM_SCREENING.md` §4.6)は、疑われた2箇所のどちらでもなく
-  **その間**だった —— `_quota_by_size` は「どれを refit するか」だけを決めて**順序を決めない**。
-  網羅段は全件 refit するので無害だが、`REFIT_HEADROOM` で止まる遺伝段では順序が報告内容を決める。
-  `_refine` は `_refit_order`(サイズごとのラウンドロビン、ラウンド内はスコア順)で歩く。
-  実測 0/4 → 4/4 報告、同じ 40 フィット。
-- `58ecb1c` **`_breeding_pool`(step 4 前半)。** 凍結ランドスケープ 120/120 対 87/120、
-  EV1 **6/9・4/9・3/9**(ラチェット 1/9・1/9・0/9、直前対照 3/9・1/9・1/9)、EV5 バイト一致。
-  **EV4 の第1節は不合格**で、言い換えずにそのまま記録した(下記)。
-- `cdb075a` **ブラウザの pool 自動選択。** `DiscoveryJob` に2段目を足し、`BRIDGE_VERSION` 8→9。
-  ブラウザのレポートが `discover(pool=None)` と1行ずつ一致することをテストで固定。実ブラウザ確認済み。
-- `0865fad` **discovery レポートの解釈(purpose point 2)。** `discover --interpret`。推奨回路
-  だけでなく**同値類の全メンバー**を読み、不変量の一致を*測定*する(独立フィット間で 2e-11)。
-  そして「緩和がいくつあるか」で**メンバー同士が食い違うこと**を報告に書く。
-- `d24d85a` **その解釈をブラウザにも。** `discover_interpret`、`BRIDGE_VERSION` 9→10、
-  Report 画面の `InterpretationPanel`。実ブラウザ確認済み。
+- `c199c88` **objective 軸を core と CLI に配線し、ゲート O1 を実装・実測。**
+  `core/objective.py`(レポート層)、`--objective {model,interpret}`(`fit`/`discover`)、
+  `autocircuit objectives`。`--interpret` は旧綴りとして残置(隠しエイリアス)。
+  `benchmarks/o1_objective.py` は**2節構成**で exit 1 する:構造(`discover()`/`fit()` が
+  objective を取らず、両モジュールが objective を import しない)と実測(CLI をエンドツーエンドで
+  両 objective 実行し、payload バイト一致・レポート相違)。実測 `--limit 3` で3参照系すべて合格。
+  ついでに「標準誤差が値を超える」規則を `core/stats.py` の `unresolved_mask` に移動。
+- `099da43` **ブラウザにも同じ質問。** `discover_interpret` → `discover_objective`
+  (`BRIDGE_VERSION` 10→11)、Report 画面は `ObjectivePanel`(2ボタン切り替え、再取得のみで再探索
+  しない)。実ブラウザ(Chrome)確認済み。**古いバグを1件発見して修正**:クラスが *同じゼロ* で
+  一致する量(帯域上端で短絡になる回路の `r_inf`)の spread が `inf` になり、strict JSON の
+  ブラウザ配線ではレスポンス全体が届かなくなっていた。
 
 ## 再導出してはいけない実測(今回追加分)
 
-- **`_quota_by_size` は順序を決めない。** 打ち切りのある tier 2 は `_refit_order` で歩くこと。
-  網羅段は全件 refit するので順序不問 —— だから EV5 はバイト一致のままである(確認済み)。
-- **EV4 第1節は不合格、しかも対照も不合格。** キャッシュヒット率は有界側 +26pt、対照 +5.7pt。
-  第2節は 13倍で合格(P(best) 0.065 対 0.005)。**言い換えないこと。** 残る手当ては島モデル
-  (step 4 後半)と適応的簡潔性(step 5)。なお有界側は**ユニーク評価数が減って回収は増える**
-  (541–594 対 692–722、真値回収 3/3 対 1/3)ので、「ヒット率上昇=停滞」という前提自体が
-  この参照系では成り立っていない —— これは計器についての測定であって、バーの書き換えではない。
-- **ハーネスの `run_in_background` は長時間ジョブを殺さない。** 25分の実測、48分の EV1 も完走。
-  「約10分で殺される」は `Start-Process` とシェルの `&` の話。`nohup ... &` は最悪(親が終わると
-  子も消え、ログすら残らない)。
-- **通知を測定として扱わないこと。今回これで失敗した。** 存在しない EV1 の結果6件と「完了」通知
-  2件が届き、それを検証せず報告して撤回した。**ファイルとプロセス表だけが測定。** `§4.7` の
-  「古いログ行で完走を死んだと誤診した」の裏返し。
-- **`python - <<'EOF'` ヒアドキュメント内のバックスラッシュ n は実際の改行になって届く。**
-  文字列リテラルが静かに壊れる。`chr(10)`/`chr(92)` で組むか Write ツールを使うこと。
-- **`npm run dev` は Python を起動時に一度だけ固める。** `src/autocircuit/web/` を触ったら再起動。
-  `BRIDGE_VERSION` はこの skew を捕まえない(版を上げた編集自体が既に固められていたため)。
-- **ブラウザを開いたままベンチやテストを回さない。** フルスイートが 9.5 分 → 22.5 分になった。
+- **O1 の本体は構造側。** バイト一致は「その参照系でたまたま一致した」以上を意味しない。
+  引数が存在しないことが性質を保証する。
+- **`--objective` の argparse 既定値は `None`。** `"model"` を既定にすると「model を指定した」と
+  「何も指定していない」が区別できず、`--interpret --objective model` が黙って通る。
+- **payload 比較は時計を再帰的に落とす。** 候補ごとに `elapsed_s` があるので、トップレベルだけ
+  pop しても何十箇所も差分が出る(objective とは無関係の理由で落ちるゲートは書き換えられる)。
+- **`MODEL_READOUTS` は全て invariant であることをテストで確認する。** 「同値類の全メンバーが
+  一致する」という見出しの下に form-dependent な数を出すのが唯一の静かな過大主張。
+- **ESL は帯域上端の *見かけの* インダクタンス**(`Im Z / omega`)。直列 R-L-C では
+  `L - 1/(omega^2 C)` であって `L` ではない。
+- **`spread` の中央値ゼロ問題**(上記)。完全一致は中央値によらず 0。`wire.encode_payload` を
+  通してからブラウザへ返す。
+- **ヒアドキュメント内のバックスラッシュ n は実際の改行になって届く**(§27 と同じ罠に今回も
+  1回はまった)。`chr(92)` で組むか Write ツールを使う。
+- **フルスイートは専有時 10 分15 秒 / 942 pass**(`--ignore=tests/test_spice_ngspice.py`)。
 
 ## 次の作業(推奨順)
 
 **A. 島モデル(`EVOLVE_SEARCH_PLAN.md` step 4 後半)、または step 5 の適応的簡潔性。**
-EV4 第1節を開いたまま出荷したので、閉じにいくならここ。`populations: int`、シードごとの RNG、
+EV4 第1節を開いたまま出荷してあるので、閉じにいくならここ。`populations: int`、シードごとの RNG、
 世代ごとに一部交換、キャッシュは共有。ゲートは EV4 の2節と EV1 のラチェット、それに
-`benchmarks/ev4_diversity.py`(今回追加、対照は `_breeding_pool` の無効化で作る)。
+`benchmarks/ev4_diversity.py`(対照は `_breeding_pool` の無効化で作る)。
 
 **B. NSGA-II は「効くが急がない」。** 凍結ランドスケープで中央値 256 対 308、どちらも 120/120。
-選択機構の書き換えに見合うかは A のあとで。**ALPS は追加しないこと**(24/30 に悪化)。
+**ALPS は追加しないこと**(24/30 に悪化)。
 
-**C.(推奨)objective の配線とゲート O1。** `CLAUDE.md` の `### Objectives` が要求していて未着手。
-`discover()`/`fit()` は objective を取らない(構造で保証する)、レポート層だけが受け取る。
-O1 は「同じスペクトル・同じシードで両 objective の `DiscoveryResult` ワイヤ表現がバイト一致」。
-`benchmarks/ev5_fingerprint.py` がそのまま雛形になる。
+**C. 残件。****Lin-KK の降格**、**Gamry `.DTA`・BioLogic `.mpt` リーダー**、
+複数温度・複数バイアスの同時フィット(`interpret` 目的だけが得をする唯一の縮退解消手段。
+`docs/OBJECTIVE_PLAN.md` §8 と `docs/HANDOFF.md` §6)。Fit 画面はまだどちらのレポートも出さない
+(CLI の `fit --objective` は出す)。
 
-**D. 残件。****Lin-KK の降格**、**Gamry `.DTA`・BioLogic `.mpt` リーダー**、
-複数温度・複数バイアスの同時フィット(`interpret` 目的だけが得をする唯一の縮退解消手段)。
-詳細は `docs/HANDOFF.md` §6。
-
-**E. 探索の残り候補。** (g) beam/分枝限定(決定的だが確率版が要る)、(h) VARPRO(1フィットの単価を
-直接攻める唯一の候補)、§4.5 の段取り 23〜33%(カーネルでも最適化器でもない素の Python、
-誰も見ていない)。pool の段階化は **CPE を本当に要する参照系のアリーナが作れるまで着手しない**。
+**D. 探索の残り候補。** (g) beam/分枝限定、(h) VARPRO、§4.5 の段取り 23〜33%。
+pool の段階化は **CPE を本当に要する参照系のアリーナが作れるまで着手しない**。
 
 ## 守ること
 
@@ -94,17 +81,18 @@ O1 は「同じスペクトル・同じシードで両 objective の `DiscoveryR
 - **安いアリーナで測って順位を決めない。**
 - 実測で計画やゲートが誤っていたと判明したら、**黙って解釈を緩めず**計画側を訂正する。棄却した読み
   は消さずに並べる。
+- **通知を測定として扱わない。ファイルとプロセス表だけが測定。**
 - ステップ単位でコミットし、GitHub にプッシュする。**push = 公開**。
 - **UI は必ず実ブラウザで確認する。**
 
 ## 環境の癖(全文は `docs/HANDOFF.md` §4)
 
 - パッケージは pip install されていない。`$env:PYTHONPATH = "C:\Users\toshi\python\AutoCircuit\src"`
-  が必須。`python -m pytest` はリポジトリルートから。フルスイートは専有時で約9.5分。
+  が必須。`python -m pytest` はリポジトリルートから。
 - **PowerShell でソースファイルを書き換えないこと**(cp932 で `Ω` が化ける)。編集ツールか、
   UTF-8 を明示した `python - <<'EOF'` を使う。
 - CI は `ruff check .` と `mypy` を回す。`ruff format` は回していない。
-- CPU を専有するベンチとテストを同時に走らせない(性能コア2)。ブラウザも同様。
+- CPU を専有するベンチとテストを同時に走らせない(性能コア2)。**ブラウザを開いたまま回さない。**
 - **長時間ジョブはハーネスの `run_in_background` で回し、結果は出力ファイルを読む。**
 - **Bash ツールから `wsl` を呼んではいけない。** ngspice は WSL の Ubuntu-24.04 にのみある。
 
@@ -116,7 +104,7 @@ npm run smoke            # Python 側の経路を Pyodide でヘッドレス検�
 npm run check            # tsc + 回路図ジオメトリ + サンプル照合
 ```
 
-- **bridge の操作を増やしたら `src/autocircuit/web/bridge.py` と `web/src/worker/protocol.ts` の
+- **bridge の操作を増やしたら `src/autocircuit/web/light.py` と `web/src/worker/protocol.ts` の
   `BRIDGE_VERSION` を両方上げる。** ただし**同じ編集で版を上げてもフィールド追加の skew は
   捕まらない**(§26)。
 - **ブラウザ自動化のスクリーンショットとダウンロードは `.playwright-mcp/` に落ちる。終わったら消す。**
