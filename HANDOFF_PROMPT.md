@@ -20,8 +20,9 @@ AutoCircuit プロジェクト(`C:\Users\toshi\python\AutoCircuit`)の作業を�
 
 ## 直近セッション(2026-08-24)でやったこと
 
-**コミット2本、HEAD は `099da43`。push 済み(= <https://toshihiroiguchi.github.io/AutoCircuit/>
-も更新)。CI は push 直後で未確認 —— 次セッションは `gh run list` から始めること。**
+**コミット3本(3本目はこのファイル自身)。すべて push 済み
+(= <https://toshihiroiguchi.github.io/AutoCircuit/> も更新)。`099da43` の CI は Tests・Pages
+とも success(Tests 16分34秒)。**
 
 - `c199c88` **objective 軸を core と CLI に配線し、ゲート O1 を実装・実測。**
   `core/objective.py`(レポート層)、`--objective {model,interpret}`(`fit`/`discover`)、
