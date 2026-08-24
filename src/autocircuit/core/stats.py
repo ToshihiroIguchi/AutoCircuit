@@ -20,6 +20,15 @@ BOUND_TOLERANCE = 1e-4
 #: Singular values below this fraction of the largest one are treated as null directions.
 RANK_RCOND = 1e-10
 
+#: Relative standard error above which a parameter counts as unresolved by the data.
+#:
+#: It lives here rather than with the search that made it famous because three different
+#: readers now ask the same question of a fit -- the Pareto table's ``free?`` column, the
+#: skeleton's "the data does not test this part of your assertion", and the ``model``
+#: objective's warning that a value carries no information on its own. A second copy of the
+#: threshold would let those three disagree about the same fit.
+UNRESOLVED_STDERR = 1.0
+
 #: Which rule decides between models. Six scores and one test; see :func:`criterion_value`.
 type Criterion = Literal["aic", "aicc", "bic", "caic", "hqc", "waic", "ftest"]
 
@@ -64,6 +73,21 @@ FTEST_RANKING: Criterion = "aic"
 
 #: Significance level of the sequential F-test.
 FTEST_ALPHA = 0.05
+
+
+def unresolved_mask(values: Float, stderr: Float) -> NDArray[np.bool_]:
+    """Per-parameter mask: True where the standard error exceeds the value itself.
+
+    A mask rather than only a count, because the count answers "is this model identifiable?"
+    while the mask answers "*which* parameter is not" -- and under a skeleton the second
+    question is the one that matters, since an asserted element the fit could not pin down is
+    an assertion the data never tested.
+    """
+    magnitude = np.abs(np.asarray(values, dtype=np.float64))
+    errors = np.asarray(stderr, dtype=np.float64)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ratio = np.where(magnitude > 0, errors / magnitude, np.inf)
+    return np.asarray(ratio > UNRESOLVED_STDERR)
 
 
 class FTest(NamedTuple):

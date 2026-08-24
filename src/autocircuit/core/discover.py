@@ -78,6 +78,7 @@ from .stats import (
     Criterion,
     f_test,
     information_criteria,
+    unresolved_mask,
 )
 
 # The runs test on residual signs, borrowed from the Kramers-Kronig validator: it answers the
@@ -189,9 +190,6 @@ WARM_ACCEPT_FACTOR = math.inf
 #: interpreter start-up on Windows, small enough that the early-abandon threshold keeps up.
 WORKER_CHUNK = 64
 
-#: Relative standard error above which a parameter counts as unresolved by the data.
-UNRESOLVED_STDERR = 1.0
-
 #: Two fitted candidates whose responses agree to better than this everywhere are treated as
 #: the same model. The threshold is far below any real measurement uncertainty, so matching it
 #: means the topologies are algebraic reparameterisations of one another, not merely similar.
@@ -282,11 +280,7 @@ class Candidate:
         not pin down is an assertion the data never tested (see
         :meth:`DiscoveryResult.unsupported_assertion`).
         """
-        values = np.abs(self.result.values)
-        errors = self.result.statistics.stderr
-        with np.errstate(divide="ignore", invalid="ignore"):
-            ratio = np.where(values > 0, errors / values, np.inf)
-        return np.asarray(ratio > UNRESOLVED_STDERR)
+        return unresolved_mask(self.result.values, self.result.statistics.stderr)
 
     @property
     def n_unresolved(self) -> int:

@@ -253,7 +253,8 @@ def test_discover_interpret_reads_the_class_and_not_only_the_recommendation(
     assert "r_polarisation" in out
 
     report = json.loads(report_path.read_text(encoding="utf-8"))
-    reading = report["interpretation"]
+    assert report["objective"]["objective"] == "interpret"
+    reading = report["objective"]["interpretation"]
     assert reading["circuit"] == report["recommended"]["circuit"]
     # The class is carried, and so is the per-quantity agreement it was checked with -- a claim
     # of invariance nothing measures is the label this whole module exists to avoid.
@@ -261,6 +262,96 @@ def test_discover_interpret_reads_the_class_and_not_only_the_recommendation(
     invariant = [s for s in reading["class_spread"] if s["invariant"]]
     assert invariant, "nothing was marked invariant, so the check proved nothing"
     assert all(s["spread"] < 1e-6 for s in invariant), invariant
+
+
+def _without_clocks(value: object) -> object:
+    """A report payload with every measured duration dropped, at any depth."""
+    if isinstance(value, dict):
+        return {k: _without_clocks(v) for k, v in value.items() if k != "elapsed_s"}
+    if isinstance(value, list):
+        return [_without_clocks(v) for v in value]
+    return value
+
+
+def test_the_objective_changes_the_report_and_not_one_number(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Gate O1 through the command line: same spectrum, same seed, two objectives.
+
+    The wire payload the report is built from must be byte-identical -- the objective is a
+    parameter of the reporting layer and `discover()` does not take it -- while the rendered
+    report must differ, or the axis is decoration. `benchmarks/o1_objective.py` is the full
+    version over the three reference spectra; this is the one that runs in CI.
+    """
+    data = _simulate_discover_csv(tmp_path)
+    payloads = {}
+    reports = {}
+    for objective in ("model", "interpret"):
+        report_path = tmp_path / f"discover_{objective}.json"
+        rc = main(
+            ["discover", str(data), "--mode", "exhaustive", "--no-drt",
+             "--objective", objective, "--json", str(report_path)]
+            + _DISCOVER_KWARGS
+        )
+        assert rc == 0
+        reports[objective] = capsys.readouterr().out
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
+        # The objective's own section is the one key allowed to differ; the clocks are not
+        # numbers about the answer, and every candidate carries one.
+        payload.pop("objective")
+        payloads[objective] = json.dumps(_without_clocks(payload), sort_keys=True)
+
+    assert payloads["model"] == payloads["interpret"]
+    assert reports["model"] != reports["interpret"]
+    assert "a circuit to simulate with" in reports["model"]
+    assert "what the spectrum says is inside the part" in reports["interpret"]
+
+
+def test_interpret_is_still_the_older_spelling_of_the_interpret_objective(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    data = _simulate_discover_csv(tmp_path)
+    rc = main(
+        ["discover", str(data), "--mode", "exhaustive", "--no-drt", "--interpret"]
+        + _DISCOVER_KWARGS
+    )
+    assert rc == 0
+    assert "what the spectrum says is inside the part" in capsys.readouterr().out
+
+
+def test_asking_for_two_objectives_at_once_is_an_error(tmp_path: Path) -> None:
+    """--interpret and --objective model are two answers to one question."""
+    data = _simulate_discover_csv(tmp_path)
+    with pytest.raises(SystemExit):
+        main(
+            ["discover", str(data), "--mode", "exhaustive", "--no-drt",
+             "--interpret", "--objective", "model"]
+            + _DISCOVER_KWARGS
+        )
+
+
+def test_the_model_objective_states_the_band_it_is_valid_over(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The model deliverable is the circuit *and* the band; a circuit alone over-claims."""
+    data = _simulate_discover_csv(tmp_path)
+    report_path = tmp_path / "discover.json"
+    rc = main(
+        ["discover", str(data), "--mode", "exhaustive", "--no-drt", "--json", str(report_path)]
+        + _DISCOVER_KWARGS
+    )
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Valid over" in out
+    assert "the measured band" in out
+
+    model = json.loads(report_path.read_text(encoding="utf-8"))["objective"]["model"]
+    spectrum = read_spectrum(data)
+    assert model["band"]["f_min"] == pytest.approx(float(spectrum.f[0]))
+    assert model["band"]["f_max"] == pytest.approx(float(spectrum.f[-1]))
+    assert model["circuit"] == json.loads(
+        report_path.read_text(encoding="utf-8")
+    )["recommended"]["circuit"]
 
 
 def test_discover_mode_evolve_does_not_claim_completeness(

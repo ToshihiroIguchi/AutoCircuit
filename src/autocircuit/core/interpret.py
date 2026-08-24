@@ -582,7 +582,7 @@ def interpret_values(
     floor = float(np.min(np.abs(spectrum.z)))
     f_min, f_max = float(spectrum.f[0]), float(spectrum.f[-1])
     f_geo = math.sqrt(f_min * f_max)
-    w_min, w_geo = 2 * math.pi * f_min, 2 * math.pi * f_geo
+    w_min, w_max, w_geo = 2 * math.pi * f_min, 2 * math.pi * f_max, 2 * math.pi * f_geo
     w_ref = w_geo
     z_ref = float(np.exp(np.mean(np.log(np.abs(spectrum.z)))))
     cov_ln = log_covariance(values, stderr, correlation)
@@ -648,6 +648,20 @@ def interpret_values(
             return None
         return -1.0 / (w_min * z.imag)
 
+    def _inductive(z: complex) -> bool:
+        return (
+            math.isfinite(z.real)
+            and math.isfinite(z.imag)
+            and z.imag > 0.0
+            and z.imag > CAPACITIVE_PHASE_RATIO * z.real
+        )
+
+    def inductance_at_f_max(v: Float) -> float | None:
+        z = _at(circuit, v, w_max)
+        if not _inductive(z):
+            return None
+        return z.imag / w_max
+
     def tan_delta(v: Float) -> float | None:
         z = _at(circuit, v, w_geo)
         if not _capacitive(z):
@@ -670,6 +684,12 @@ def interpret_values(
         capacitance_at_f_min,
         "F",
         note=f"apparent series capacitance at {f_min:.4g} Hz",
+    )
+    add(
+        "inductance_at_f_max",
+        inductance_at_f_max,
+        "H",
+        note=f"apparent series inductance (ESL) at {f_max:.4g} Hz",
     )
     add("tan_delta", tan_delta, "-", note=f"at {f_geo:.4g} Hz")
     add("q_factor", q_factor, "-", note=f"at {f_geo:.4g} Hz")
@@ -966,10 +986,19 @@ def interpret_class(
         values = tuple(q.value for q in quantities)
         finite = [v for v in values if math.isfinite(v)]
         median = float(np.median(finite)) if finite else math.nan
-        if not finite or median == 0.0 or len(finite) < len(values):
+        deviation = max(abs(v - median) for v in finite) if finite else math.nan
+        if finite and len(finite) == len(values) and deviation == 0.0:
+            # Exact agreement, whatever the median is. Without this branch a quantity every
+            # member reports as the same zero -- r_inf of a network that is a short at the top
+            # of the band -- comes out as an *infinite* spread, because the relative measure
+            # divides by that zero. Perfect agreement reported as total disagreement is the
+            # wrong way round, and it also made the whole payload undeliverable to the browser,
+            # whose wire is strict JSON (docs/OBJECTIVE_PLAN.md section 4.5).
+            spread = 0.0
+        elif not finite or median == 0.0 or len(finite) < len(values):
             spread = math.inf if len(values) > 1 else 0.0
         else:
-            spread = max(abs(v - median) for v in finite) / abs(median)
+            spread = deviation / abs(median)
         spreads.append(
             ClassSpread(
                 name=name,

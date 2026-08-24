@@ -65,6 +65,29 @@ def decode_float(payload: float | str) -> float:
     return float(payload)
 
 
+def encode_payload(value: Any) -> Any:
+    """A nested report payload with every non-finite float replaced by its sentinel.
+
+    The browser serialises every response with ``allow_nan=False``
+    (:mod:`autocircuit.web.bridge`), so one infinity anywhere in a report makes the *whole*
+    response undeliverable -- the caller sees "Out of range float values are not JSON
+    compliant" and not the report. That is reachable rather than theoretical: an equivalence
+    class whose members disagree about a quantity whose median is zero produces an infinite
+    spread, and a network that is a short at one end of the band has exactly such a limit.
+
+    Report payloads are built by :meth:`to_dict` methods that return plain Python floats, which
+    is right for a file the CLI writes; this is the one step between those and a wire that
+    cannot carry them.
+    """
+    if isinstance(value, dict):
+        return {key: encode_payload(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [encode_payload(item) for item in value]
+    if isinstance(value, float):
+        return encode_float(value)
+    return value
+
+
 def encode_array(values: Float) -> dict[str, Any]:
     """A real array of any rank, with its shape, so 1-D and 2-D travel the same way."""
     array = np.asarray(values, dtype=np.float64)

@@ -13,7 +13,7 @@ import textwrap
 import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -28,7 +28,16 @@ from autocircuit.core.discover import (
 from autocircuit.core.drt import DRTResult, drt
 from autocircuit.core.elements import DEFAULT_POOL, POOLS, REGISTRY
 from autocircuit.core.fit import FitResult, fit, report_dict
-from autocircuit.core.interpret import Interpretation, interpret, interpret_class
+from autocircuit.core.objective import (
+    DEFAULT_OBJECTIVE,
+    OBJECTIVE_LABELS,
+    OBJECTIVE_NOTES,
+    OBJECTIVES,
+    Objective,
+    ObjectiveReport,
+    discovery_report,
+    fit_report,
+)
 from autocircuit.core.simulate import log_frequencies, simulate
 from autocircuit.core.spectrum import Spectrum
 from autocircuit.core.spice import to_netlist
@@ -122,12 +131,15 @@ def _write_outputs(
     spectrum: Spectrum,
     circuit: Circuit,
     result: FitResult,
-    interpretation: Interpretation | None = None,
+    objective: ObjectiveReport | None = None,
 ) -> None:
     if getattr(args, "json", None):
         payload = report_dict(result, spectrum)
-        if interpretation is not None:
-            payload["interpretation"] = interpretation.to_dict()
+        if objective is not None:
+            # Under its own key rather than merged in, so that what the analysis produced and
+            # what one reader wanted out of it stay separable in the file -- which is what
+            # gate O1 compares (docs/OBJECTIVE_PLAN.md).
+            payload["objective"] = objective.to_dict()
         Path(args.json).write_text(json.dumps(payload, indent=2), encoding="utf-8")
         print(f"\nWrote fit report to {args.json}")
     if getattr(args, "spice", None):
@@ -171,12 +183,29 @@ def cmd_fit(args: argparse.Namespace) -> int:
         time_limit=args.time_limit,
     )
     print(result.summary())
-    reading = interpret(result, spectrum) if args.interpret else None
-    if reading is not None:
-        print()
-        print(reading.summary())
-    _write_outputs(args, spectrum, circuit, result, reading)
+    report = fit_report(result, spectrum, _objective_of(args))
+    print()
+    print(report.summary())
+    _write_outputs(args, spectrum, circuit, result, report)
     return 0 if result.success else 1
+
+
+def _objective_of(args: argparse.Namespace) -> Objective:
+    """Which report the user asked for -- and nothing else reads this.
+
+    ``--interpret`` predates the flag and is kept as its alias, because it named exactly this
+    objective before the axis had a name. The value never leaves the reporting layer: neither
+    ``fit`` nor ``discover`` takes it, which is what makes gate O1 a property of the code
+    rather than of the caller's discipline.
+    """
+    if getattr(args, "interpret", False):
+        if args.objective is not None and args.objective != "interpret":
+            raise SystemExit(
+                "error: --interpret is the older spelling of --objective interpret, but "
+                f"--objective {args.objective} was also given"
+            )
+        return "interpret"
+    return cast("Objective", args.objective or DEFAULT_OBJECTIVE)
 
 
 def _progress_reporter() -> Callable[[int, int, str | None], None]:
@@ -297,10 +326,6 @@ def cmd_discover(args: argparse.Namespace) -> int:
     )
     print(result.summary(limit=args.top))
 
-    # DRT is printed beside the search, never fed into it. Raising the enumeration floor on a
-    # DRT relaxation count would save under 1% of the screen and cost the completeness claim
-    # (docs/DISCOVERY_V2_PLAN.md section 3.4), so the two analyses stay independent and the
-    # reader compares them.
     # Opt-in, and only under a skeleton: without one nothing was excluded, and the pass costs
     # about as much as the search it follows (a size-5 sweep is ~20 min on one core).
     excluded = None
@@ -319,21 +344,25 @@ def cmd_discover(args: argparse.Namespace) -> int:
         print(f"\nWhat the skeleton excluded (screened in {excluded.elapsed_s:.1f} s):")
         print(f"  {excluded.summary()}")
 
-    # What the recommended circuit says is inside the part -- and, because this is discovery
-    # rather than a fit of a circuit the user wrote down, what the rest of its equivalence class
-    # says about the same reading. `CLAUDE.md`: under the `interpret` objective the class *is*
-    # the question, since whether a resistance is a grain boundary or an electrode interface is
-    # exactly a difference of form and the spectrum does not contain the answer.
-    reading = None
-    if args.interpret:
-        if result.recommended is None:
-            raise SystemExit("error: no candidate was fitted, so there is nothing to interpret")
-        family = [result.recommended, *result.equivalents_of(result.recommended)]
-        reading = interpret_class([c.result for c in family], spectrum)
-        print()
-        print(reading.summary())
-
+    # The DRT is computed here and printed below, because the `interpret` report wants the
+    # model-free relaxation count for its cross-check. It is *advice* in both places and
+    # changes no candidate and no number: raising the enumeration floor on a DRT peak count
+    # would save under 1% of the screen and cost the completeness claim
+    # (docs/DISCOVERY_V2_PLAN.md section 3.4), so the two analyses stay independent and the
+    # reader compares them.
     probe = None if args.no_drt else _probe_structure(spectrum)
+
+    # What the user came for, applied to the search that has already finished. The objective
+    # reaches no number: `discover` above does not take it (docs/OBJECTIVE_PLAN.md, gate O1).
+    report = discovery_report(
+        result,
+        spectrum,
+        _objective_of(args),
+        drt_peaks=None if probe is None else probe.n_relaxations,
+    )
+    print()
+    print(report.summary())
+
     if probe is not None:
         print("\nStructure probe (independent of the search above):")
         for line in probe.hints():
@@ -341,8 +370,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
 
     if args.json:
         payload = result.to_dict(top=args.top, excluded=excluded)
-        if reading is not None:
-            payload["interpretation"] = reading.to_dict()
+        payload["objective"] = report.to_dict()
         Path(args.json).write_text(json.dumps(payload, indent=2), encoding="utf-8")
         print(f"\nWrote discovery report to {args.json}")
 
@@ -364,6 +392,30 @@ def cmd_discover(args: argparse.Namespace) -> int:
         Path(args.spice).write_text(netlist, encoding="utf-8")
         print(f"Wrote SPICE subcircuit for the recommended candidate to {args.spice}")
     return 0 if best is not None else 1
+
+
+def cmd_objectives(args: argparse.Namespace) -> int:
+    """Explain the two objectives, and the one thing neither of them is allowed to do."""
+    print(_objective_help())
+    return 0
+
+
+def _objective_help() -> str:
+    """The text of that, kept separate so a test can read it without capturing stdout."""
+    lines = ["What you can want out of an impedance spectrum (--objective):", ""]
+    for name in OBJECTIVES:
+        lines.append(f"  {OBJECTIVE_LABELS[name]}  ({name})")
+        lines.extend(
+            textwrap.wrap(
+                OBJECTIVE_NOTES[name], 88, initial_indent="      ", subsequent_indent="      "
+            )
+        )
+        lines.append("")
+    lines.append("The objective changes the report and nothing else. It does not narrow the")
+    lines.append("element pool, reorder the Pareto front or change what is recommended: two")
+    lines.append("people with the same spectrum and the same seed get the same circuit and the")
+    lines.append("same values whatever they came for, and only the reading differs.")
+    return "\n".join(lines)
 
 
 def cmd_validate(args: argparse.Namespace) -> int:
@@ -480,6 +532,30 @@ def cmd_elements(args: argparse.Namespace) -> int:
 # -- Argument parsing ------------------------------------------------------------------------
 
 
+def _add_objective_argument(parser: argparse.ArgumentParser) -> None:
+    """The axis that says what the user wants out, which is not what the search does.
+
+    Orthogonal to the *mode*: the mode says how much of the topology the user fixes and it
+    changes the search; this says what the report is for and it changes only the report.
+    """
+    parser.add_argument(
+        "--objective",
+        choices=OBJECTIVES,
+        # Defaulted to None and resolved below, so that "asked for model" and "asked for
+        # nothing" stay distinguishable -- otherwise `--interpret --objective model` reads as
+        # one answer and is silently two.
+        default=None,
+        help=f"what you want out of this analysis (default {DEFAULT_OBJECTIVE}). It changes "
+        "the report and nothing else: the same spectrum and seed give the same circuit and "
+        "the same values under either. 'autocircuit objectives' explains both",
+    )
+    parser.add_argument(
+        "--interpret",
+        action="store_true",
+        help=argparse.SUPPRESS,  # the older spelling of --objective interpret
+    )
+
+
 def _add_data_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("data", help="impedance data file")
     parser.add_argument("--format", help="force a reader instead of sniffing the format")
@@ -548,15 +624,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_fit.add_argument("--time-limit", type=float, help="seconds per global search stage")
     p_fit.add_argument("--model-csv", help="write the fitted model spectrum here")
     p_fit.add_argument("--no-validate", action="store_true", help="skip the Lin-KK pre-check")
-    p_fit.add_argument(
-        "--interpret",
-        action="store_true",
-        help=(
-            "also read the fit as internal structure: relaxation times, polarisation shares, "
-            "ESR, self-resonance. Splits what every equivalent topology agrees on from what "
-            "only this circuit form says"
-        ),
-    )
+    _add_objective_argument(p_fit)
     _add_output_arguments(p_fit)
     p_fit.set_defaults(func=cmd_fit)
 
@@ -643,14 +711,7 @@ def build_parser() -> argparse.ArgumentParser:
         "ranks by AIC and then tests each step up the front. 'autocircuit criteria' explains "
         "each one",
     )
-    p_disc.add_argument(
-        "--interpret",
-        action="store_true",
-        help="also read the recommended circuit as internal structure, and check that reading "
-        "against every other topology the data cannot tell it apart from: what they agree on "
-        "is a property of the measurement, what they do not is a property of the form that was "
-        "reported",
-    )
+    _add_objective_argument(p_disc)
     p_disc.add_argument("--time-limit", type=float, help="wall-clock budget in seconds")
     p_disc.add_argument("--no-validate", action="store_true")
     _add_output_arguments(p_disc)
@@ -742,6 +803,12 @@ def build_parser() -> argparse.ArgumentParser:
         "criteria", help="explain the model-selection criteria discover can rank by"
     )
     p_crit.set_defaults(func=cmd_criteria)
+
+    # objectives
+    p_obj = subparsers.add_parser(
+        "objectives", help="explain what --objective changes, and what it may not change"
+    )
+    p_obj.set_defaults(func=cmd_objectives)
 
     return parser
 
