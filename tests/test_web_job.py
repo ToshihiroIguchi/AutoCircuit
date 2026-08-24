@@ -38,6 +38,7 @@ from autocircuit.core.discover import (
 from autocircuit.core.interpret import interpret_class
 from autocircuit.core.simulate import log_frequencies, simulate
 from autocircuit.core.spectrum import Spectrum
+from autocircuit.core.wire import encode_payload
 from autocircuit.web import job as job_module
 from autocircuit.web.bridge import handle
 
@@ -845,7 +846,7 @@ def test_the_json_export_includes_the_excluded_pass_only_when_one_was_run() -> N
 
 
 def test_the_browser_can_read_a_reported_circuit_as_internal_structure() -> None:
-    """`discover_interpret`, and the thing that makes it honest: it carries the class.
+    """`discover_objective` under `interpret`, and what makes it honest: it carries the class.
 
     The same rule the CLI follows (`docs/HANDOFF.md` §27) -- interpret the recommendation *and*
     every topology the data cannot tell it apart from, so the report can say which numbers the
@@ -855,20 +856,68 @@ def test_the_browser_can_read_a_reported_circuit_as_internal_structure() -> None
     spectrum = _semicircle()
     driver = Driver(spectrum, pool=list(POOL), exhaustive_limit=LIMIT, screen_chunk=1)
     driver.run()
-    answer = _call("discover_interpret", job=driver.id)
+    answer = _call("discover_objective", job=driver.id, objective="interpret")
 
     running = job_module.current(driver.id)
     chosen = running.candidate(None)
     family = [chosen, *running.report().equivalents_of(chosen)]
     expected = interpret_class([c.result for c in family], spectrum)
 
-    assert answer["summary"] == expected.summary()
-    assert answer["interpretation"] == expected.to_dict()
-    assert answer["interpretation"]["class_members"][0] == chosen.circuit.to_string()
-    invariant = [
-        row for row in answer["interpretation"]["class_spread"] if row["invariant"]
-    ]
+    reading = answer["objective"]["interpretation"]
+    assert expected.summary() in answer["summary"]
+    assert reading == encode_payload(expected.to_dict())
+    assert reading["class_members"][0] == chosen.circuit.to_string()
+    invariant = [row for row in reading["class_spread"] if row["invariant"]]
     assert invariant, "nothing marked invariant, so the answer asserts nothing"
+
+
+def _without_clocks(value: Any) -> Any:
+    """A payload with every measured duration dropped, at any depth."""
+    if isinstance(value, dict):
+        return {k: _without_clocks(v) for k, v in value.items() if k != "elapsed_s"}
+    if isinstance(value, list):
+        return [_without_clocks(v) for v in value]
+    return value
+
+
+def test_the_browser_asks_the_objective_of_the_report_and_never_of_the_search() -> None:
+    """Gate O1 across the bridge: one search, two reports, and the search cannot see either.
+
+    `discover_start` has no objective and could not use one -- that is the structural half of
+    the gate (`docs/OBJECTIVE_PLAN.md` §2) -- so the two answers below are two renderings of the
+    *same* finished job, and the report each returns must differ while the job does not move.
+    """
+    spectrum = _semicircle()
+    driver = Driver(spectrum, pool=list(POOL), exhaustive_limit=LIMIT, screen_chunk=1)
+    driver.run()
+
+    before = _call("discover_report", job=driver.id)
+    model = _call("discover_objective", job=driver.id, objective="model")
+    reading = _call("discover_objective", job=driver.id, objective="interpret")
+    after = _call("discover_report", job=driver.id)
+
+    # Everything but the clock: the report carries the elapsed time of the search, which keeps
+    # running while the job is alive and is not a number about the answer.
+    assert _without_clocks(before) == _without_clocks(after), (
+        "reading a report moved the search it was read from"
+    )
+    assert model["summary"] != reading["summary"]
+    assert model["objective"]["objective"] == "model"
+    assert model["objective"]["model"]["circuit"] == before["recommended"]
+    assert "interpretation" not in model["objective"]
+    assert "model" not in reading["objective"]
+
+
+def test_a_report_with_an_infinite_class_spread_still_reaches_the_browser() -> None:
+    """The wire is strict JSON, and a class that agrees on a *zero* used to break it.
+
+    A network that is a short at the top of the band reports ``r_inf = 0``; the relative spread
+    over the class divides by that median, and the whole response became undeliverable rather
+    than merely odd. Two fixes, and this asserts the outer one: every float in the payload is
+    encoded, so no report can be lost to a value it merely mentions.
+    """
+    payload = {"a": math.inf, "b": [math.nan, 1.0], "c": {"d": -math.inf}}
+    assert json.dumps(encode_payload(payload), allow_nan=False)
 
 
 def _diffusion() -> Spectrum:

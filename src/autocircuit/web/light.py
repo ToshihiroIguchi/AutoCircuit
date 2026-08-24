@@ -50,7 +50,11 @@ from autocircuit.core.validate import WIRE_VERSION as VALIDATE_WIRE_VERSION
 #: there is more to do after it, and ``discover_report`` carries ``pool_choice``.
 #: 10 (2026-08-24): ``discover_interpret`` -- the recommended circuit read as internal
 #: structure, checked against every topology the data cannot tell it apart from.
-BRIDGE_VERSION = 10
+#: 11 (2026-08-24): ``discover_interpret`` becomes ``discover_objective``, which answers either
+#: report -- ``model`` (a circuit to simulate with, its band and its terminal readouts) or
+#: ``interpret`` (the same class reading as before). The objective travels with the request for
+#: a *report*; no search operation takes one, which is gate O1's structural half.
+BRIDGE_VERSION = 11
 
 #: One operation: a request payload in, a JSON-safe result out.
 Operation = Callable[[dict[str, Any]], Any]

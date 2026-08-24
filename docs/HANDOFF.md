@@ -2035,5 +2035,108 @@ relaxation and `p(R1-CPE1,R2)` says 0, and reports the four invariant quantities
 ### What is not done
 
 The Fit screen shows no interpretation -- a manual fit has no equivalence class to check against,
-so it would be the weaker half of the same panel, and `fit --interpret` already covers it on the
-command line. The `model`/`interpret` objective split is still unwired, and gate O1 with it.
+so it would be the weaker half of the same panel, and the command line already covers it. Since
+section 28 the way to ask for this reading is `--objective interpret` on either front end, and
+the panel described above is one half of the two the Report screen now offers.
+
+
+## 28. The objective gets wired, and gate O1 is a structural claim before it is a byte claim
+
+`CLAUDE.md`'s "Objectives" section has been asking for this since it was written: there are two
+reasons to bring a spectrum here -- a circuit to simulate with, and a reading of what is inside
+the part -- and they want different reports out of the *same* analysis. `core/objective.py` is
+that reporting layer, `--objective {model,interpret}` reaches it from `fit` and `discover`, and
+`autocircuit objectives` explains the axis. `docs/OBJECTIVE_PLAN.md` is the plan document.
+
+### The invariant is held by construction, and that is the half of O1 that matters
+
+Gate O1 is stated as a byte comparison: both objectives, same spectrum and seed, byte-identical
+`DiscoveryResult` wire payload. That is worth measuring and it is *not* what holds the property.
+What holds it is that `discover()` and `fit()` take no objective and neither module imports the
+reporting layer, so the value cannot reach a search that might act on it. A byte comparison
+passing while the parameter existed would say only that two runs happened to agree on the three
+spectra it was given -- which is the same shape as every screening-budget failure in section 3:
+the report looks healthy and the claim underneath it is weaker than the sentence.
+
+So `benchmarks/o1_objective.py` checks both, and fails with exit status 1 rather than printing a
+table. [measured, `--limit 3`] structural pass; payload identical and report differs on all three
+references (capacitor, Maxwell-Wagner, Randles). A cheap copy runs in the suite
+(`tests/test_cli.py::test_the_objective_changes_the_report_and_not_one_number`), so a leak fails
+CI instead of waiting for a benchmark nobody runs.
+
+### Four things not to re-derive
+
+1. **`--objective` defaults to `None`, not to `model`.** With a real default argparse cannot tell
+   *asked for model* from *asked for nothing*, and `--interpret --objective model` -- two answers
+   to one question -- was accepted silently, the alias winning. Resolving `None` in
+   `_objective_of` is what makes the conflict visible at all.
+2. **A payload comparison drops clocks recursively.** Every candidate carries its own
+   `elapsed_s`, so popping the top-level one leaves dozens of differences that have nothing to do
+   with the objective. `_stable` in the benchmark and `_without_clocks` in the test both walk the
+   whole tree. A gate that fails for a reason it is not about is a gate that gets reworded.
+3. **The `model` report's licence is checked, not asserted.** Its numbers are printed under
+   "properties of Z, so every equivalent topology agrees", and that sentence is true only because
+   every name in `MODEL_READOUTS` is marked `invariant` in `core/interpret.py`. A test asserts it.
+   The failure mode -- a form-dependent number under an invariant heading -- is invisible in the
+   output, which is precisely what `interpret.py` exists to prevent.
+4. **ESL is the apparent inductance at the top of the band, not the model's `L`.**
+   `inductance_at_f_max` is `Im Z / omega` at `f_max`, gated on the response being inductive
+   there; for a series R-L-C that is `L - 1/(omega^2 C)` and approaches `L` only well above
+   resonance. Reporting the parameter would be reporting the form under an invariant heading.
+
+The "standard error exceeds the value" rule moved from `core/discover.py` to `core/stats.py` as
+`unresolved_mask` on the way past: three readers now ask that same question of one fit -- the
+Pareto table's `free?` column, the skeleton's "the data does not test this part of your
+assertion", and the `model` objective's warning that a value carries no information on its own.
+
+### What the two reports say
+
+`model` leads with the deliverable and its limit: the circuit, the band it is valid over (the
+measured one -- outside it the model is extrapolation and nothing has tested it), the agreement
+inside that band, the invariant readouts, and `Re Z` sampled across it. Its equivalence-class note
+is the interesting one, because under this objective the class is a *non-problem* and saying so is
+still honest work: the members have the same terminal Z over the band, so they export and simulate
+identically, and they are free to differ outside it -- which is why the band is part of the
+deliverable and not a footnote.
+
+`interpret` is the `ClassInterpretation` of section 27, now reached by `--objective interpret`
+(`--interpret` is kept as its older spelling), plus the sentence that everything above is
+conditional on the reported form. The DRT, when it was computed beside the search, now feeds its
+model-free relaxation count into the cross-check; it remains advice and changes no candidate and
+no number.
+
+### The browser asks the same question, and a bug the wire had been hiding
+
+`discover_interpret` became `discover_objective` (`BRIDGE_VERSION` 10 -> 11): the objective
+travels with the request for a *report*, and no search operation takes one. The Report screen's
+`ObjectivePanel` switches between the two with two buttons; switching re-fetches and cannot
+re-run anything, which is the structural claim made visible.
+
+[measured, in Chrome] Tissue (Cole), three-element limit. Under `model`: `p(R1,CPE1)-R2` over
+10 Hz - 1 MHz, RMS |dZ|/|Z| 1.28%, worst point 2.37%, and the note that the one other topology
+in the class exports and simulates identically over that band. Under `interpret`: the
+relaxation-count alert (1 against 0) and the four invariant quantities agreeing to 1.9e-9 to
+4.6e-9 percent. No console errors.
+
+Building it turned up something older. `ClassSpread.spread` divides by the median, and its
+zero-median guard returned `inf` -- so a quantity every member reports as *the same zero*
+(`r_inf` of a network that is a short at the top of the band, which `interpret.py` reports as
+exactly zero on purpose) came out as infinite disagreement. Because the browser's wire is
+strict JSON, that one value made the **whole response undeliverable**: the reader got "Out of
+range float values are not JSON compliant" where a report should have been.
+[measured] `p(R1,C1)` and `p(C1,R1)` as one class: spread `inf`, `json.dumps(allow_nan=False)`
+raises. Both halves are now fixed and both were needed -- exact agreement reads 0 whatever the
+median is, and every objective payload leaves through `wire.encode_payload`, so no report can be
+lost to a non-finite value it merely mentions.
+
+### State of the suite
+
+[measured] **942 pass in 10 min 15 s** (`--ignore=tests/test_spice_ngspice.py`, which needs the
+ngspice in WSL); `ruff check .` and `mypy` clean; `npm run check` and `npm run smoke` pass.
+
+### What is not done
+
+The Fit screen still shows no report of either kind; `fit --objective` covers mode 1 on the
+command line. The multi-condition fit -- several sweeps at different temperature or bias, fitted
+to one circuit -- remains the only instrument that could *break* a degeneracy, and it belongs to
+`interpret` alone (§6).

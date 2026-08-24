@@ -977,7 +977,7 @@ def test_bridge_version_is_bumped_for_the_new_operations() -> None:
     """Pins the value rather than just its presence: a worker checks this at start-up and a
     stale cached bundle must fail loudly instead of answering with the old protocol.
     """
-    assert BRIDGE_VERSION == 10
+    assert BRIDGE_VERSION == 11
 
 
 def test_every_response_above_parses_as_json_and_re_dumps_without_allow_nan() -> None:

@@ -27,7 +27,7 @@ import { DrtPanel } from "../components/DrtPanel";
 import { EquivalenceClasses } from "../components/EquivalenceClasses";
 import { ExcludedPanel } from "../components/ExcludedPanel";
 import { ExportPanel, type ExportItem } from "../components/ExportPanel";
-import { InterpretationPanel } from "../components/InterpretationPanel";
+import { ObjectivePanel } from "../components/ObjectivePanel";
 import { ParetoTable } from "../components/ParetoTable";
 import { SkeletonFindings } from "../components/SkeletonFindings";
 import { RuntimeNotice } from "../components/RuntimeNotice";
@@ -224,15 +224,11 @@ export function ReportScreen({
             />
           )}
 
-          {/* Purpose point 2: the circuit is the means and the inside of the part is the end.
-              It sits above the downloads and below the classes on purpose -- it is a reading of
-              the recommendation, and the classes are what limit what the reading may say. */}
-          <InterpretationPanel
-            client={client}
-            job={report.job}
-            circuit={null}
-            ready={ready}
-          />
+          {/* What the reader came for. It sits above the downloads and below the classes on
+              purpose: both reports are readings of the recommendation, and the classes are what
+              limit what a reading may say -- loudly under `interpret`, where the class *is* the
+              question, and as a stated non-problem under `model`. */}
+          <ObjectivePanel client={client} job={report.job} circuit={null} ready={ready} />
 
           <ExportPanel
             title="Download this search"

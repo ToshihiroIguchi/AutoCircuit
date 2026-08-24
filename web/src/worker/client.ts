@@ -13,7 +13,8 @@ import type {
   ExportArtifactWire,
   FitResultWire,
   FitWire,
-  InterpretationAnswer,
+  Objective,
+  ObjectiveAnswer,
   PreviewWire,
   RefitStepWire,
   RefitTaskWire,
@@ -457,19 +458,24 @@ export class BridgeClient {
   }
 
   /**
-   * One reported circuit read as internal structure, checked against its equivalence class.
+   * One finished search rendered for what the reader came for -- a model, or a reading.
+   *
+   * The objective travels with the request for a *report* and never with the request for a
+   * search: `discoverStart` does not take one and cannot (`docs/OBJECTIVE_PLAN.md`, gate O1).
    *
    * Nothing is fitted: every member is a tier-2 result the job still holds. `summary` arrives
    * rendered, like `completeness`, because the sentence that says what may not be claimed is
    * the part a second implementation would get subtly wrong.
    */
-  async discoverInterpret(
+  async discoverObjective(
     job: string,
+    objective: Objective,
     circuit?: string | null,
-  ): Promise<InterpretationAnswer> {
-    return this.call<InterpretationAnswer>({
-      op: "discover_interpret",
+  ): Promise<ObjectiveAnswer> {
+    return this.call<ObjectiveAnswer>({
+      op: "discover_objective",
       job,
+      objective,
       circuit: circuit ?? null,
     });
   }

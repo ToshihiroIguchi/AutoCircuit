@@ -249,9 +249,50 @@ export interface InterpretationWire {
   }>;
 }
 
-/** `discover_interpret`'s answer: the structured reading and the rendered sentences. */
-export interface InterpretationAnswer {
-  interpretation: InterpretationWire;
+/**
+ * The `model` objective's answer: a circuit, the band it is good over, and by how much.
+ *
+ * Every readout here is marked `invariant` in `core/interpret.py`, which is what licenses the
+ * heading it is shown under -- the equivalence class does not matter for this purpose, because
+ * its members have the same terminal Z over this band. `core/objective.py` decides that list;
+ * nothing here re-derives it.
+ */
+export interface ModelReportWire {
+  circuit: string;
+  band: { f_min: WireFloat; f_max: WireFloat };
+  relative_error: WireFloat;
+  worst_relative_error: WireFloat;
+  chi2_reduced: WireFloat;
+  readouts: Array<{
+    name: string;
+    value: WireFloat;
+    unit: string;
+    invariant: boolean;
+    stderr?: WireFloat;
+    note?: string;
+  }>;
+  esr_curve: Array<{ f_hz: WireFloat; esr_ohm: WireFloat }>;
+  equivalents: string[];
+  n_unresolved: number;
+  notes: string[];
+}
+
+/** What the user came for. Orthogonal to the mode, and it changes the report and nothing else. */
+export type Objective = "model" | "interpret";
+
+/** One analysis rendered for one objective; exactly one of the two bodies is present. */
+export interface ObjectiveWire {
+  objective: Objective;
+  label: string;
+  notes: string[];
+  unavailable?: string;
+  model?: ModelReportWire;
+  interpretation?: InterpretationWire;
+}
+
+/** `discover_objective`'s answer: the structured report and the rendered sentences. */
+export interface ObjectiveAnswer {
+  objective: ObjectiveWire;
   /** Rendered by the core and shown verbatim, exactly as `completeness` is. */
   summary: string;
 }

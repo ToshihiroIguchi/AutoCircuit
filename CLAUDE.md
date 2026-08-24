@@ -72,15 +72,15 @@ Consequences that follow from those three, and that outrank local convenience:
   of the total polarisation, and dimensionless *ratios* such as grain-to-grain-boundary
   capacitance. Those are internal structure stated in the only terms the input supports.
 - **Point 2 is under way and not finished.** `core/interpret.py` computes the geometry-free
-  readouts from a fitted circuit -- `autocircuit fit --interpret`, and `interpretation` in the
-  `--json` report. What it is built around is the split that matters: every quantity is marked
+  readouts from a fitted circuit -- `autocircuit fit --objective interpret`, and
+  `objective.interpretation` in the `--json` report. What it is built around is the split that matters: every quantity is marked
   **invariant** (the same for every topology in the equivalence class, because it is a property
   of `Z` -- terminal resistances, self-resonance, tan delta, and the poles and zeros of `Z(s)`)
   or **form-dependent** (a feature of the tree that was reported, such as a block's `R*C`).
   Gate I1 has both halves: the invariant quantities must agree across an exact
   reparameterisation, *and* the form-dependent ones must be seen to disagree, because a label
-  nothing can falsify is not a label. Still missing: the `objective` split below is not wired anywhere. The **discovery** report carries one on both front ends
-  (`discover --interpret`, and the Report screen's panel), and it reads the recommendation's
+  nothing can falsify is not a label. The **discovery** report carries one on both front ends
+  (`discover --objective interpret`, and the Report screen's panel), and it reads the recommendation's
   *whole equivalence class* rather than the recommendation alone -- [measured] the class agrees on the invariant quantities to
   2e-11 across independently fitted members, and disagrees about how many relaxations the part
   shows, which is exactly the reading a non-expert would otherwise take as a finding.
@@ -126,7 +126,11 @@ parsimony-with-every-parameter-resolved is the right recommendation rule for bot
 
 **Gate O1 — the objective changes no number.** The full pipeline run under both objectives on the
 same spectrum and seed produces a **byte-identical** `DiscoveryResult` wire payload; only the
-rendered report differs. Fingerprint it the way EV5 does. *Not implemented yet.*
+rendered report differs. Fingerprint it the way EV5 does. **Implemented and measured** on all
+three references (`benchmarks/o1_objective.py`, `docs/OBJECTIVE_PLAN.md`), and it has two halves:
+the byte comparison, and the *structural* one that actually holds the property — `discover()` and
+`fit()` take no objective and neither module imports the reporting layer, so a value that cannot
+reach the search cannot change it.
 
 **Why the split exists at all is the equivalence classes, not the vocabulary.** `R1-p(R2,C1)` and
 `p(R1,C1-R2)` fit the same data to 1.2e-15. Under `model` that is harmless — same terminal
@@ -349,6 +353,22 @@ static-site Web UI running the same core via WASM (Pyodide).
    reported "nothing beats the incumbent" and been wrong — the same shape as `screen` versus
    `screen-rank`. Three arms do beat it (120/120 against 87/120), and what they share is not
    their operators but that they **bound the set they breed from**.
+
+14. `docs/OBJECTIVE_PLAN.md` — the objective axis, which says what the user wants out and is
+   **orthogonal to the mode**. **Implemented in the core, the CLI (`--objective`,
+   `autocircuit objectives`) and the browser (`discover_objective`, the Report screen's
+   `ObjectivePanel`); gate O1 measured on all three references.** Its §2 is the part that
+   matters: the invariant is held *by construction*, since
+   `discover()` and `fit()` cannot receive an objective and neither imports the reporting layer
+   — a byte comparison passing while the parameter existed would only say the two runs happened
+   to agree on those spectra. §4.1 is where the obvious default was wrong (`--objective`
+   defaulting to `model` makes "asked for model" and "asked for nothing" the same thing, so two
+   contradictory flags were accepted silently), and §4.3 is the one place this layer could
+   quietly over-claim — the `model` report's sentence that every equivalent topology agrees is
+   licensed only by every readout being marked invariant, so a test asserts that rather than
+   trusting the list. §4.5 is a bug the browser's strict-JSON wire had been hiding: a class that
+   agrees on a *zero* was reporting infinite disagreement, and that one value made the whole
+   response undeliverable rather than merely odd.
 
 Update these when decisions change.
 

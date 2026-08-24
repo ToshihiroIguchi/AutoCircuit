@@ -63,6 +63,12 @@ autocircuit discover cap.csv --pool component --workers 8 --progress
 # Rank that search by something other than AIC. `autocircuit criteria` explains the seven.
 autocircuit discover cap.csv --pool component --criterion bic
 
+# Say what you came for. `model` (the default) reports a circuit to simulate with and the band
+# it is valid over; `interpret` reports what the spectrum says is inside the part, and how much
+# of that the equivalence class will not let it claim. It changes the report and nothing else --
+# the circuit and every value in it are the same either way. `autocircuit objectives` explains.
+autocircuit discover cell.csv --objective interpret
+
 # Check the data is Kramers-Kronig consistent before believing any of it
 autocircuit validate cap.csv
 
@@ -148,6 +154,18 @@ reparameterisations of one another — `R1-p(R2,C1)` and `p(R1,C1-R2)` describe 
 set of Nyquist semicircles and fit any such data identically. AutoCircuit detects and reports
 these as indistinguishable rather than picking one and presenting it as the answer. Choosing
 between them requires physical knowledge of the sample, not more computation.
+
+**Two reasons to bring a spectrum here, and the objective may not touch a number.** `model`
+wants a circuit to simulate with -- the deliverable is the SPICE subcircuit and the band it is
+valid over, with the terminal readouts beside it, and its claim is checkable from the data
+alone. `interpret` wants what the spectrum says is inside the part -- how many relaxations, each
+one's time constant, each block's share of the polarisation -- and its claim is always
+conditional on the reported form. `--objective` picks which report you get, on `fit` and on
+`discover` alike, and that is *all* it does: the search does not receive it and could not use
+it, so two people with the same spectrum and seed get the same circuit and the same values
+whatever they came for. What legitimately changes is how loudly the report says the data cannot
+decide -- loudest under `interpret`, where the equivalence class below is the question rather
+than a caveat.
 
 **Discovery is exhaustive first.** The distinct topology space is small — a few thousand
 candidates at five elements — so `discover` enumerates all of it (`--mode exhaustive`) instead

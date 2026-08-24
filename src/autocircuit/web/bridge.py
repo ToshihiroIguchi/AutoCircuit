@@ -56,10 +56,15 @@ from autocircuit.core.drt import WIRE_VERSION as DRT_WIRE_VERSION
 from autocircuit.core.elements import POOLS, REGISTRY
 from autocircuit.core.fit import WIRE_VERSION as FIT_WIRE_VERSION
 from autocircuit.core.fit import FitResult, Weighting, fit, relative_error, search_space
-from autocircuit.core.interpret import interpret_class
+from autocircuit.core.objective import DEFAULT_OBJECTIVE, Objective, discovery_report
 from autocircuit.core.spectrum import Spectrum
 from autocircuit.core.stats import DEFAULT_CRITERION
-from autocircuit.core.wire import encode_array, encode_complex_array, encode_float
+from autocircuit.core.wire import (
+    encode_array,
+    encode_complex_array,
+    encode_float,
+    encode_payload,
+)
 from autocircuit.web import export, job
 from autocircuit.web.light import BRIDGE_VERSION, Operation, handle
 
@@ -391,13 +396,18 @@ def _op_discover_candidate(payload: dict[str, Any]) -> dict[str, Any]:
     return _fit_payload(candidate.result)
 
 
-def _op_discover_interpret(payload: dict[str, Any]) -> dict[str, Any]:
-    """What the reported circuit says is inside the part, checked against its whole class.
+def _op_discover_objective(payload: dict[str, Any]) -> dict[str, Any]:
+    """One finished search, rendered for what the reader came for.
 
-    `CLAUDE.md` purpose point 2 -- the circuit is a means, the inside of the part is the end --
-    with the caveat that makes it honest under discovery: the reading is computed for the
-    recommendation *and* for every topology the data cannot tell it apart from, and what the
-    class disagrees on is reported as loudly as what it agrees on.
+    The two objectives (`docs/OBJECTIVE_PLAN.md`): ``model`` is a circuit to simulate with, and
+    its claim is checkable from the data alone -- the band, the agreement in it, the terminal
+    readouts. ``interpret`` is what the spectrum says is inside the part, and its claim is
+    conditional on the reported form, so it leads with the equivalence class.
+
+    **The objective arrives with the request for a report and never with the request for a
+    search.** ``discover_start`` does not take one and `core/discover.py` cannot receive one;
+    that is gate O1's structural half, and it is why this operation exists separately rather
+    than as a flag on the search.
 
     Nothing is fitted. Every member is a tier-2 result the job still holds, so this is arithmetic
     over fits that already exist, which is why it is answered on demand rather than folded into
@@ -405,13 +415,17 @@ def _op_discover_interpret(payload: dict[str, Any]) -> dict[str, Any]:
 
     ``summary`` travels rendered, for the same reason ``completeness`` does: the sentence saying
     what may and may not be claimed is the part a second implementation would get subtly wrong.
+
+    The payload goes through :func:`encode_payload` rather than out as it stands: a report can
+    carry an infinite class spread, and this wire is strict JSON, so one such value would make
+    the whole response undeliverable rather than merely odd.
     """
     running = job.current(str(payload["job"]))
     chosen = running.candidate(payload.get("circuit"))
     result = running.report()
-    family = [chosen, *result.equivalents_of(chosen)]
-    reading = interpret_class([c.result for c in family], running.spectrum)
-    return {"interpretation": reading.to_dict(), "summary": reading.summary()}
+    objective = cast(Objective, payload.get("objective") or DEFAULT_OBJECTIVE)
+    report = discovery_report(result, running.spectrum, objective, candidate=chosen)
+    return {"objective": encode_payload(report.to_dict()), "summary": report.summary()}
 
 
 def _op_discover_cancel(payload: dict[str, Any]) -> dict[str, Any]:
@@ -672,7 +686,7 @@ OPERATIONS: dict[str, Operation] = {
     "discover_refit": _op_discover_refit,
     "discover_report": _op_discover_report,
     "discover_candidate": _op_discover_candidate,
-    "discover_interpret": _op_discover_interpret,
+    "discover_objective": _op_discover_objective,
     "discover_cancel": _op_discover_cancel,
     "excluded_start": _op_excluded_start,
     "excluded_screen": _op_excluded_screen,
