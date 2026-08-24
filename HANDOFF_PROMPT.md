@@ -21,7 +21,8 @@ AutoCircuit プロジェクト(`C:\Users\toshi\python\AutoCircuit`)の作業を�
 
 ## 直近セッション(2026-08-23〜24)でやったこと
 
-**コミット6本、HEAD は `d24d85a`。すべて push 済み(= 公開サイトも更新済み)。**
+**コミット7本、HEAD は `d1e6ecd`(7本目はこのファイル自身の更新)。すべて push 済み
+(= <https://toshihiroiguchi.github.io/AutoCircuit/> も更新済み)。CI・Pages ともに success。**
 
 - `84684b9` **報告経路の欠陥を確認して直した。** 真値クラスが archive で1位に採点されながら1件も
   報告されない事象(`SEARCH_ALGORITHM_SCREENING.md` §4.6)は、疑われた2箇所のどちらでもなく
