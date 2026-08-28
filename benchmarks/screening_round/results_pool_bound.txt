@@ -1,0 +1,176 @@
+Raw arena output, uncommitted, kept because C:\...\Temp can be cleared.
+Not yet written into docs/. See EVOLVE_SEARCH_PLAN.md section 3.4.2.
+
+########## 1. islands vs the tight-pool ladder, budget 900 (saturated) ##########
+arena: land_rclcpe6.json  pool=('R', 'C', 'L', 'CPE')  n<=6  21057 topologies, 18 targets (0.085%)
+budget: 900 fits per run, 120 seeds, population 40
+landscape optimum AICc -1682.511
+
+arm               hit rate          95% CI  median fits  mean fits   best AICc          pressure
+------------------------------------------------------------------------------------------------
+ga_bounded       120/120   [0.97,1.00]               308        321    -1682.44      0.103->0.065  n1:0% n2:1% n3:4% n4:9% n5:27% n6:58%
+ga_tight20       120/120   [0.97,1.00]               240        242    -1682.42      0.137->0.113  n1:0% n2:1% n3:4% n4:10% n5:28% n6:55%
+ga_tight10       120/120   [0.97,1.00]               194        196    -1682.48      0.240->0.180  n1:0% n2:1% n3:4% n4:11% n5:30% n6:52%
+ga_tight5        120/120   [0.97,1.00]               168        172    -1682.46      0.365->0.248  n1:0% n2:1% n3:5% n4:13% n5:32% n6:49%
+ga_tight3        120/120   [0.97,1.00]               146        161    -1682.47      0.444->0.281  n1:0% n2:1% n3:5% n4:13% n5:32% n6:48%
+ga_tight1        120/120   [0.97,1.00]               148        153    -1682.46      0.539->0.325  n1:0% n2:1% n3:5% n4:14% n5:33% n6:46%
+islands4_m50     120/120   [0.97,1.00]               239        233    -1682.46      0.259->0.182  n1:0% n2:1% n3:4% n4:11% n5:31% n6:52%
+islands4_m75     120/120   [0.97,1.00]               246        234    -1682.49      0.253->0.181  n1:0% n2:1% n3:4% n4:11% n5:31% n6:52%
+islands4_m100    120/120   [0.97,1.00]               243        239    -1682.40      0.253->0.181  n1:0% n2:1% n3:4% n4:11% n5:31% n6:52%
+islands2_m50     120/120   [0.97,1.00]               223        238    -1682.44      0.139->0.114  n1:0% n2:1% n3:4% n4:10% n5:28% n6:55%
+islands8_m50     120/120   [0.97,1.00]               242        249    -1682.40      0.466->0.261  n1:0% n2:1% n3:5% n4:12% n5:32% n6:49%
+
+Paired against ga_bounded, seed by seed (a seed either arm missed is dropped):
+arm               faster  slower  tied  median dfits  sign test p
+ga_tight20            85      34     1           -70       0.0000
+ga_tight10            98      19     3          -114       0.0000
+ga_tight5            105      14     1          -146       0.0000
+ga_tight3            111       9     0          -164       0.0000
+ga_tight1            113       6     1          -137       0.0000
+islands4_m50          88      32     0           -73       0.0000
+islands4_m75          89      31     0           -70       0.0000
+islands4_m100         84      35     1           -76       0.0000
+islands2_m50          89      31     0           -68       0.0000
+islands8_m50          79      41     0           -60       0.0007
+
+########## 2. the same ladder unsaturated, budgets 150 and 250 ##########
+===== budget 150 =====
+arena: land_rclcpe6.json  pool=('R', 'C', 'L', 'CPE')  n<=6  21057 topologies, 18 targets (0.085%)
+budget: 150 fits per run, 120 seeds, population 40
+landscape optimum AICc -1682.511
+
+arm               hit rate          95% CI  median fits  mean fits   best AICc          pressure
+------------------------------------------------------------------------------------------------
+ga_bounded       7/120   [0.03,0.12]               112        113    -1649.76      0.103->0.068  n1:2% n2:6% n3:12% n4:20% n5:30% n6:30%
+ga_tight20       24/120   [0.14,0.28]               111        110    -1661.24      0.137->0.119  n1:2% n2:6% n3:11% n4:18% n5:31% n6:33%
+ga_tight10       30/120   [0.18,0.33]               114        106    -1670.49      0.240->0.186  n1:2% n2:6% n3:10% n4:17% n5:30% n6:36%
+ga_tight5        47/120   [0.31,0.48]               118        108    -1670.40      0.365->0.266  n1:2% n2:6% n3:10% n4:17% n5:29% n6:36%
+ga_tight3        64/120   [0.44,0.62]               122        114    -1674.06      0.444->0.318  n1:2% n2:6% n3:12% n4:17% n5:29% n6:35%
+ga_tight1        65/120   [0.45,0.63]               113        110    -1676.14      0.539->0.386  n1:3% n2:6% n3:14% n4:19% n5:29% n6:29%
+islands4_m50     18/120   [0.10,0.22]               106        101    -1659.87      0.259->0.204  n1:2% n2:6% n3:11% n4:18% n5:31% n6:32%
+
+Paired against ga_bounded, seed by seed (a seed either arm missed is dropped):
+arm               faster  slower  tied  median dfits  sign test p
+ga_tight20             1       2     0            20       1.0000
+ga_tight10             2       0     0           -30       0.5000
+ga_tight5              3       0     0            -7       0.2500
+ga_tight3              3       0     0           -10       0.2500
+ga_tight1              3       0     1           -32       0.2500
+islands4_m50           0       1     0            89       1.0000
+===== budget 250 =====
+arena: land_rclcpe6.json  pool=('R', 'C', 'L', 'CPE')  n<=6  21057 topologies, 18 targets (0.085%)
+budget: 250 fits per run, 120 seeds, population 40
+landscape optimum AICc -1682.511
+
+arm               hit rate          95% CI  median fits  mean fits   best AICc          pressure
+------------------------------------------------------------------------------------------------
+ga_bounded       38/120   [0.24,0.40]               198        190    -1677.38      0.103->0.066  n1:1% n2:4% n3:8% n4:16% n5:32% n6:39%
+ga_tight20       66/120   [0.46,0.64]               174        172    -1678.83      0.137->0.114  n1:1% n2:4% n3:7% n4:15% n5:31% n6:42%
+ga_tight10       93/120   [0.69,0.84]               172        169    -1680.34      0.240->0.185  n1:2% n2:4% n3:7% n4:13% n5:29% n6:45%
+ga_tight5        110/120   [0.85,0.95]               166        158    -1681.35      0.365->0.268  n1:2% n2:4% n3:9% n4:15% n5:30% n6:41%
+ga_tight3        110/120   [0.85,0.95]               142        149    -1680.98      0.444->0.325  n1:2% n2:4% n3:10% n4:16% n5:31% n6:37%
+ga_tight1        112/120   [0.87,0.97]               143        144    -1680.82      0.539->0.392  n1:2% n2:4% n3:12% n4:18% n5:33% n6:31%
+islands4_m50     68/120   [0.48,0.65]               180        174    -1679.51      0.259->0.190  n1:1% n2:4% n3:7% n4:15% n5:30% n6:42%
+
+Paired against ga_bounded, seed by seed (a seed either arm missed is dropped):
+arm               faster  slower  tied  median dfits  sign test p
+ga_tight20            19       6     0           -32       0.0146
+ga_tight10            21       8     2           -12       0.0241
+ga_tight5             26       7     1           -33       0.0013
+ga_tight3             31       4     0           -56       0.0000
+ga_tight1             31       5     1           -66       0.0000
+islands4_m50          17       6     0           -31       0.0347
+
+########## 3. front-only, which turns out to be identical to pool_bound=1 ##########
+===== budget 150 =====
+arena: land_rclcpe6.json  pool=('R', 'C', 'L', 'CPE')  n<=6  21057 topologies, 18 targets (0.085%)
+budget: 150 fits per run, 120 seeds, population 40
+landscape optimum AICc -1682.511
+
+arm               hit rate          95% CI  median fits  mean fits   best AICc          pressure
+------------------------------------------------------------------------------------------------
+ga_front         65/120   [0.45,0.63]               113        110    -1676.14      0.539->0.386  n1:3% n2:6% n3:14% n4:19% n5:29% n6:29%
+ga_tight1        65/120   [0.45,0.63]               113        110    -1676.14      0.539->0.386  n1:3% n2:6% n3:14% n4:19% n5:29% n6:29%
+ga_tight3        64/120   [0.44,0.62]               122        114    -1674.06      0.444->0.318  n1:2% n2:6% n3:12% n4:17% n5:29% n6:35%
+ga_tight5        47/120   [0.31,0.48]               118        108    -1670.40      0.365->0.266  n1:2% n2:6% n3:10% n4:17% n5:29% n6:36%
+
+Paired against ga_front, seed by seed (a seed either arm missed is dropped):
+arm               faster  slower  tied  median dfits  sign test p
+ga_tight1              0       0    65             0       1.0000
+ga_tight3             17      22     0             3       0.5224
+ga_tight5             15      14     0            -1       1.0000
+===== budget 250 =====
+arena: land_rclcpe6.json  pool=('R', 'C', 'L', 'CPE')  n<=6  21057 topologies, 18 targets (0.085%)
+budget: 250 fits per run, 120 seeds, population 40
+landscape optimum AICc -1682.511
+
+arm               hit rate          95% CI  median fits  mean fits   best AICc          pressure
+------------------------------------------------------------------------------------------------
+ga_front         112/120   [0.87,0.97]               143        144    -1680.82      0.539->0.392  n1:2% n2:4% n3:12% n4:18% n5:33% n6:31%
+ga_tight1        112/120   [0.87,0.97]               143        144    -1680.82      0.539->0.392  n1:2% n2:4% n3:12% n4:18% n5:33% n6:31%
+ga_tight3        110/120   [0.85,0.95]               142        149    -1680.98      0.444->0.325  n1:2% n2:4% n3:10% n4:16% n5:31% n6:37%
+ga_tight5        110/120   [0.85,0.95]               166        158    -1681.35      0.365->0.268  n1:2% n2:4% n3:9% n4:15% n5:30% n6:41%
+
+Paired against ga_front, seed by seed (a seed either arm missed is dropped):
+arm               faster  slower  tied  median dfits  sign test p
+ga_tight1              0       0   112             0       1.0000
+ga_tight3             46      57     0             4       0.3245
+ga_tight5             42      61     0             9       0.0756
+
+########## 4. islands under the front-only rule (re-run after the kill) ##########
+===== budget 150 =====
+arena: land_rclcpe6.json  pool=('R', 'C', 'L', 'CPE')  n<=6  21057 topologies, 18 targets (0.085%)
+budget: 150 fits per run, 120 seeds, population 40
+landscape optimum AICc -1682.511
+
+arm               hit rate          95% CI  median fits  mean fits   best AICc          pressure
+------------------------------------------------------------------------------------------------
+ga_front         65/120   [0.45,0.63]               113        110    -1676.14      0.539->0.386  n1:3% n2:6% n3:14% n4:19% n5:29% n6:29%
+islands2_front   77/120   [0.55,0.72]               116        112    -1675.46      0.541->0.394  n1:3% n2:6% n3:14% n4:19% n5:29% n6:29%
+islands4_front   60/120   [0.41,0.59]               116        111    -1674.36      0.616->0.409  n1:2% n2:6% n3:14% n4:20% n5:29% n6:28%
+islands4_front_iso 27/120   [0.16,0.31]               108        102    -1662.49      0.676->0.454  n1:2% n2:7% n3:16% n4:24% n5:28% n6:23%
+
+Paired against ga_front, seed by seed (a seed either arm missed is dropped):
+arm               faster  slower  tied  median dfits  sign test p
+islands2_front        19      23     0             3       0.6440
+islands4_front        14      16     1             3       0.8555
+islands4_front_iso       6       5     1            -1       1.0000
+===== budget 250 =====
+arena: land_rclcpe6.json  pool=('R', 'C', 'L', 'CPE')  n<=6  21057 topologies, 18 targets (0.085%)
+budget: 250 fits per run, 120 seeds, population 40
+landscape optimum AICc -1682.511
+
+arm               hit rate          95% CI  median fits  mean fits   best AICc          pressure
+------------------------------------------------------------------------------------------------
+ga_front         112/120   [0.87,0.97]               143        144    -1680.82      0.539->0.392  n1:2% n2:4% n3:12% n4:18% n5:33% n6:31%
+islands2_front   112/120   [0.87,0.97]               132        136    -1681.03      0.541->0.391  n1:2% n2:4% n3:12% n4:19% n5:32% n6:31%
+islands4_front   108/120   [0.83,0.94]               143        147    -1681.16      0.616->0.404  n1:2% n2:4% n3:12% n4:19% n5:32% n6:31%
+islands4_front_iso 68/120   [0.48,0.65]               166        160    -1679.83      0.676->0.406  n1:2% n2:4% n3:12% n4:21% n5:31% n6:30%
+
+Paired against ga_front, seed by seed (a seed either arm missed is dropped):
+arm               faster  slower  tied  median dfits  sign test p
+islands2_front        57      49     0           -10       0.4968
+islands4_front        48      52     1             5       0.7644
+islands4_front_iso      25      38     1            14       0.1299
+
+########## 5. islands2 at 480 seeds, because 120 could not resolve it ##########
+===== budget 150, 480 seeds =====
+arena: land_rclcpe6.json  pool=('R', 'C', 'L', 'CPE')  n<=6  21057 topologies, 18 targets (0.085%)
+budget: 150 fits per run, 480 seeds, population 40
+landscape optimum AICc -1682.511
+
+arm               hit rate          95% CI  median fits  mean fits   best AICc          pressure
+------------------------------------------------------------------------------------------------
+ga_front         282/480   [0.54,0.63]               112        106    -1675.84      0.525->0.385  n1:2% n2:6% n3:14% n4:19% n5:29% n6:28%
+islands2_front   302/480   [0.59,0.67]               114        110    -1675.75      0.537->0.395  n1:2% n2:6% n3:14% n4:19% n5:29% n6:29%
+islands4_front   233/480   [0.44,0.53]               114        109    -1673.13      0.616->0.405  n1:2% n2:6% n3:14% n4:20% n5:29% n6:28%
+
+Hit/miss paired against ga_front (McNemar, exact):
+arm                both  only base  only arm  neither        p
+islands2_front      174        108       128       70   0.2161
+islands4_front      136        146        97      101   0.0020
+
+Paired against ga_front, seed by seed (a seed either arm missed is dropped):
+arm               faster  slower  tied  median dfits  sign test p
+islands2_front        81      92     1             3       0.4472
+islands4_front        63      71     2             3       0.5455

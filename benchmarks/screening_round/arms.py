@@ -48,6 +48,14 @@ from autocircuit.core.discover import (
 
 CRITERION = "aicc"
 
+#: Fraction of an island's members that its neighbour also breeds from, per generation.
+#:
+#: This and the three helpers below used to live in `discover.py`. They were removed when this
+#: round measured the islands out of the library (`EVOLVE_SEARCH_PLAN.md` section 3.4.4) and
+#: they live here now for the reason `arm_nsga2` and `arm_map_elites` do: an arm that recorded
+#: a rejection has to stay runnable, or the rejection is a claim rather than a measurement.
+MIGRATION_FRACTION = 0.1
+
 
 @dataclass
 class Ind:
@@ -168,12 +176,20 @@ def arm_current(table: Table, rng: np.random.Generator, pool: tuple[str, ...],
 
 
 def arm_ga_bounded(table: Table, rng: np.random.Generator, pool: tuple[str, ...],
-                   max_elements: int, population: int) -> Trace:
+                   max_elements: int, population: int, *, pool_bound: int | None = None) -> Trace:
     """Step 4's minimal half: the same search, but the breeding pool stops growing.
 
     `_evolve` breeds from the entire history, so `_tournament` draws 3 of N with N rising every
     generation -- the 8.2x pressure collapse of `EVOLVE_SEARCH_PLAN.md` section 1.2. Here the
-    pool is the Pareto front plus the best `population` by score, and nothing else changes.
+    pool is the Pareto front plus the best `pool_bound` by score, and nothing else changes.
+
+    ``pool_bound`` is how many members past the Pareto front the pool keeps, and the ladder
+    registered below walks it from a whole generation down to **none**. It began as the control
+    the islands arm needed -- islands narrow the pool *and* split it, so without an arm that only
+    narrows, a win could be either -- and it ended as the measurement that removed them and
+    changed what ships: `EVOLUTION`'s width is now `discover.BREEDING_EXTRA` = 0, the front
+    itself. `None` here means "a whole generation", which is the width step 4 first shipped, so
+    `ga_bounded` still reproduces the arm this round originally measured.
 
     Since the measurement that this arm won, the rule has shipped as `discover._breeding_pool`
     and this arm **calls it** rather than restating it -- the same reason `current` drives
@@ -202,9 +218,126 @@ def arm_ga_bounded(table: Table, rng: np.random.Generator, pool: tuple[str, ...]
             trees = [(random_topology(rng, pool, int(rng.integers(2, max_elements + 1))), None)
                      for _ in range(population)]
             continue
-        alive = _breeding_pool(alive_all, population, CRITERION)
+        # `or` would fold a bound of zero into the default, and zero is the arm that
+        # decided the question: it is the Pareto front on its own, which is what the ladder
+        # converges to and what now ships. It produced a plausible number rather than an error.
+        bound = population if pool_bound is None else pool_bound
+        alive = _breeding_pool(alive_all, bound, CRITERION)
         pressure.append(1.0 - (1.0 - 1.0 / len(alive)) ** 3)
         trees = _next_generation(alive, rng, pool, max_elements, population, CRITERION)
+        generation += 1
+    return Trace(table.hit_at, table.fits, table.best, pressure, table.sizes)
+
+
+def _island_sizes(population: int, islands: int) -> list[int]:
+    """Split one generation across the islands, largest remainders first.
+
+    ``population`` is the size of a *generation*, not of an island, so turning islands on
+    subdivides the same budget instead of multiplying it. That is what makes the arms
+    comparable: a generation costs the same number of fits either way.
+    """
+    if islands < 1:
+        raise ValueError("islands must be at least 1")
+    if population < islands:
+        raise ValueError(f"population {population} cannot be split across {islands} islands")
+    base, extra = divmod(population, islands)
+    return [base + (1 if index < extra else 0) for index in range(islands)]
+
+
+def _migrants(alive: Sequence[Ind], count: int, criterion: str) -> list[Ind]:
+    """The ``count`` best-scoring members an island offers its neighbour."""
+    if count <= 0:
+        return []
+    return sorted(alive, key=lambda c: (c.score(criterion), c.circuit.canonical_form()))[:count]
+
+
+def _with_migrants(
+    alive_by_island: Sequence[list[Ind]],
+    sizes: Sequence[int],
+    fraction: float,
+    criterion: str,
+) -> list[list[Ind]]:
+    """Ring migration: island *i* also breeds from the best of island *i-1* this generation.
+
+    The exchange is **transient** -- the migrants join the set island *i* breeds from now, and
+    not island *i*'s archive. Permanent adoption would leave every island holding every other
+    island's best after one lap of the ring, which is the single shared pool islands exist to
+    split, reached more slowly.
+
+    A positive fraction always moves at least one member: `round(0.1 * 5)` is 0, so an island
+    sweep at a fixed fraction would silently turn migration off at the higher island counts and
+    neither result would say what it had measured.
+    """
+    migrants = [
+        _migrants(alive, 0 if fraction <= 0.0 else max(1, round(fraction * size)), criterion)
+        for alive, size in zip(alive_by_island, sizes, strict=True)
+    ]
+    return [
+        _unique_best(list(alive) + migrants[index - 1], criterion)
+        for index, alive in enumerate(alive_by_island)
+    ]
+
+
+def arm_islands(table: Table, rng: np.random.Generator, pool: tuple[str, ...],
+                max_elements: int, population: int, *, islands: int = 4,
+                migration: float = MIGRATION_FRACTION,
+                pool_bound: int | None = None) -> Trace:
+    """Step 4's second half: the same generation, split across sub-populations that breed apart.
+
+    `ga_bounded` bounds the set the search breeds from and EV4 measured what that costs: two
+    thirds of the late proposals are topologies already fitted, because one bounded pool is one
+    neighbourhood. Islands keep the bound and multiply the neighbourhoods -- `islands` pools,
+    each the front-plus-best of its *own* archive, exchanging their best round a ring.
+
+    ``population`` is split rather than multiplied, so a generation costs the same number of
+    fits here as in `ga_bounded` and the two arms are comparable at equal budget. Everything
+    structural is the library's -- `_island_sizes`, `_with_migrants`, `_breeding_pool`,
+    `_next_generation` -- so this arm cannot drift from what ships. Only the random streams are
+    the arena's own: the harness hands every arm one `Generator` and spawning from it is the
+    same derivation `_island_streams` performs on a seed.
+
+    ``pool_bound`` exists so the islands can be tried under the rule the single-pool ladder
+    settled on rather than the one they were written against. Without it the comparison is
+    rigged: the ladder's winner breeds from the Pareto front alone, and an islands arm still
+    breeding from front-plus-ten would lose for the reason the ladder already measured instead
+    of for anything to do with islands.
+    """
+    sizes = _island_sizes(population, islands)
+    streams = list(rng.spawn(islands))
+    flocks: list[list[tuple[Node, Ind | None]]] = [
+        [(random_topology(stream, pool, int(stream.integers(2, max_elements + 1))), None)
+         for _ in range(size)]
+        for stream, size in zip(streams, sizes, strict=True)
+    ]
+    archives: list[list[Ind]] = [[] for _ in range(islands)]
+    pressure: list[float] = []
+    generation = 0
+    while not table.exhausted:
+        for index, trees in enumerate(flocks):
+            for tree, _parent in trees:
+                ind = table.evaluate(tree, generation)
+                if ind is not None:
+                    archives[index].append(ind)
+                if table.exhausted:
+                    break
+            if table.exhausted:
+                break
+        alive_by_island = [_unique_best(archive, CRITERION) for archive in archives]
+        if islands > 1:
+            alive_by_island = _with_migrants(alive_by_island, sizes, migration, CRITERION)
+        flocks = []
+        for index, (stream, size) in enumerate(zip(streams, sizes, strict=True)):
+            alive = alive_by_island[index]
+            if not alive:
+                flocks.append([
+                    (random_topology(stream, pool, int(stream.integers(2, max_elements + 1))),
+                     None)
+                    for _ in range(size)
+                ])
+                continue
+            bred = _breeding_pool(alive, size if pool_bound is None else pool_bound, CRITERION)
+            pressure.append(1.0 - (1.0 - 1.0 / len(bred)) ** 3)
+            flocks.append(_next_generation(bred, stream, pool, max_elements, size, CRITERION))
         generation += 1
     return Trace(table.hit_at, table.fits, table.best, pressure, table.sizes)
 
@@ -468,6 +601,35 @@ ARMS: dict[str, Callable[..., Trace]] = {
     "random": arm_random,
     "current": arm_current,
     "ga_bounded": arm_ga_bounded,
+    "islands2": lambda *a, **k: arm_islands(*a, islands=2, **k),
+    "islands4": lambda *a, **k: arm_islands(*a, islands=4, **k),
+    "islands8": lambda *a, **k: arm_islands(*a, islands=8, **k),
+    # The migration sweep, at the island count the sweep above settles on. `iso` is full
+    # isolation, which is the arm that says whether the ring is doing anything at all.
+    "islands4_iso": lambda *a, **k: arm_islands(*a, islands=4, migration=0.0, **k),
+    "islands4_m25": lambda *a, **k: arm_islands(*a, islands=4, migration=0.25, **k),
+    "islands4_m50": lambda *a, **k: arm_islands(*a, islands=4, migration=0.5, **k),
+    "islands4_m75": lambda *a, **k: arm_islands(*a, islands=4, migration=0.75, **k),
+    "islands4_m100": lambda *a, **k: arm_islands(*a, islands=4, migration=1.0, **k),
+    "islands2_m50": lambda *a, **k: arm_islands(*a, islands=2, migration=0.5, **k),
+    "islands8_m50": lambda *a, **k: arm_islands(*a, islands=8, migration=0.5, **k),
+    # The control that separates "several pools" from "one smaller pool": same generation, one
+    # neighbourhood, bounded to what a quarter-sized island's would be.
+    # The ladder runs down to a pool of one on purpose: a bound that keeps improving all the way
+    # there is not "a well-chosen neighbourhood", it is hill climbing wearing a population, and
+    # the two are told apart only by measuring the end of the ladder rather than a point on it.
+    "ga_tight20": lambda *a, **k: arm_ga_bounded(*a, pool_bound=20, **k),
+    "ga_tight10": lambda *a, **k: arm_ga_bounded(*a, pool_bound=10, **k),
+    "ga_tight5": lambda *a, **k: arm_ga_bounded(*a, pool_bound=5, **k),
+    "ga_tight3": lambda *a, **k: arm_ga_bounded(*a, pool_bound=3, **k),
+    "ga_tight1": lambda *a, **k: arm_ga_bounded(*a, pool_bound=1, **k),
+    "ga_front": lambda *a, **k: arm_ga_bounded(*a, pool_bound=0, **k),
+    "islands2_front": lambda *a, **k: arm_islands(*a, islands=2, migration=0.5,
+                                                  pool_bound=0, **k),
+    "islands4_front": lambda *a, **k: arm_islands(*a, islands=4, migration=0.5,
+                                                  pool_bound=0, **k),
+    "islands4_front_iso": lambda *a, **k: arm_islands(*a, islands=4, migration=0.0,
+                                                      pool_bound=0, **k),
     "staged": arm_staged,
     "mapelites": arm_mapelites,
     "mapelites_alps": lambda *a, **k: arm_mapelites(*a, alps=True, **k),
@@ -478,6 +640,23 @@ ARMS: dict[str, Callable[..., Trace]] = {
     "beam8": lambda *a, **k: arm_beam(*a, width=8, **k),
     "beam24": lambda *a, **k: arm_beam(*a, width=24, **k),
 }
+
+
+def _sign_test(faster: int, slower: int) -> float:
+    """Two-sided exact sign test on paired wins, ties discarded.
+
+    Every arm walks the *same* table from the same seeds, so the runs are paired seed by seed
+    and the paired comparison is the one with power. Reading two medians side by side is not:
+    120/120 against 120/120 says the arena has saturated, and 252 against 308 is then the only
+    signal left -- which is exactly the situation where an unpaired eyeball turns noise into a
+    recommendation.
+    """
+    n = faster + slower
+    if n == 0:
+        return 1.0
+    extreme = min(faster, slower)
+    tail = sum(math.comb(n, k) for k in range(extreme + 1)) / 2**n
+    return min(1.0, 2 * tail)
 
 
 def _wilson(hits: int, n: int) -> tuple[float, float]:
@@ -526,6 +705,7 @@ def main() -> None:
     print(header)
     print("-" * len(header))
 
+    paired: dict[str, list[int | None]] = {}
     for name in args.arms.split(","):
         fn = ARMS[name]
         hits: list[int | None] = []
@@ -548,14 +728,56 @@ def main() -> None:
                 sizes[k] = sizes.get(k, 0) + v
         total = sum(sizes.values()) or 1
         size_txt = " ".join(f"n{k}:{v / total:.0%}" for k, v in sorted(sizes.items()))
+        paired[name] = hits
         found = [h for h in hits if h is not None]
         lo, hi = _wilson(len(found), seeds)
         median = float(np.median(found)) if found else math.nan
         mean = float(np.mean(found)) if found else math.nan
         p_txt = (f"{np.mean([p[0] for p in press]):.3f}->{np.mean([p[1] for p in press]):.3f}"
                  if press else "-")
+        # Flushed, because a redirected run of eight arms is otherwise a file that stays
+        # empty for twenty minutes and then arrives all at once -- indistinguishable from a
+        # process that has died.
         print(f"{name:16s} {len(found)}/{seeds:<5d} [{lo:.2f},{hi:.2f}]      "
-              f"{median:12.0f} {mean:10.0f} {np.mean(bests):11.2f} {p_txt:>17s}  {size_txt}")
+              f"{median:12.0f} {mean:10.0f} {np.mean(bests):11.2f} {p_txt:>17s}  {size_txt}",
+              flush=True)
+
+    names = args.arms.split(",")
+    if len(names) > 1:
+        base = names[0]
+        # The hit rates are paired too, and the fits table below cannot test them: it drops
+        # exactly the seeds where the two arms disagree about hitting at all, which at an
+        # unsaturated budget is the entire signal. McNemar is that test -- an exact binomial on
+        # the discordant seeds, which is `_sign_test` again with a different pair of counts.
+        print()
+        print(f"Hit/miss paired against {base} (McNemar, exact):")
+        print(f"{'arm':16s} {'both':>6s} {'only base':>10s} {'only arm':>9s} {'neither':>8s} "
+              f"{'p':>8s}")
+        for name in names[1:]:
+            pairs = list(zip(paired[base], paired[name], strict=True))
+            both = sum(1 for a, b in pairs if a is not None and b is not None)
+            only_base = sum(1 for a, b in pairs if a is not None and b is None)
+            only_arm = sum(1 for a, b in pairs if a is None and b is not None)
+            neither = sum(1 for a, b in pairs if a is None and b is None)
+            print(f"{name:16s} {both:>6d} {only_base:>10d} {only_arm:>9d} {neither:>8d} "
+                  f"{_sign_test(only_arm, only_base):>8.4f}")
+
+        print()
+        print(f"Paired against {base}, seed by seed (a seed either arm missed is dropped):")
+        print(f"{'arm':16s} {'faster':>7s} {'slower':>7s} {'tied':>5s} {'median dfits':>13s} "
+              f"{'sign test p':>12s}")
+        for name in names[1:]:
+            pairs = [
+                (a, b)
+                for a, b in zip(paired[base], paired[name], strict=True)
+                if a is not None and b is not None
+            ]
+            faster = sum(1 for a, b in pairs if b < a)
+            slower = sum(1 for a, b in pairs if b > a)
+            tied = len(pairs) - faster - slower
+            delta = float(np.median([b - a for a, b in pairs])) if pairs else math.nan
+            print(f"{name:16s} {faster:>7d} {slower:>7d} {tied:>5d} {delta:>13.0f} "
+                  f"{_sign_test(faster, slower):>12.4f}")
 
 
 if __name__ == "__main__":
