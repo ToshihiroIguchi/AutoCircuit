@@ -719,9 +719,37 @@ def test_the_search_breeds_from_a_bounded_pool_however_long_it_runs(
 
     assert offered, "the genetic search never bred"
     for n_alive, n_front in offered:
-        assert n_alive <= population + n_front, (
-            f"bred from {n_alive} candidates, above the bound {population} + {n_front}"
+        # The shipped rule is the front itself (`BREEDING_EXTRA`), so this is an equality
+        # rather than a bound. An inequality would pass just as well with the front-plus-forty
+        # rule the ladder of section 3.4.3 measured as 9x worse.
+        assert n_alive == n_front, (
+            f"bred from {n_alive} candidates against a front of {n_front}"
         )
     assert result.n_evaluated > max(n for n, _f in offered), (
         "the archive never outgrew the pool, so the bound was never tested"
     )
+
+
+def test_the_front_alone_and_the_front_plus_its_best_are_the_same_set() -> None:
+    """Why `BREEDING_EXTRA` is 0 and not 1: the two are the same rule, not two rungs.
+
+    The ladder of docs/EVOLVE_SEARCH_PLAN.md section 3.4.3 measured them as identical on every
+    one of 120 seeds, which is what an identity looks like from the outside. It is one: the
+    best-scoring candidate cannot be dominated, so it is already on the front and asking for it
+    a second time adds nothing. The reason this is worth a test is that the *measurement* could
+    have been read as a coincidence of one arena.
+    """
+    data = simulate(
+        "R1-p(R2,C1)",
+        log_frequencies(1e-1, 1e6, 8),
+        {"R1.R": 50.0, "R2.R": 1e3, "C1.C": 1e-8},
+        noise=0.005,
+        seed=0,
+    )
+    archive = _archive(data)
+    front = [c.circuit.canonical_form() for c in _breeding_pool(archive, 0, "aicc")]
+
+    assert front == [c.circuit.canonical_form() for c in _breeding_pool(archive, 1, "aicc")]
+    assert front == [c.circuit.canonical_form() for c in pareto_front(archive, "aicc")]
+    # And the default is that rule rather than a number that happens to equal it today.
+    assert front == [c.circuit.canonical_form() for c in _breeding_pool(archive, criterion="aicc")]

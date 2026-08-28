@@ -186,6 +186,22 @@ REFIT_HEADROOM = 1.5
 #: against and, for the same reason, the way back to the pre-step-3 search.
 WARM_ACCEPT_FACTOR = math.inf
 
+#: How many best-scoring candidates join the Pareto front in the set a generation breeds from.
+#:
+#: [measured] Zero, and that is a rule rather than a tuned width -- see
+#: docs/EVOLVE_SEARCH_PLAN.md section 3.4.3. The ladder that measured it ran the width down to
+#: one and then to none, and the last two rungs are *the same arm on every seed*, because the
+#: best-scoring candidate is by definition non-dominated and is therefore already on the front.
+#: So the search breeds from the front, which is naturally bounded at roughly one member per
+#: complexity level and needs no number chosen for it. Adding members back is measurably worse:
+#: on the 21,057-topology arena at 150 fits, front alone reaches 65/120 where front-plus-three
+#: reaches 64/120, front-plus-five 47/120 and the shipped front-plus-forty 7/120.
+#:
+#: It stays a parameter of `_breeding_pool` and not of `discover()`: `benchmarks/ev4_diversity.py`
+#: and `benchmarks/screening_round/arms.py` re-measure the ladder by passing other values, and a
+#: search internal that a user cannot set correctly is not a knob (CLAUDE.md).
+BREEDING_EXTRA = 0
+
 #: Tier-1 tasks handed to a worker process at a time. Large enough to amortise the ~1 s
 #: interpreter start-up on Windows, small enough that the early-abandon threshold keeps up.
 WORKER_CHUNK = 64
@@ -1898,7 +1914,7 @@ def _evolve(
             continue
 
         trees = _next_generation(
-            _breeding_pool(alive, population, criterion),
+            _breeding_pool(alive, criterion=criterion),
             rng,
             pool,
             max_elements,
@@ -2745,9 +2761,11 @@ def _unique_best(
 
 
 def _breeding_pool(
-    alive: Sequence[Candidate], population: int, criterion: Criterion = DEFAULT_CRITERION
+    alive: Sequence[Candidate],
+    extra: int = BREEDING_EXTRA,
+    criterion: Criterion = DEFAULT_CRITERION,
 ) -> list[Candidate]:
-    """The subset of the archive that may become a parent: the front, plus the best by score.
+    """The subset of the archive that may become a parent: the Pareto front.
 
     `_evolve` breeds from its *entire history*, and that is the mechanism behind
     docs/EVOLVE_SEARCH_PLAN.md section 1.2: `_tournament` draws 3 of N with N growing every
@@ -2757,10 +2775,16 @@ def _breeding_pool(
 
     Bounding the set fixes N. [measured, docs/SEARCH_ALGORITHM_SCREENING.md section 5] On the
     frozen landscape of the three-block Maxwell-Wagner reference, over 120 seeds counted in fits
-    rather than seconds, this arm reaches the truth's equivalence class in **120/120 [0.97,1.00]
-    at a median of 308 fits**, against the unbounded incumbent's **87/120 [0.64,0.80] at 451**.
-    Three arms cleared that bar and what they share is not their operators but that all three
-    bound the set they breed from; this is the smallest of the three.
+    rather than seconds, bounding it at all reaches the truth's equivalence class in **120/120
+    [0.97,1.00] at a median of 308 fits**, against the unbounded incumbent's **87/120 [0.64,0.80]
+    at 451**. Three arms cleared that bar and what they share is not their operators but that all
+    three bound the set they breed from; this is the smallest of the three.
+
+    **How tightly to bound it is `BREEDING_EXTRA`, and the answer is not a width.** The ladder in
+    docs/EVOLVE_SEARCH_PLAN.md section 3.4.3 ran the extra members from forty down to none and
+    the last two rungs are the same arm on every seed, so what ships is the front by itself. At
+    an unsaturated budget that is 65/120 against the front-plus-forty rule's 7/120; ``extra``
+    survives only so the benchmarks can re-walk the ladder.
 
     Two things it deliberately does not do:
 
@@ -2776,6 +2800,11 @@ def _breeding_pool(
       no measurement behind it. One change, one measurement.
     """
     front = pareto_front(alive, criterion)
+    if extra <= 0:
+        # The shipped rule, and worth short-circuiting rather than letting the slice below
+        # return nothing: the ranking calls `canonical_form()` on the whole archive, which grows
+        # every generation, to choose members it would then discard.
+        return front
     on_front = {id(candidate) for candidate in front}
     ranked = sorted(
         alive,
@@ -2787,7 +2816,7 @@ def _breeding_pool(
             c.circuit.canonical_form(),
         ),
     )
-    return front + [c for c in ranked[:population] if id(c) not in on_front]
+    return front + [c for c in ranked[:extra] if id(c) not in on_front]
 
 
 def _next_generation(
