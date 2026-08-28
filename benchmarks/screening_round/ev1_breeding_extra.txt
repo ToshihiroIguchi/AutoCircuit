@@ -1,0 +1,45 @@
+============================================================================================
+EV1 baseline: does mode="evolve" recover a 6-7 element truth, or an exact equivalent?
+============================================================================================
+This is a BASELINE, not a pass/fail gate: EV1's pass fraction and time budget are
+written from these numbers (docs/EVOLVE_SEARCH_PLAN.md section 3.1), not assumed before
+the run. 'tier1 rows' counts Pareto rows fitted at the reduced screening budget rather
+than the full refit -- the defect section 1.4 of the plan found in the report itself.
+
+Sweeping the breeding pool's extra members: 40, 0.
+Arm 0 is the control -- it is the shipped `BREEDING_EXTRA`, i.e. the Pareto front alone.
+The arms are interleaved seed by seed rather than run one after the other, because
+the budget here is wall-clock and [measured, docs/HANDOFF.md section 4] this
+machine's speed drifts by a factor of two within an hour. Running one arm for an
+hour and then the other would put that drift straight into 'topologies evaluated',
+which is the quantity EV3 compares.
+
+three-block Maxwell-Wagner: p(R1,C1)-p(R2,C2)-p(R3,C3)   pool R,C,L,CPE
+  seed 0 extra=40: FAIL  reported=False on-front=False recommended=False  generations=185  evaluated=1,603  12.0 min  tier1 rows: 0/10  best err=1.34%  -> p(p(R1,C1)-p(C2,R2),CPE1)
+  seed 0 extra=0: PASS  reported=True on-front=True recommended=True  generations=627  evaluated=1,339  12.0 min  tier1 rows: 0/9  best err=1.34%  -> p(p(C1,R1)-p(R2,C2)-C3,R3)
+  seed 1 extra=40: PASS  reported=True on-front=True recommended=True  generations=352  evaluated=1,756  11.2 min  tier1 rows: 0/13  best err=1.24%  -> p(C1-p(R1,C2),R2,C3-R3)
+  seed 1 extra=0: PASS  reported=True on-front=True recommended=True  generations=489  evaluated=1,128  11.5 min  tier1 rows: 0/11  best err=1.24%  -> p(R1-C1,C2,R2-p(C3,R3))
+  seed 2 extra=40: PASS  reported=True on-front=True recommended=True  generations=242  evaluated=1,667  11.6 min  tier1 rows: 0/10  best err=1.33%  -> p(R1,p(C1,R2)-C2,C3-R3)
+  seed 2 extra=0: PASS  reported=True on-front=True recommended=True  generations=491  evaluated=877  11.6 min  tier1 rows: 0/9  best err=1.33%  -> p(R1-p(C1,R2-p(C2,R3)),C3)
+  ==> EV1 baseline [extra=40] (truth reported): 2/3; on the Pareto front: 2/3; it is the recommendation: 2/3; mean 11.6 min; mean topologies evaluated 1,675; tier1 rows 0/33
+  ==> EV1 baseline [extra=0] (truth reported): 3/3; on the Pareto front: 3/3; it is the recommendation: 3/3; mean 11.7 min; mean topologies evaluated 1,115; tier1 rows 0/29
+
+capacitor + interfacial block: C1-R1-L1-SKINF1-p(R2,CPE1)   pool R,C,L,CPE,SKINF
+  seed 0 extra=40: PASS  reported=True on-front=False recommended=False  generations=131  evaluated=1,765  14.0 min  tier1 rows: 0/14  best err=1.25%  -> L1-p(CPE1,R1)-C1-SKINF1
+  seed 0 extra=0: PASS  reported=True on-front=True recommended=False  generations=292  evaluated=1,293  13.8 min  tier1 rows: 0/10  best err=1.28%  -> p(R1,CPE1)-C1-SKINF1-L1
+  seed 1 extra=40: PASS  reported=True on-front=True recommended=False  generations=222  evaluated=2,128  13.7 min  tier1 rows: 0/10  best err=1.24%  -> C1-p(CPE1,R1)-SKINF1-L1
+  seed 1 extra=0: PASS  reported=True on-front=True recommended=False  generations=238  evaluated=1,398  13.6 min  tier1 rows: 0/12  best err=1.20%  -> p(CPE1,R1)-C1-SKINF1-L1
+  seed 2 extra=40: FAIL  reported=False on-front=False recommended=False  generations=167  evaluated=2,326  13.0 min  tier1 rows: 0/8  best err=1.32%  -> C1-SKINF1-L1-p(R1,CPE1)
+  seed 2 extra=0: FAIL  reported=False on-front=False recommended=False  generations=406  evaluated=1,599  12.9 min  tier1 rows: 0/9  best err=1.32%  -> p(CPE1,R1)-C1-SKINF1-L1
+  ==> EV1 baseline [extra=40] (truth reported): 2/3; on the Pareto front: 1/3; it is the recommendation: 0/3; mean 13.6 min; mean topologies evaluated 2,073; tier1 rows 0/32
+  ==> EV1 baseline [extra=0] (truth reported): 2/3; on the Pareto front: 2/3; it is the recommendation: 0/3; mean 13.4 min; mean topologies evaluated 1,430; tier1 rows 0/31
+
+Randles + ESL + second block: R1-L1-p(CPE1,R2-Wo1)-p(R3,C1)   pool R,C,L,CPE,W,Wo
+  seed 0 extra=40: FAIL  reported=False on-front=False recommended=False  generations=39  evaluated=892  12.5 min  tier1 rows: 0/10  best err=1.60%  -> p(CPE1,R1,L1)-L2-Wo1-R2
+  seed 0 extra=0: FAIL  reported=False on-front=False recommended=False  generations=98  evaluated=997  12.5 min  tier1 rows: 0/11  best err=1.32%  -> R1-p(C1-R2,CPE1,R3)-C2-L1
+  seed 1 extra=40: FAIL  reported=False on-front=False recommended=False  generations=44  evaluated=971  13.4 min  tier1 rows: 0/10  best err=1.24%  -> L1-R1-C1-p(R2,C2-p(CPE1,CPE2))
+  seed 1 extra=0: FAIL  reported=False on-front=False recommended=False  generations=117  evaluated=1,070  12.8 min  tier1 rows: 0/13  best err=1.24%  -> L1-R1-p(CPE1,p(R2,L2)-R3-Wo1)
+  seed 2 extra=40: FAIL  reported=False on-front=False recommended=False  generations=47  evaluated=1,019  13.9 min  tier1 rows: 0/11  best err=1.32%  -> p(Wo1-R1,CPE1,R2)-Wo2-R3-L1
+  seed 2 extra=0: FAIL  reported=False on-front=False recommended=False  generations=88  evaluated=998  12.9 min  tier1 rows: 0/13  best err=1.34%  -> p(R1,CPE1)-L1-p(Wo1-R2,C1)-R3
+  ==> EV1 baseline [extra=40] (truth reported): 0/3; on the Pareto front: 0/3; it is the recommendation: 0/3; mean 13.3 min; mean topologies evaluated 961; tier1 rows 0/31
+  ==> EV1 baseline [extra=0] (truth reported): 0/3; on the Pareto front: 0/3; it is the recommendation: 0/3; mean 12.7 min; mean topologies evaluated 1,022; tier1 rows 0/37

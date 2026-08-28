@@ -856,15 +856,56 @@ Last, because they are tuning and the steps above are structure.
   already does; what it may do is measure whether a *cheap* re-proposal is a cost at all, which
   this run suggests and does not establish (541 fits in 5.5 min against 692 in 7.1).
 
-  **[in flight] EV4 is being re-measured for the front-only pool of §3.4.3**, three arms
-  (`unbounded`, `bounded`, `front`) interleaved seed by seed, and so is EV1's ratchet
-  (`evolve-gate --breeding-extra 40,0`). **A first attempt at both was discarded rather than
-  reported**, for the reason the paragraph above this one had already given: all 27 runs stopped
-  at the 30-generation cap well inside their 600 s, so the arms shared a *generation count* and
-  not a budget — and since the arms differ in what a generation costs, the shipped arm looked
-  cheaper (2.5 min against 3.9, 298 topologies against 566) only because it had been handed less
-  to do. Both benchmarks now default `--generations` to 1000 so that `--time-limit` is what runs
-  out. Nothing from the discarded run is quoted anywhere as a result.
+  **[measured] Re-run for the front-only pool of §3.4.3, and it fails a second clause.** Three
+  arms, three seeds, 600 s each, interleaved, generation cap 1000 so that the clock is what runs
+  out. (**A first attempt was discarded rather than reported**, for the reason the paragraph
+  above this one had already given: all 27 runs stopped at the 30-generation cap well inside
+  their 600 s, so the arms shared a *generation count* and not a budget — and since the arms
+  differ in what a generation costs, the shipped arm looked cheaper only because it had been
+  handed less to do. Nothing from that run is quoted anywhere as a result.)
+
+  | arm | generations | topologies evaluated | hit rate, first third → last | P(best enters a tournament) |
+  |---|---|---|---|---|
+  | unbounded | 117 | 2,473 | 41.7% → 51.7% (**+10.0 pt**) | 0.0139 → 0.0017 (**÷8.3**) |
+  | bounded (front + 40) | 211 | 1,564 | 65.7% → 91.7% (**+26.0 pt**) | 0.0654 → 0.0635 (÷1.03) |
+  | front (ships) | 479 | 1,039 | 92.3% → 95.3% (**+3.0 pt**) | 0.3763 → 0.2750 (**÷1.37**) |
+
+  *Clause 1 fails for all three arms*, the front arm by the smallest margin of the three — and
+  that number is not the good news it looks like, because its hit rate is **92% in the first
+  third**. There is no room left to rise. The front arm re-proposes what it knows from the very
+  first generations, which is the concentration clause 1 was written to detect, arriving so
+  early that the clause's *shape* test cannot see it.
+
+  *Clause 2 now fails too, and it passed for the rule this replaces.* This is the one to state
+  plainly rather than soften: the shipped arm's P(best) falls by 1.37x across a run where the
+  previous rule's was flat. What the clause was written to catch is nonetheless absent — §1.2's
+  mechanism is an archive that grows without bound, and the unbounded arm shows it at ÷8.3 with
+  N reaching 2,104. The front arm's N goes **5 → 10**, which is the front acquiring one more
+  complexity level, and it falls *from a level 4–6x higher than the arm that passes*. The clause
+  is not reworded to say that. It is recorded as failed with the mechanism beside it, and the
+  reason the step ships anyway is clause 3.
+
+  *Clause 3 passes, on the comparison that has a same-day control.* [measured] EV1's ratchet,
+  `evolve-gate --breeding-extra 40,0`, three references x seeds 0–2, 600 s each, arms
+  interleaved seed by seed:
+
+  | | front + 40 | **front (ships)** |
+  |---|---|---|
+  | three-block Maxwell-Wagner | 2/3 reported, 2/3 on-front, 2/3 recommended | **3/3, 3/3, 3/3** |
+  | capacitor + interfacial | 2/3, 1/3, 0/3 | 2/3, **2/3**, 0/3 |
+  | Randles + ESL | 0/3, 0/3, 0/3 | 0/3, 0/3, 0/3 |
+  | **total** | 4/9, 3/9, 2/9 | **5/9, 5/9, 3/9** |
+  | mean topologies evaluated | 1,675 / 2,073 / 961 | 1,115 / 1,430 / 1,022 |
+
+  Both arms clear EV1's floors of 1/9, 1/9, 0/9, and the shipped arm is ahead of its own
+  interleaved control on every one of the three counts. **It is ahead while fitting a third
+  fewer distinct topologies**, which is the same finding as the bounded pool's and one step
+  further along: under a best-wins cache a re-proposal is a refit of a known topology, and 479
+  generations of that beat 211 generations of breadth. Two things this table is *not*: it is not
+  a comparison against the 6/9 recorded in `docs/HANDOFF.md` §25, which was measured at the
+  30-generation cap and without a control (that section says so); and 4/9 against 5/9 on nine
+  runs is not a significant difference — the claim EV1 licenses is **no regression**, which is
+  what its bar was written as.
   (EV5 is stated above, next to the baseline it corrects.) Its full form: `mode="exhaustive"`
   and `mode="auto"` below the fallback threshold produce identical results for a fixed seed
   before and after every step; the full test suite stays green; `npm run check` is untouched
@@ -877,7 +918,7 @@ Last, because they are tuning and the steps above are structure.
 | 1 | 6–7 element references + `evolve-gate` benchmark mode; run it; write EV1's bar from the result | M | — | **done, baseline partial** — mode and references landed and measured; 4 of 9 runs completed before the machine stopped them twice (§4) |
 | 2 | tier-2-only reporting in `_evolve`; shared per-size quota helper; `REFINE_DEFAULT["evolve"]`; EV2 test; withdraw G5 in `DISCOVERY_V2_PLAN.md` | M | 1 | **done** — EV2 and EV5 both measured; see §3.2.1. **Reopened once**: the deadline this step added had no refit *order* behind it and lost a first-ranked candidate (§3.2.1, fourth bullet); fixed and re-gated |
 | 3 | structural parameter inheritance, two-stage evaluation, best-wins cache; sweep `WARM_ACCEPT_FACTOR`; EV3 | L | 2 | **done** — EV3 passes both halves (§4); §3.3.1 records the polish budget that decided it, and the two readings that nearly got it wrong |
-| 4 | bounded selection pool, scaled tournament, islands with shared cache; EV4 | M | 3 | **done on the frozen landscape, EV1/EV4 re-measurement in flight** — `_breeding_pool`: 120/120 against 87/120 (§3.4.1), and its *width* then measured down to zero, so what ships is the Pareto front alone (`BREEDING_EXTRA`, §3.4.3: 65/120 against 7/120 at an unsaturated budget). **Islands were built and removed** (§3.4.4): indistinguishable at two, significantly worse at four, far worse with migration off. The scaled tournament stays unmotivated once the pool is bounded. EV4's first clause still **fails** and is recorded rather than reworded (§4) |
+| 4 | bounded selection pool, scaled tournament, islands with shared cache; EV4 | M | 3 | **done, EV4 open on two clauses and saying so** — `_breeding_pool`: 120/120 against 87/120 (§3.4.1), and its *width* then measured down to zero, so what ships is the Pareto front alone (`BREEDING_EXTRA`, §3.4.3: 65/120 against 7/120 at an unsaturated budget). **Islands were built and removed** (§3.4.4): indistinguishable at two, significantly worse at four, far worse with migration off. The scaled tournament stays unmotivated once the pool is bounded. EV4's clause 1 fails for every arm and **clause 2 now fails for the shipped one**, both recorded rather than reworded; clause 3 passes with EV1 at 5/9, 5/9, 3/9 against an interleaved control's 4/9, 3/9, 2/9 (§4) |
 | 5 | adaptive parsimony in selection only; mutation-weight sweep | M | 4 | planned |
 | 6 | docs: this file marked implemented with its corrections, `CLAUDE.md` "Start here" entry 10, `benchmarks/README.md`, `DISCOVERY_V2_PLAN.md` §4 G5 withdrawal note | S | 5 | planned |
 

@@ -1,0 +1,21 @@
+EV4 diversity: three-block Maxwell-Wagner  p(R1,C1)-p(R2,C2)-p(R3,C3)
+pool R,C,L,CPE, 3 seeds, 600 s each, population 40, generation cap 1000, arms interleaved seed by seed
+
+arm        seed  gens   fits  evaluated         hit rate         pool            P(best)    min
+-----------------------------------------------------------------------------------------------
+unbounded     0   119   2430      2,430       43% -> 53%     32->2104   0.0132 -> 0.0017   12.5
+bounded       0   192   1631      1,631       64% -> 89%       32->47   0.0652 -> 0.0625   12.2
+front         0   502   1174      1,174       94% -> 94%        5->10   0.4180 -> 0.2914   12.7
+unbounded     1   111   2430      2,430       41% -> 50%     29->2135   0.0143 -> 0.0017   13.0
+bounded       1   222   1460      1,460       68% -> 94%       29->46   0.0655 -> 0.0651   11.4
+front         1   432   1058      1,058       91% -> 94%        5->10   0.3425 -> 0.2848   11.5
+unbounded     2   121   2560      2,560       41% -> 52%     25->2265   0.0142 -> 0.0016   12.4
+bounded       2   219   1602      1,602       65% -> 92%       25->47   0.0656 -> 0.0629   11.8
+front         2   504    886        886       92% -> 98%        5->11   0.3685 -> 0.2487   11.4
+
+unbounded  topologies evaluated per seed: [2430, 2430, 2560]  (2 distinct values across 3 seeds)
+bounded    topologies evaluated per seed: [1631, 1460, 1602]  (3 distinct values across 3 seeds)
+front      topologies evaluated per seed: [1174, 1058, 886]  (3 distinct values across 3 seeds)
+
+EV4 clause 1 asks whether the hit rate RISES across a run; clause 2 whether P(best) FALLS.
+Evaluated counts that stop varying with the seed would say the search closed one neighbourhood and stopped exploring.

@@ -2214,6 +2214,37 @@ above it now, and it demoted the two-island reading from 77-against-65 to p = 0.
   120 seeds the two rungs are 146 and 148.
 * *"Two islands beat one pool."* 77/120 against 65/120 at 120 seeds; p = 0.216 at 480.
 
+### The gates, and the one that got worse
+
+**EV5 passes.** `mode="exhaustive"` and `mode="auto"` produce a **byte-identical 487,364-byte**
+fingerprint across the change -- `diff` returns nothing at all. Run both sides with the *same*
+copy of the probe: the first attempt diffed on the header line alone, because the "before" side
+had used the probe as it stood at HEAD, which did not yet echo the genetic-path parameters. That
+is a difference in the instrument and it would have had to be explained away in prose; copying
+the current probe into the `git worktree` and re-running is a few minutes and leaves nothing to
+explain.
+
+**EV1 does not regress, measured against a same-day interleaved control** —
+`evolve-gate --breeding-extra 40,0`, three references x seeds 0-2, 600 s each. The shipped rule
+reaches 5/9 reported, 5/9 on the front, 3/9 recommended against the previous width's 4/9, 3/9,
+2/9, and clears EV1's floors of 1/9, 1/9, 0/9. It does that while fitting a third fewer distinct
+topologies (1,115 against 1,675 on the reference that separates them) and running **536
+generations against 260** in the same wall clock -- both figures from that run rather than
+borrowed from EV4's. Nine runs cannot make 4/9 against 5/9
+significant; what EV1 licenses is *no regression*, which is how its bar is written. Do not read
+this table against the 6/9 in section 25 -- that one was taken at the 30-generation cap with no
+control, and says so.
+
+**EV4 fails a second clause, and the step ships saying so.** Clause 2 -- P(best) does not fall --
+passed for the front-plus-forty rule (0.0654 -> 0.0635) and **fails for the front alone**
+(0.3763 -> 0.2750, a 1.37x fall). The mechanism section 1.2 named is absent: that is an archive
+growing without bound, which the unbounded arm still shows at 8.3x with N reaching 2,104, while
+the front's N goes 5 -> 10 as it acquires one more complexity level -- and it falls from a level
+4-6x higher than the arm that passes. Clause 1 fails for all three arms; the front's +3.0 points
+is the smallest rise measured and is not good news, because its hit rate is **92% in the first
+third** and has nowhere to rise to. The clauses are recorded as failed with those mechanisms
+beside them and are not reworded, for the reason section 25 gives.
+
 ### One unrelated flake fixed on the way
 
 `tests/test_web_job.py`'s gate-O1 test compares two readings of one finished job with
