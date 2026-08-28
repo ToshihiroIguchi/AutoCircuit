@@ -59,6 +59,9 @@ wrongly *declared* lost on the strength of a stale log line — the arena that
 python analyse.py land_rclcpe6.json                       # KPI-0: the truth's rank in the arena
 python arms.py land_rclcpe6.json targets_rclcpe6.json `
        --seeds 120 --budget 900 --max-elements 6          # KPI-1/2: the arms, ~10 min
+python arms.py land_rclcpe6.json targets_rclcpe6.json `
+       --seeds 120 --budget 150 --max-elements 6 `
+       --arms ga_bounded,ga_tight10,ga_tight3,ga_front    # how wide the breeding pool should be
 python param_opt.py land_rcl6.json --cases 12 --seeds 2   # KPI-3: optimisers at equal NFE
 python profile_eval.py                                    # KPI-4: where one evaluation's time goes
 python kpi0_sample.py --pool R,C,L,CPE --per-size 400     # KPI-0 by sampling — see the warning below
@@ -72,7 +75,7 @@ measurement. `evolve_probe.py` can see that the truth's class was visited and no
 this one wraps `_shortlist_candidates` and `_refine` and says which of them lost it — the
 answer was neither, and §4.6.1 has it.
 
-## Three traps this directory walked into, so the next person does not
+## Five traps this directory walked into, so the next person does not
 
 **A sample is not a rank.** `kpi0_sample.py` on 1,176 topologies reported that nothing
 out-scores the truth. Sixteen things do; they are 0.09% of the level, so a 400-point sample
@@ -83,6 +86,20 @@ comes from the full table.
 target set over-counted the CPE arena's class by **7.6x** (136 against 18), and it changed a
 verdict: MAP-Elites read 118/120 on the proxy and 120/120 on the verified set. `targets.py` is
 the response test and it is the one that decides.
+
+**A budget everything clears is a budget that ranks nothing.** The pool-width ladder
+(`ga_bounded` through `ga_front`) and every islands arm reach 120/120 at the 900-fit budget the
+first round used, so only the median fits separates them — and read that way, islands beat the
+incumbent. They lose to a single pool of their own width, which only shows once the budget drops
+to 150 and hit rate goes back on the discriminating axis. Same shape as §4.2 of
+`SEARCH_ALGORITHM_SCREENING.md`, in the other direction: check that the arena still has
+somewhere to fail before believing the ranking it gives.
+
+**Two paired tests, and the fits one cannot see a hit-rate difference.** The table headed
+"Paired against ..." compares fits-to-hit and drops every seed either arm missed — which at an
+unsaturated budget is most of the signal. The McNemar table above it is the one that tests the
+hit rates. Adding it changed a verdict: two islands read 77/120 against 65/120, which at 480
+seeds is 302/480 against 282/480 with p = 0.216.
 
 **An empty result looks like a pass.** `evolve_probe.py` reported "class members visited: 0" for
 a whole session because it fed `Circuit.canonical_form()` — which is `[p(C,R)-p(C,R)-p(C,R)]`, a

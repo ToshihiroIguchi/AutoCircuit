@@ -275,7 +275,7 @@ static-site Web UI running the same core via WASM (Pyodide).
 
 10. `docs/EVOLVE_SEARCH_PLAN.md` — the genetic search, which is what `mode="auto"` falls back to
    above five elements and the only part of discovery that had **no quality gate at all**.
-   **Steps 1–3 of 6 implemented, step 4's first half with them; steps 5–6 planned.** Its §1 is four measurements saying the
+   **Steps 1–4 of 6 implemented; steps 5–6 planned.** Its §1 is four measurements saying the
    fallback is worse than merely unmeasured — a six-element truth never evaluated in 349 s, an
    archive that is never retired so selection pressure falls 8.2× over 12 generations, and
    **82% of the reported Pareto rows carrying screening-grade numbers** in violation of the rule
@@ -300,7 +300,18 @@ static-site Web UI running the same core via WASM (Pyodide).
    cheapest to re-learn the hard way: step 2's refit deadline had **no order behind it**, so the
    report walked past a candidate ranked *1 of 270* and published forty others. The quota says
    which candidates deserve a refit and says nothing about the sequence; a tier that can stop
-   early needs both.
+   early needs both. **§3.4.3 and §3.4.4 are step 4, and they are the clearest case in this repo
+   of a saturated arena ranking nothing.** Step 4 bounded the set the search breeds from at
+   `population` — a width nobody had measured, because it was the number already in the argument
+   list — and then split it across islands. A ladder run down to zero says the answer is not a
+   width at all: `pool_bound=0` and `pool_bound=1` are the *same arm on every seed*, since the
+   best-scoring candidate cannot be dominated, so what ships is the Pareto front by itself
+   (`BREEDING_EXTRA`, 65/120 against the old rule's 7/120 at an unsaturated budget). The islands
+   were **built and then removed**: at the 900-fit budget the round had been using, all eleven
+   arms score 120/120 and the islands appear to win — and at 150 fits they lose to a single pool
+   of their own width. Two islands survived to 480 seeds before McNemar demoted them (p = 0.216).
+   Three separate readings were withdrawn rather than softened, and the paired test that could
+   not see a hit-rate difference at all was fixed rather than trusted.
 
 11. `docs/KK_RESONANCE_PLAN.md` — the Lin-KK test and the resonance its basis cannot express.
    **Implemented; gates K1–K4 measured.** Its §2 is the one to read, and it is the whole point

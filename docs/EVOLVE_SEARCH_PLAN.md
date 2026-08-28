@@ -383,10 +383,12 @@ For §1.2 and §1.3, in that order of importance.
   `TOURNAMENT_FRACTION` has no measurement behind it. [measured] On the frozen landscape the
   bounded arm's pressure goes 0.103 → 0.065 over a run where the incumbent's goes 0.103 → 0.003:
   the 8.2× collapse §1.2 measured becomes 1.6×. Left alone unless something measures a need.
-- **Islands. [not done]** `populations: int`, each with its own RNG stream derived from `seed`,
-  exchanging a fraction of members per generation. Note one thing this port gets for free that
-  PySR does not: the evaluator cache is shared across islands, so two islands converging on the
-  same topology cost one fit, not two.
+- **Islands. [built, measured, removed]** `islands: int`, each with its own RNG stream derived
+  from `seed`, exchanging a fraction of members per generation. It was implemented and it does
+  not ship: §3.4.4 is the arena round that removed it, and §3.4.2 is kept as the record of what
+  was built, because four of its decisions are the ones anyone rebuilding this would have to
+  make again. The short version is that islands' apparent win was the narrowing they came
+  wrapped in, and narrowing one pool directly is both simpler and better.
 
 Measured target: cache-hit rate per generation stops rising, and EV1 does not regress. Both, not
 either.
@@ -418,6 +420,193 @@ MAP-Elites archive at 418 — and what all three share is not their operators bu
 the set they breed from. This is the smallest of the three, so it goes first; NSGA-II is worth
 its selection rewrite only if this is not enough. **ALPS age layering must not be added**: on top
 of MAP-Elites it measured 24/30, the one addition in the round that made things worse.
+
+#### 3.4.2 What the islands needed that this plan did not specify
+
+**This describes code that was built and then removed (§3.4.4).** It is kept for two reasons:
+the arm that recorded the rejection still runs, in `benchmarks/screening_round/arms.py`, and
+these four decisions are not obvious — anyone who reaches for islands again will have to make
+them, and getting the first one wrong makes the comparison meaningless rather than merely wrong.
+
+Four decisions, none of them in the sketch, all of them load-bearing.
+
+* **`population` is split across the islands, not multiplied by them.** PySR names a
+  `population_size` *per* population; here `population` stays the size of a **generation**, so
+  four islands are four pools of ten rather than four pools of forty. That is what makes the
+  arms comparable at all: a generation costs the same number of fits either way, so a
+  difference in what the search finds is a difference in how it breeds and not in how much it
+  was given. `_island_sizes` is the split and it raises rather than rounds to zero when there
+  are fewer members than islands.
+* **Island 0 keeps the single-population random stream.** `_island_streams` returns
+  `default_rng(seed)` itself for the first island and derived streams for the rest, so
+  `islands=1` is the shipped search bit for bit rather than merely equivalent-looking. Spawning
+  all of them would have been just as reproducible and would have moved every result of the
+  default configuration — the drift EV5 exists to catch. [measured] EV5's probe, extended to
+  fingerprint `mode="evolve"` (five generations, population 10, `max_elements=4`, three
+  references), is **byte-identical** across this change: 181,321 bytes before and after.
+* **Migration is transient, and it is the neighbour's best.** Island *i* breeds from its own
+  bounded pool *plus* the best `round(fraction * size)` members of island *i-1* — for that
+  generation only. Permanent adoption is the obvious alternative and it defeats the point: after
+  one lap of the ring every island holds every other island's best, which is the single shared
+  pool this step exists to split, reached more slowly. Nothing is lost by keeping the archives
+  apart, because the *report* is drawn from their union and the evaluator's cache is shared, so
+  a topology two islands both reach is fitted once.
+* **A positive fraction always moves at least one member.** `round(0.1 * 5)` is 0, so an island
+  sweep at a fixed fraction would silently turn migration *off* at the higher island counts and
+  neither result would say what it had measured. The floor is `max(1, ...)`, and `fraction = 0`
+  stays available as the fully isolated arm.
+
+One thing the islands fixed on the way past, which is a defect in the bounded pool rather than
+in them: **a topology now has one fitness**. The evaluator's cache is best-wins, so a second
+island arriving at a known topology with a better warm start improves the fit and holds the
+improved candidate, while the first island's archive still holds the object it was handed. Each
+island's archive is therefore resolved through the cache (`_Evaluator.best_known`) before it
+breeds. A topology is a genotype and its fit is that genotype's evaluation; one genotype with two
+fitnesses is not a search, and nothing in a report could have shown it.
+
+#### 3.4.3 How wide the bounded pool should be, measured all the way down
+
+Neither §3.4.1 nor §3.4.2 asked how wide the pool should be. `_breeding_pool` was given
+`population` because `population` was the number already in the argument list, and the islands
+inherited that width without questioning it. The ladder that asks the question --
+`ga_tight20`, `ga_tight10`, `ga_tight5`, `ga_tight3`, `ga_tight1`, `ga_front` in
+`benchmarks/screening_round/arms.py` -- runs down to a pool of **one, and then to none**, on
+purpose: a bound that keeps improving all the way there is not a well-chosen neighbourhood, it is
+hill climbing wearing a population, and the two are told apart only by measuring the end of the
+ladder rather than a point on it.
+
+Three runs, all on the 21,057-topology `R,C,L,CPE` arena with 18 verified targets (0.085%), 120
+seeds, `population` 40, AICc. Raw output in
+`benchmarks/screening_round/results_pool_bound.txt`.
+
+**[measured] At 900 fits the arena is saturated and ranks nothing.** All eleven arms reach
+120/120 [0.97,1.00], so only the median fits separates them: `ga_bounded` 308, tight20 240,
+tight10 194, tight5 168, tight3 146, tight1 148, and every islands configuration 223-246 -- 2,
+4 and 8 islands alike, with migration 0.5 / 0.75 / 1.0 giving 239 / 246 / 243, which is to say
+the migration rate changes nothing measurable. **A round that had stopped here would have
+reported that islands beat the incumbent**: 239 against 308, paired 88 faster / 32 slower,
+p = 0.0000. That is true and it is not the finding, because a *single* pool of the same width
+beats both at 194. §4.2 of `SEARCH_ALGORITHM_SCREENING.md` again, in the other direction: an
+arena everything passes ranks nothing, and the win islands appeared to have was the narrowing
+they came wrapped in.
+
+**[measured] Unsaturated, tightening the pool multiplies the hit rate 9.3x and costs nothing.**
+Budgets 150 and 250 put hit rate back on the discriminating axis:
+
+| arm | pool width | hit @150 | hit @250 | pressure, first third -> last |
+| --- | --- | --- | --- | --- |
+| `ga_bounded` (shipped) | front + 40 | 7/120 [0.03,0.12] | 38/120 [0.24,0.40] | 0.103 -> 0.068 |
+| `ga_tight20` | front + 20 | 24/120 [0.14,0.28] | 66/120 [0.46,0.64] | 0.137 -> 0.119 |
+| `ga_tight10` | front + 10 | 30/120 [0.18,0.33] | 93/120 [0.69,0.84] | 0.240 -> 0.186 |
+| `ga_tight5` | front + 5 | 47/120 [0.31,0.48] | 110/120 [0.85,0.95] | 0.365 -> 0.266 |
+| `ga_tight3` | front + 3 | 64/120 [0.44,0.62] | 110/120 [0.85,0.95] | 0.444 -> 0.318 |
+| `ga_tight1` | front + 1 | 65/120 [0.45,0.63] | 112/120 [0.87,0.97] | 0.539 -> 0.386 |
+| `islands4_m50` | 4 x (front + 10) | 18/120 [0.10,0.22] | 68/120 [0.48,0.65] | 0.259 -> 0.204 |
+
+The intervals at the two ends do not touch at either budget. Two readings of that table, and the
+second is the one that matters:
+
+* Tightening does **not** trade reliability for speed, which is what a bound is usually suspected
+  of. It buys both at once, and the reason is in the last column: the wider the pool, the more of
+  it is made of candidates that are dominated, so the selection pressure that §1.2 measured
+  collapsing is being diluted rather than spent.
+* **The islands lose to the single pool of their own width.** `islands4_m50` is four pools of ten
+  and reaches 18/120 where `ga_tight10` reaches 30/120; at 250 it is 68/120 against 93/120. Their
+  entire apparent advantage at budget 900 was that splitting a pool of 40 four ways makes each
+  neighbourhood narrower, and narrowing the pool directly is both simpler and better.
+
+**[measured] The end of the ladder is not a bound at all.** `ga_front` (`pool_bound=0`, the
+Pareto front and nothing else) and `ga_tight1` are **the same arm on every seed**: 65 tied at
+budget 150 and 112 tied at 250, identical medians (113 and 143), identical best AICc (-1676.14
+and -1680.82), identical size histograms and identical pressure. That is an identity rather than
+a coincidence -- the best-scoring candidate is by definition non-dominated, so it is already on
+the front, and "the front plus the best one" adds nothing. The ladder therefore terminates at a
+rule with **no width parameter in it**: breed from the Pareto front. Adding anything back is
+measurably worse (front+3 is 64/120 and front+5 is 47/120 against front's 65/120 at budget 150),
+and the front is naturally bounded at roughly one member per complexity level, which is why the
+pressure stops collapsing without anyone choosing a number.
+
+Two readings this measurement **withdrew**, kept here because both looked settled at the time:
+
+* *"Islands help."* Withdrawn. See the two paragraphs above; the saturated arena said yes and was
+  measuring the wrong thing.
+* *"The ladder turns around at a pool of one."* Withdrawn. A 3-seed smoke run had tight3 at 131
+  fits against tight1's 222 and that shape is exactly what a too-narrow pool would look like. At
+  120 seeds they are 146 and 148 -- indistinguishable. Three seeds cannot resolve a median, and
+  the smoke reading should never have been carried as one.
+
+Two facts about running this round that cost an evening each:
+
+* **`pool_bound or population` folds a bound of zero into the default.** The arm that decided the
+  whole question is the one whose bound is 0, and it silently ran at 40 until the `is None` check
+  replaced it. It produced a plausible number rather than an error.
+* **A cache hit costs no budget and does cost wall time.** `Table.evaluate` returns a known
+  topology without incrementing the fit counter, so a tighter pool re-proposes what it already
+  knows, burns generations for free and takes *far longer in wall clock while spending fewer
+  fits*. A run that looks hung at the tight end of the ladder is not hung. Budget in fits is the
+  right unit for the comparison and the wrong unit for the ETA.
+
+#### 3.4.4 The islands, measured out
+
+§3.4.3 changed the rule the islands were written against, which meant the comparison they had
+been losing was no longer the comparison to make: the ladder's winner breeds from the Pareto
+front alone, and an islands arm still breeding from front-plus-ten would lose for the reason the
+ladder had already measured rather than for anything to do with islands. So `arm_islands` was
+given the same `pool_bound` knob and re-run under the front-only rule. **Removing an
+implementation on the strength of a comparison run under the losing configuration is not a
+measurement, it is a conclusion arriving early.**
+
+**[measured] Islands never help, and four of them hurt.** 120 seeds, same arena, migration 0.5
+except where noted:
+
+| arm | hit @150 | hit @250 |
+| --- | --- | --- |
+| `ga_front` (one pool, the front) | 65/120 [0.45,0.63] | 112/120 [0.87,0.97] |
+| `islands2_front` | 77/120 [0.55,0.72] | 112/120 [0.87,0.97] |
+| `islands4_front` | 60/120 [0.41,0.59] | 108/120 [0.83,0.94] |
+| `islands4_front_iso` (no migration) | 27/120 [0.16,0.31] | 68/120 [0.48,0.65] |
+
+The isolated arm is the control that says the ring is doing something rather than nothing — cut
+migration and four islands fall to 27/120 — and it is also the clearest statement of the cost:
+four independent narrow searches are much worse than one. Two islands at budget 150 is the only
+cell that looks like a win, and **at 120 seeds that question cannot be answered**, so the
+response was more seeds rather than a softer reading of the bar (§3.3.1 records the last time
+this project nearly got that backwards).
+
+**[measured] At 480 seeds the two-island win is noise and the four-island loss is real.** The
+paired hit/miss test is McNemar, exact, on the discordant seeds — which is also a gap this round
+found in the harness: the fits table drops every seed where the two arms disagree about hitting
+at all, which at an unsaturated budget is the entire signal, so a hit-rate difference had never
+been tested by anything.
+
+| arm | hit @150 | both hit | only `ga_front` | only this arm | McNemar p |
+| --- | --- | --- | --- | --- | --- |
+| `ga_front` | 282/480 [0.54,0.63] | — | — | — | — |
+| `islands2_front` | 302/480 [0.59,0.67] | 174 | 108 | 128 | **0.216** |
+| `islands4_front` | 233/480 [0.44,0.53] | 136 | 146 | 97 | **0.0020** |
+
+Neither arm differs in fits-to-hit (p = 0.45 and 0.55). So: two islands is indistinguishable
+from one pool, four islands is significantly worse, and isolated islands are far worse. **The
+implementation is removed** — `islands`, `MIGRATION_FRACTION`, `_island_sizes`,
+`_island_streams`, `_migrants`, `_with_migrants`, the `--islands` CLI flag and the five tests
+that pinned them. `arm_islands` stays in the screening round, carrying its own copies of the
+three helpers, for the same reason `arm_nsga2` and `arm_map_elites` do: an arm that recorded a
+rejection has to stay runnable, or the rejection is a claim rather than a measurement.
+
+One thing the islands paid for on the way out. The `--islands` flag should never have been
+offered at all: CLAUDE.md's rule is that a search internal the target user cannot set correctly
+is not a knob, and "how many sub-populations" is exactly that. `BREEDING_EXTRA` is the shape the
+replacement takes — a module constant with its measurement in the docstring, reachable by the
+benchmarks that measured it and by nothing else.
+
+Three readings this step withdrew, all of them after they had looked settled:
+
+* *"Islands help."* Measured at a saturated budget, where they beat the incumbent 239 fits to
+  308 and lost to a single pool of their own width at 194.
+* *"The ladder turns around at a pool of one."* A 3-seed smoke run; at 120 seeds the two rungs
+  are 146 and 148.
+* *"Two islands are better than one pool."* 77/120 against 65/120 at 120 seeds; 302/480 against
+  282/480 with McNemar p = 0.216 at 480.
 
 ### 3.5 Step 5 — adaptive parsimony, and the mutation weights
 
@@ -661,12 +850,21 @@ Last, because they are tuning and the steps above are structure.
   counts also still vary with the seed, so nothing has closed one neighbourhood and stopped.
 
   **So this step ships with EV4 open, and says so.** The clause is not withdrawn and not
-  reinterpreted: it is recorded as failed, with the two measurements above beside it, and the
-  remedies are already in this plan — islands (step 4's second half) and adaptive parsimony in
-  selection (step 5), both of which attack exactly the concentration that produces the number.
-  What a future session must not do is rewrite the clause to something the build already does;
-  what it may do is measure whether a *cheap* re-proposal is a cost at all, which this run
-  suggests and does not establish (541 fits in 5.5 min against 692 in 7.1).
+  reinterpreted: it is recorded as failed, with the two measurements above beside it. One of the
+  two remedies this paragraph named has since been measured and removed (islands, §3.4.4); the
+  other is step 5. What a future session must not do is rewrite the clause to something the build
+  already does; what it may do is measure whether a *cheap* re-proposal is a cost at all, which
+  this run suggests and does not establish (541 fits in 5.5 min against 692 in 7.1).
+
+  **[in flight] EV4 is being re-measured for the front-only pool of §3.4.3**, three arms
+  (`unbounded`, `bounded`, `front`) interleaved seed by seed, and so is EV1's ratchet
+  (`evolve-gate --breeding-extra 40,0`). **A first attempt at both was discarded rather than
+  reported**, for the reason the paragraph above this one had already given: all 27 runs stopped
+  at the 30-generation cap well inside their 600 s, so the arms shared a *generation count* and
+  not a budget — and since the arms differ in what a generation costs, the shipped arm looked
+  cheaper (2.5 min against 3.9, 298 topologies against 566) only because it had been handed less
+  to do. Both benchmarks now default `--generations` to 1000 so that `--time-limit` is what runs
+  out. Nothing from the discarded run is quoted anywhere as a result.
   (EV5 is stated above, next to the baseline it corrects.) Its full form: `mode="exhaustive"`
   and `mode="auto"` below the fallback threshold produce identical results for a fixed seed
   before and after every step; the full test suite stays green; `npm run check` is untouched
@@ -679,7 +877,7 @@ Last, because they are tuning and the steps above are structure.
 | 1 | 6–7 element references + `evolve-gate` benchmark mode; run it; write EV1's bar from the result | M | — | **done, baseline partial** — mode and references landed and measured; 4 of 9 runs completed before the machine stopped them twice (§4) |
 | 2 | tier-2-only reporting in `_evolve`; shared per-size quota helper; `REFINE_DEFAULT["evolve"]`; EV2 test; withdraw G5 in `DISCOVERY_V2_PLAN.md` | M | 1 | **done** — EV2 and EV5 both measured; see §3.2.1. **Reopened once**: the deadline this step added had no refit *order* behind it and lost a first-ranked candidate (§3.2.1, fourth bullet); fixed and re-gated |
 | 3 | structural parameter inheritance, two-stage evaluation, best-wins cache; sweep `WARM_ACCEPT_FACTOR`; EV3 | L | 2 | **done** — EV3 passes both halves (§4); §3.3.1 records the polish budget that decided it, and the two readings that nearly got it wrong |
-| 4 | bounded selection pool, scaled tournament, islands with shared cache; EV4 | M | 3 | **first half done, EV4 open** — `_breeding_pool`: 120/120 against 87/120 on the frozen landscape (§3.4.1) and EV1 1/9 → 6/9, but EV4's first clause **fails** and is recorded rather than reworded (§4). The scaled tournament is unmotivated once the pool is bounded; islands are not done and are now the named remedy |
+| 4 | bounded selection pool, scaled tournament, islands with shared cache; EV4 | M | 3 | **done on the frozen landscape, EV1/EV4 re-measurement in flight** — `_breeding_pool`: 120/120 against 87/120 (§3.4.1), and its *width* then measured down to zero, so what ships is the Pareto front alone (`BREEDING_EXTRA`, §3.4.3: 65/120 against 7/120 at an unsaturated budget). **Islands were built and removed** (§3.4.4): indistinguishable at two, significantly worse at four, far worse with migration off. The scaled tournament stays unmotivated once the pool is bounded. EV4's first clause still **fails** and is recorded rather than reworded (§4) |
 | 5 | adaptive parsimony in selection only; mutation-weight sweep | M | 4 | planned |
 | 6 | docs: this file marked implemented with its corrections, `CLAUDE.md` "Start here" entry 10, `benchmarks/README.md`, `DISCOVERY_V2_PLAN.md` §4 G5 withdrawal note | S | 5 | planned |
 

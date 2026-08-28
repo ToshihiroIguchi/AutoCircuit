@@ -2140,3 +2140,84 @@ The Fit screen still shows no report of either kind; `fit --objective` covers mo
 command line. The multi-condition fit -- several sweeps at different temperature or bias, fitted
 to one circuit -- remains the only instrument that could *break* a degeneracy, and it belongs to
 `interpret` alone (§6).
+
+## 29. The breeding pool loses its width, and the islands lose their case
+
+`docs/EVOLVE_SEARCH_PLAN.md` §3.4.3 and §3.4.4. Section 25 above shipped `_breeding_pool` as
+*the Pareto front plus the best `population` by score*, and §3.4.2 then split that pool across
+islands. Neither had measured the one number both were built on: how wide the pool should be.
+`population` was the width because `population` was the argument already in scope.
+
+### What ships
+
+**The front, and nothing added to it.** `BREEDING_EXTRA = 0`, a module constant with its
+measurement in its docstring. It stays a parameter of `_breeding_pool` (so the two benchmarks
+that measured it can re-walk the ladder) and it is deliberately not a parameter of `discover()`:
+a search internal the target user cannot set correctly is not a knob, which is also why the
+`--islands` CLI flag that had been added should never have been offered.
+
+**The islands are gone** -- `islands`, `MIGRATION_FRACTION`, `_island_sizes`, `_island_streams`,
+`_migrants`, `_with_migrants`, the CLI flag and five tests. `arm_islands` stays in
+`benchmarks/screening_round/arms.py` with its own copies of the three helpers, for the same
+reason `arm_nsga2` and `arm_map_elites` are there: an arm that recorded a rejection has to stay
+runnable, or the rejection is a claim and not a measurement.
+
+### The numbers, on the 21,057-topology frozen arena
+
+[measured] 120 seeds, `population` 40, AICc; raw output in
+`benchmarks/screening_round/results_pool_bound.txt`.
+
+| breeding pool | hit @150 fits | hit @250 fits |
+|---|---|---|
+| front + 40 (what section 25 shipped) | 7/120 [0.03,0.12] | 38/120 [0.24,0.40] |
+| front + 10 | 30/120 | 93/120 |
+| front + 3 | 64/120 | 110/120 |
+| **front alone** | **65/120 [0.45,0.63]** | **112/120 [0.87,0.97]** |
+| 4 islands x (front + 10) | 18/120 [0.10,0.22] | 68/120 [0.48,0.65] |
+
+`pool_bound = 0` and `pool_bound = 1` are **the same arm on every seed** -- identical medians,
+identical best AICc, identical histograms. That is an identity, not a coincidence: the
+best-scoring candidate cannot be dominated, so it is already on the front. The ladder therefore
+ends at a rule with no width in it.
+
+Islands under that same rule: two islands 302/480 against one pool's 282/480, McNemar p = 0.216
+-- indistinguishable; four islands 233/480, p = 0.0020 -- worse; four islands with migration
+switched off 27/120 against 65/120 -- far worse.
+
+### Four things not to re-derive
+
+**A saturated arena ranks nothing, and it looks like a result.** At the 900-fit budget section 25
+used, all eleven arms reach 120/120, so only median fits separates them -- and read that way the
+islands beat the incumbent, 239 to 308, p = 0.0000. They lose to a single pool of their own width
+at 194. Same shape as `SEARCH_ALGORITHM_SCREENING.md` §4.2 and the opposite direction: check that
+the arena still has somewhere to fail before believing a ranking from it.
+
+**A cache hit costs no budget and does cost wall time.** `Table.evaluate` returns a known
+topology without incrementing the fit counter, so a tighter pool re-proposes what it knows,
+burns generations for free, and runs *far longer in wall clock while spending fewer fits*. A
+tight arm that looks hung is not. Fits are the right unit for the comparison and the wrong unit
+for an ETA.
+
+**`pool_bound or population` folded the deciding arm into the default.** The arm that settled the
+question is the one whose bound is 0, and `or` silently ran it at 40. It produced a plausible
+number rather than an error. `is None`.
+
+**The paired table in `arms.py` could not test a hit rate.** It compares fits-to-hit and drops
+every seed either arm missed, which at an unsaturated budget is the whole signal, so the hit-rate
+column had never been tested by anything. An exact McNemar on the discordant seeds is printed
+above it now, and it demoted the two-island reading from 77-against-65 to p = 0.216.
+
+### Three readings withdrawn, with the numbers that withdrew them
+
+* *"Islands help."* Measured at a saturated budget; they lose to one pool of their own width.
+* *"The ladder turns around at a pool of one."* A 3-seed smoke run said 131 fits against 222; at
+  120 seeds the two rungs are 146 and 148.
+* *"Two islands beat one pool."* 77/120 against 65/120 at 120 seeds; p = 0.216 at 480.
+
+### One unrelated flake fixed on the way
+
+`tests/test_web_job.py`'s gate-O1 test compares two readings of one finished job with
+`_without_clocks`, which dropped every `elapsed_s` key and missed the same clock spelled out in
+the rendered summary ("Evaluated 6 distinct topologies in 1.2 s"). The two readings disagree
+whenever they land either side of a tenth of a second. The string is scrubbed in the test, not in
+the renderer -- a report that tells the user how long the search took is right to.

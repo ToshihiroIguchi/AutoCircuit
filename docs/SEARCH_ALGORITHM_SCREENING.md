@@ -375,7 +375,7 @@ is by change size, not by median, because the medians are close and the risk is 
 
 | candidate | evidence |
 |---|---|
-| **bounding the breeding pool** (`EVOLVE_SEARCH_PLAN.md` step 4's first half; the minimal reading of survey (e)) — **adopted; it is `discover._breeding_pool`** | 120/120 [0.97,1.00], median 308 fits against 451. A few lines around `_next_generation`'s caller. Re-measured against the shipped rule (the arm now calls it rather than restating it) and unchanged: 120/120, median 308 |
+| **bounding the breeding pool** (`EVOLVE_SEARCH_PLAN.md` step 4's first half; the minimal reading of survey (e)) — **adopted; it is `discover._breeding_pool`** | 120/120 [0.97,1.00], median 308 fits against 451. A few lines around `_next_generation`'s caller. Re-measured against the shipped rule (the arm now calls it rather than restating it) and unchanged: 120/120, median 308. **Since superseded on its width** — see §5.1 |
 | **(f) NSGA-II** | 120/120 [0.97,1.00], median **256** — the fastest arm measured, for a selection rewrite |
 | **(e) MAP-Elites archive** (without ALPS) | 120/120 [0.97,1.00], median 418 — clears the bar, and is the slowest and largest of the three |
 
@@ -396,6 +396,34 @@ is by change size, not by median, because the medians are close and the risk is 
 | (h) VARPRO | untested here, and the one candidate that attacks the factor §4.6 identifies as binding: seconds per fit |
 | pool staging inside `_evolve` | not a survey entry at all. `descriptors.choose_pool` already stages widening for the exhaustive stage; §4.6 measures the fallback going 0/1 → 2/2 when CPE is out of the pool |
 | the 23–33% spent in per-topology setup (§4.5) | neither kernel nor optimiser, plain Python, and nobody has looked at it |
+
+### 5.1 A later round, on the same instruments: how wide the bound should be
+
+The round above measured *bounded against unbounded* and stopped there. The width it adopted was
+`population`, which was the number already in `_breeding_pool`'s argument list rather than a
+measured one. A later ladder — `ga_tight20`, `ga_tight10`, `ga_tight5`, `ga_tight3`, `ga_tight1`,
+`ga_front`, plus `arm_islands` — ran it down to zero. `docs/EVOLVE_SEARCH_PLAN.md` §3.4.3 and
+§3.4.4 carry the tables; three things belong here, because they are about the instrument rather
+than about the search.
+
+**The 900-fit budget this round used is saturated for every one of those arms.** All eleven reach
+120/120, so the ladder can only be read as median fits, and read that way the islands arms beat
+the incumbent. Drop the budget to 150 and the ranking is different and the reason is visible: the
+islands lose to a single pool of their own width. §4.2 of this document says the cheap arena
+ranked nothing; this says a *saturated* one does the same thing, and the check is the same —
+confirm the arena still has somewhere to fail before believing a ranking it produces.
+
+**The paired table in `arms.py` could not see a hit-rate difference at all.** It compares
+fits-to-hit and drops every seed either arm missed, which at an unsaturated budget is the entire
+signal. An exact McNemar on the discordant seeds is now printed above it, and it changed a
+verdict: two islands read 77/120 against a single pool's 65/120, and at 480 seeds that is
+302/480 against 282/480, p = 0.216. The response to a bar that cannot resolve its own question
+is more seeds.
+
+**A cache hit costs no budget and does cost wall time.** `Table.evaluate` returns a known
+topology without incrementing the fit counter, so the tighter arms re-propose what they already
+know and take far longer in wall clock while spending fewer fits. Budget in fits is the right
+unit for the comparison and the wrong unit for an ETA; a tight arm that looks hung is not.
 
 **What this round cannot decide:**
 
