@@ -23,6 +23,7 @@ import csv
 import io
 import json
 import math
+import re
 from typing import Any
 
 import pytest
@@ -871,12 +872,25 @@ def test_the_browser_can_read_a_reported_circuit_as_internal_structure() -> None
     assert invariant, "nothing marked invariant, so the answer asserts nothing"
 
 
+#: The elapsed time as the rendered summary writes it -- "Evaluated 6 distinct topologies in 1.2 s".
+_RENDERED_CLOCK = re.compile(r" in \d+(?:\.\d+)? s")
+
+
 def _without_clocks(value: Any) -> Any:
-    """A payload with every measured duration dropped, at any depth."""
+    """A payload with every measured duration dropped, at any depth.
+
+    Dropping the ``elapsed_s`` keys is not enough, and the gap was a flake rather than a
+    theory: the *rendered* summary spells the same clock out in its first line, so two readings
+    of one finished job disagree whenever they land either side of a tenth of a second. The
+    string is scrubbed here rather than in the renderer, because a report that tells the user
+    how long the search took is right to.
+    """
     if isinstance(value, dict):
         return {k: _without_clocks(v) for k, v in value.items() if k != "elapsed_s"}
     if isinstance(value, list):
         return [_without_clocks(v) for v in value]
+    if isinstance(value, str):
+        return _RENDERED_CLOCK.sub(" in <clock>", value)
     return value
 
 
