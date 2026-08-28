@@ -85,16 +85,21 @@ limit -- use ``--seeds 1`` and a short ``--time-limit`` for a sanity run.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import itertools
 import math
 import time
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
+from typing import NamedTuple
 
 import numpy as np
 
+from autocircuit.core import discover as discover_module
 from autocircuit.core.circuit import Circuit
 from autocircuit.core.discover import (
+    BREEDING_EXTRA,
+    DEFAULT_CRITERION,
     EQUIVALENCE_RTOL,
     MIN_REFINE_PER_SIZE,
     REFINE_DEFAULT,
@@ -920,8 +925,61 @@ class _ArmTally:
     pareto: int = 0
 
 
+@contextlib.contextmanager
+def _breeding_extra(extra: int) -> Iterator[None]:
+    """Run the block with `_breeding_pool` widened to ``extra`` members past the front.
+
+    The width is deliberately not a parameter of ``discover()`` -- it is a search internal with
+    a measured default (:data:`~autocircuit.core.discover.BREEDING_EXTRA`), and CLAUDE.md's rule
+    is that those are not handed to the user. So the arm wraps the function rather than passing
+    an argument, which is also what `benchmarks/ev4_diversity.py` does and for the same reason:
+    every arm is then the shipped code with one thing changed.
+    """
+    original = discover_module._breeding_pool
+    if extra == BREEDING_EXTRA:
+        yield
+        return
+
+    def widened(alive, _extra=BREEDING_EXTRA, criterion=DEFAULT_CRITERION):  # type: ignore[no-untyped-def]
+        return original(alive, extra, criterion)
+
+    discover_module._breeding_pool = widened  # type: ignore[assignment]
+    try:
+        yield
+    finally:
+        discover_module._breeding_pool = original  # type: ignore[assignment]
+
+
+class _Arm(NamedTuple):
+    """One arm of ``evolve-gate``: a warm-start factor and a breeding-pool width.
+
+    Two axes rather than one because both have a gate that asks a two-sided question, and the
+    interleaving that makes either readable is the same. They are never crossed: a sweep moves
+    one axis and holds the other at the library default, so an arm's label names the one thing
+    that differs from what ships.
+    """
+
+    warm: float = WARM_ACCEPT_FACTOR
+    extra: int = BREEDING_EXTRA
+    #: Which field the sweep is moving. Naming it is not decoration: the control arm of a
+    #: breeding-extra sweep sits *at* the library default, so a label that reports "whichever
+    #: field differs from what ships" reports the wrong axis for exactly the arm that matters.
+    axis: str = "warm"
+
+    @property
+    def label(self) -> str:
+        if self.axis == "extra":
+            return f"extra={self.extra}"
+        return f"warm={self.warm:g}"
+
+
 def report_evolve_gate(
-    seeds: int, time_limit: float, seed_start: int = 0, warm: Sequence[float] = ()
+    seeds: int,
+    time_limit: float,
+    seed_start: int = 0,
+    warm: Sequence[float] = (),
+    extra: Sequence[int] = (),
+    generations: int = 1000,
 ) -> None:
     """Baseline for gate EV1: does ``mode="evolve"`` recover a 6-7 element truth at all?
 
@@ -964,13 +1022,26 @@ def report_evolve_gate(
         "the run. 'tier1 rows' counts Pareto rows fitted at the reduced screening budget rather\n"
         "than the full refit -- the defect section 1.4 of the plan found in the report itself."
     )
-    arms = tuple(warm) or (WARM_ACCEPT_FACTOR,)
+    if warm and extra:
+        raise SystemExit("sweep one axis at a time: --warm or --breeding-extra, not both")
+    arms = tuple(_Arm(warm=value, axis="warm") for value in warm) or tuple(
+        _Arm(extra=value, axis="extra") for value in extra
+    ) or (_Arm(),)
     if len(arms) > 1:
         print()
-        print("Sweeping warm_accept: " + ", ".join(f"{arm:g}" for arm in arms) + ".")
-        print(
-            "Arm 0 is the control -- inheritance off, i.e. the search as it was before step 3."
-        )
+        if extra:
+            print("Sweeping the breeding pool's extra members: "
+                  + ", ".join(str(a.extra) for a in arms) + ".")
+            print(
+                f"Arm {BREEDING_EXTRA} is the control -- it is the shipped `BREEDING_EXTRA`,"
+                " i.e. the Pareto front alone."
+            )
+        else:
+            print("Sweeping warm_accept: " + ", ".join(f"{a.warm:g}" for a in arms) + ".")
+            print(
+                "Arm 0 is the control -- inheritance off, i.e. the search as it was before"
+                " step 3."
+            )
         print(
             "The arms are interleaved seed by seed rather than run one after the other, because"
         )
@@ -992,15 +1063,17 @@ def report_evolve_gate(
             data = reference.spectrum(seed)
             for arm in arms:
                 started = time.perf_counter()
-                result = discover(
-                    data,
-                    pool=reference.pool,
-                    mode="evolve",
-                    max_elements=7,
-                    seed=seed,
-                    time_limit=time_limit,
-                    warm_accept=arm,
-                )
+                with _breeding_extra(arm.extra):
+                    result = discover(
+                        data,
+                        pool=reference.pool,
+                        mode="evolve",
+                        max_elements=7,
+                        generations=generations,
+                        seed=seed,
+                        time_limit=time_limit,
+                        warm_accept=arm.warm,
+                    )
                 elapsed = time.perf_counter() - started
                 verdict = _large_truth_verdict(result, reference, data)
                 tier1_rows = sum(
@@ -1015,7 +1088,9 @@ def report_evolve_gate(
                 tally.tier1 += tier1_rows
                 tally.pareto += len(result.pareto)
                 best_error = min((c.relative_error for c in result.pareto), default=math.nan)
-                prefix = f"  seed {seed}" if len(arms) == 1 else f"  seed {seed} warm={arm:g}"
+                prefix = (
+                    f"  seed {seed}" if len(arms) == 1 else f"  seed {seed} {arm.label}"
+                )
                 print(
                     f"{prefix}: {'PASS' if verdict.reported else 'FAIL'}"
                     f"  reported={verdict.reported} on-front={verdict.on_front}"
@@ -1030,7 +1105,7 @@ def report_evolve_gate(
                 )
         for arm in arms:
             tally = tallies[arm]
-            arm_label = "" if len(arms) == 1 else f" [warm={arm:g}]"
+            arm_label = "" if len(arms) == 1 else f" [{arm.label}]"
             print(
                 f"  ==> EV1 baseline{arm_label} (truth reported): {tally.reported}/{seeds};"
                 f" on the Pareto front: {tally.on_front}/{seeds};"
@@ -1080,6 +1155,21 @@ def main() -> None:
         " inheritance off and is the control arm. Empty runs one arm at the library default.",
     )
     parser.add_argument(
+        "--generations", type=int, default=1000,
+        help="evolve-gate: generation cap. The default is far above the library's 30 on"
+        " purpose -- [measured, section 4] that cap binds in 5.2 of a 600 s budget, and a run"
+        " stopped by a generation count rather than by the clock gives its arms different"
+        " amounts of work whenever they differ in what a generation costs.",
+    )
+    parser.add_argument(
+        "--breeding-extra",
+        default="",
+        help="evolve-gate: sweep how many best-scoring candidates join the Pareto front in the"
+        " set a generation breeds from, e.g. '0,40'. One arm per value, interleaved seed by"
+        " seed like --warm; 0 is the control, since it is the shipped rule. Not combinable"
+        " with --warm.",
+    )
+    parser.add_argument(
         "--seed-start", type=int, default=0,
         help="first seed of the range (evolve-gate). A single evolve-gate run costs minutes, so"
         " a baseline is normally taken in chunks -- '--seed-start 1 --seeds 2' is seeds 1 and 2"
@@ -1126,7 +1216,10 @@ def main() -> None:
         report_screen(args.sample)
     elif args.what == "evolve-gate":
         warm = [float(text) for text in args.warm.split(",") if text.strip()]
-        report_evolve_gate(args.seeds, args.time_limit, args.seed_start, warm)
+        extra = [int(text) for text in args.breeding_extra.split(",") if text.strip()]
+        report_evolve_gate(
+            args.seeds, args.time_limit, args.seed_start, warm, extra, args.generations
+        )
     else:
         budgets = [
             ScreenBudget(*(int(part) for part in text.split("x")))

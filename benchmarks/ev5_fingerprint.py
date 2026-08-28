@@ -58,10 +58,22 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--workers", type=int, default=1)
     ap.add_argument("--mode", default="exhaustive,auto")
+    # The genetic path is fingerprintable too, and it has to be for any change to `_evolve`
+    # that claims to leave the default configuration alone. Its budget must be generations and
+    # never a clock, or the probe measures where the machine happened to stop rather than what
+    # the search did. `--mode evolve` is deliberately not the default: EV5 is *nothing else
+    # moved*, and the genetic path is the thing that is allowed to.
+    ap.add_argument("--generations", type=int, default=30)
+    ap.add_argument("--population", type=int, default=40)
+    ap.add_argument("--max-elements", type=int, default=7)
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
 
-    lines: list[str] = [f"# limit={args.limit} seed={args.seed} modes={args.mode}"]
+    lines: list[str] = [
+        f"# limit={args.limit} seed={args.seed} modes={args.mode} "
+        f"generations={args.generations} population={args.population} "
+        f"max_elements={args.max_elements}"
+    ]
     for mode in args.mode.split(","):
         for reference in REFERENCES:
             data = simulate(
@@ -78,6 +90,9 @@ def main() -> None:
                 exhaustive_limit=args.limit,
                 seed=args.seed,
                 workers=args.workers,
+                generations=args.generations,
+                population=args.population,
+                max_elements=args.max_elements,
             )
             lines.append(f"\n## {mode} :: {reference.label}")
             lines.append(json.dumps(_stable(result.to_dict()), indent=1, sort_keys=True))

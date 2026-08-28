@@ -21,6 +21,7 @@ python benchmarks/discovery_v2.py skeleton --workers 8       # gate P1, ~20 min
 python benchmarks/discovery_v2.py wrong-skeleton --workers 8 # gate P2, ~20 min
 python benchmarks/discovery_v2.py evolve-gate --seeds 3 --time-limit 600   # gate EV1, ~2.5 h
 python benchmarks/discovery_v2.py evolve-gate --only Maxwell --seeds 10 --warm 0,inf     --time-limit 600                                          # gate EV3, ~3 h
+python benchmarks/discovery_v2.py evolve-gate --breeding-extra 40,0 --seeds 3 --time-limit 600  # EV1 on the pool width
 python benchmarks/ev4_diversity.py --reference three-block --seeds 3   # gate EV4, ~35 min
 python benchmarks/ev5_fingerprint.py --out before.txt    # gate EV5, ~4 min per side
 python benchmarks/kk_resonance.py                       # gates K1-K4, seconds
@@ -38,6 +39,16 @@ failing, and identity is also what says the publication path is still determinis
 rather than stashing, so an interrupted run cannot leave the working tree in a state nobody
 expected. It is the instrument that caught the lost tiebreak that the whole test suite missed
 (`docs/EVOLVE_SEARCH_PLAN.md` §3.2.1).
+
+**A wall-clock budget only binds if `generations` does not.** `discover`'s default cap is 30,
+and [measured, `EVOLVE_SEARCH_PLAN.md` §4] every EV3 run hit it in 5.2 of a 600 s budget. That is
+harmless for a sweep whose arms cost the same per generation and wrong for one whose arms do not:
+a comparison of breeding-pool widths stopped by a generation count gives the cheaper arm less
+work, not less time, and the whole point of interleaving is a shared budget. Both `evolve-gate`
+and `ev4_diversity.py` therefore default `--generations` to 1000 — far above the library's own
+default on purpose, so that `--time-limit` is what runs out. The first run of the pool-width
+comparison was made without this and had to be discarded: all eighteen runs stopped at generation
+30, and the arm that ships looked *cheaper* only because it had been given less to do.
 
 `evolve-gate` is the slow one and it is budgeted in **wall-clock**, which changes how it must be
 run. Three rules, each of them a measurement that was lost before it was learned:
