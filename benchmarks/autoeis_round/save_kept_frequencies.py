@@ -2,9 +2,8 @@
 import json
 from pathlib import Path
 
-import numpy as np
-
 import autoeis as ae
+import numpy as np
 
 ARENA = Path(r"C:\Users\toshi\python\AutoCircuit\benchmarks\autoeis_round\arena_c")
 arena = json.loads((ARENA / "arena.json").read_text())
@@ -15,4 +14,4 @@ for t in arena["truths"]:
     f2, _ = ae.utils.preprocess_impedance_data(f, z)
     out[t["truth_id"]] = sorted(float(x) for x in f2)
     print(f"{t['truth_id']}: {len(f)} -> {len(f2)}", flush=True)
-json.dump(out, open(ARENA / "kept_frequencies.json", "w"), indent=1)
+(ARENA / "kept_frequencies.json").write_text(json.dumps(out, indent=1), encoding="utf-8")
