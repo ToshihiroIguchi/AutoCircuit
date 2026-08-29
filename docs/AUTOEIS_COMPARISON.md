@@ -375,6 +375,35 @@ posterior coefficient of variation reaches 1 — its own convention, not ours ma
 draw is what §1.3 refuses, and it would be no less a selection here. Truths the two instruments
 disagree about carry a caveat wherever they appear.
 
+**What the answer was, and why it mostly is not about the arena.** [measured] AutoEIS calls 3 of
+the 8 identifiable where our screen calls 8 of 8. That looked like the arena bias hole 2
+describes, and it is almost entirely something else. Running the leverage test — *our*
+deterministic instrument — on **the sweep AutoEIS actually receives after its own preprocessing**
+lines the two up almost exactly:
+
+| truth | below the noise floor on *their* data | AutoEIS called unresolved | |
+|---|---|---|---|
+| c3_0 | — | — | agree |
+| c3_1 | — | — | agree |
+| c5_0 | — | — | agree |
+| c4_0 | `L1.L`, `L2.L`, `R1.R` | `L2`, `L4`, `R1` | **same three** |
+| c4_1 | `CPE1.Q`, `L1.L` | `P2w`, `L1` | **same two** |
+| c5_1 | `CPE1.Q`, `CPE1.n`, `L1.L`, `R1.R` | `P3w`, `R4` | subset |
+| c6_1 | `CPE2.Q`, `CPE2.n`, `L1.L`, `L2.L` | `P2w`, `L1` | partial |
+| c6_0 | — | `L1`, `P2w` | disagree |
+
+The magnitudes say it plainly: `c4_0`'s `R1` has 1.14% leverage on the full sweep and **0.00%** on
+the 51 points AutoEIS keeps; `c5_1`'s `CPE1.Q` goes 2.75% → 0.01%. The parameters AutoEIS cannot
+resolve are, with one exception, exactly the parameters its own preprocessing removed the evidence
+for.
+
+So hole 2 is much smaller than it looked. The arena is fair *to the data as generated* — every
+parameter of every truth is above the noise floor on the full sweep — and AutoEIS's handicap on
+these truths is one its defaults impose on themselves. That is a legitimate part of "the other
+tool at its defaults" and is to be **reported, not corrected**: the round would be measuring
+something else entirely if the spectra were trimmed to suit it. `c6_0` is the one real
+disagreement and carries a caveat.
+
 ### 1.6 Stopping rule, fixed now so that it cannot be chosen later
 
 The seed list (1–20) and the stage boundaries (5, 10, 20 seeds) are written into `arena.py` before
