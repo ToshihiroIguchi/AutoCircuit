@@ -45,3 +45,7 @@ benchmarks/screening_round/*.jsonl
 benchmarks/autoeis_round/arena_c/
 benchmarks/autoeis_round/*.log
 benchmarks/autoeis_round/*.log.err
+benchmarks/autoeis_round/round.log
+benchmarks/autoeis_round/run_ae.log
+benchmarks/autoeis_round/score.log
+benchmarks/autoeis_round/*.jsonl
