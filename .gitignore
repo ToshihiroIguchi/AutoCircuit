@@ -42,3 +42,6 @@ web/dist/
 benchmarks/screening_round/land_*.json
 benchmarks/screening_round/sample_*.json
 benchmarks/screening_round/*.jsonl
+benchmarks/autoeis_round/arena_c/
+benchmarks/autoeis_round/*.log
+benchmarks/autoeis_round/*.log.err

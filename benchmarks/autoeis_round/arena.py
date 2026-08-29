@@ -213,8 +213,10 @@ def is_identifiable(circuit: str, params: dict[str, float]) -> bool:
     return not bool(np.any(unresolved_mask(result.values, stderr)))
 
 
-def candidate_stream(size: int, rng: np.random.Generator) -> list[tuple[str, dict[str, float]]]:
-    """Every (topology, parameter draw) this arena would try at ``size``, in order.
+def candidate_stream(
+    size: int, rng: np.random.Generator
+) -> list[tuple[str, list[dict[str, float]]]]:
+    """Every topology this arena would try at ``size``, each with its parameter draws.
 
     **No fitting happens here**, which is what makes the sampler resumable without becoming
     non-deterministic: the whole candidate sequence is a pure function of :data:`ARENA_SEED`, so
@@ -222,6 +224,11 @@ def candidate_stream(size: int, rng: np.random.Generator) -> list[tuple[str, dic
     cached on disk -- have to survive. Drawing candidates and screening them in one interleaved
     RNG stream, which is the obvious way to write this, could not be resumed without either
     replaying every fit or advancing the RNG differently the second time.
+
+    The draws are **grouped by topology** rather than flattened. A flat sequence looks equivalent
+    and is not: the acceptance loop stops at the first identifiable draw, and with a flat list its
+    next step is the *same* topology's next parameter draw, so an arena asking for two truths per
+    size got one topology twice. Grouping is what makes "one truth per topology" expressible.
     """
     admissible: list[Node] = []
     for node in enumerate_topologies(POOL, size):
@@ -234,12 +241,11 @@ def candidate_stream(size: int, rng: np.random.Generator) -> list[tuple[str, dic
         raise RuntimeError(f"no admissible topology of size {size}")
 
     order = rng.permutation(len(admissible))
-    out: list[tuple[str, dict[str, float]]] = []
+    out: list[tuple[str, list[dict[str, float]]]] = []
     for index in order:
         circuit = Circuit(admissible[int(index)])
         text = circuit.to_string()
-        for _ in range(PARAM_ATTEMPTS):
-            out.append((text, _draw_params(circuit, rng)))
+        out.append((text, [_draw_params(circuit, rng) for _ in range(PARAM_ATTEMPTS)]))
     return out
 
 
@@ -285,36 +291,44 @@ def sample_truths(
         census.rejected_no_parallel_block += no_parallel
 
         taken = 0
-        for text, params in candidate_stream(size, rng):
+        for text, draws in candidate_stream(size, rng):
             if taken == TRUTHS_PER_SIZE:
                 break
-            key = json.dumps([text, params], sort_keys=True)
-            if key in cache:
-                verdict = cache[key]
+            # One truth per topology at most: the first identifiable draw is taken and the rest
+            # of this topology's draws are abandoned, so two truths of a size are two different
+            # circuits rather than one circuit twice.
+            for params in draws:
+                key = json.dumps([text, params], sort_keys=True)
+                if key in cache:
+                    verdict = cache[key]
+                else:
+                    verdict = is_identifiable(text, params)
+                    if cache_path is not None:
+                        with cache_path.open("a", encoding="utf-8") as handle:
+                            handle.write(
+                                json.dumps({"key": key, "identifiable": verdict}) + "\n"
+                            )
+                    cache[key] = verdict
+                if not verdict:
+                    census.rejected_unidentifiable += 1
+                    continue
+                circuit = Circuit.parse(text)
+                truth = Truth(
+                    truth_id=f"c{size}_{taken}",
+                    circuit=text,
+                    params=params,
+                    n_elements=size,
+                    has_inductor=any(leaf.code == "L" for leaf in circuit.leaves),
+                )
+                truths.append(truth)
+                census.accepted += 1
+                taken += 1
+                if verbose:
+                    print(f"  accepted {truth.truth_id}: {text}", flush=True)
+                break
             else:
-                verdict = is_identifiable(text, params)
-                if cache_path is not None:
-                    with cache_path.open("a", encoding="utf-8") as handle:
-                        handle.write(
-                            json.dumps({"key": key, "identifiable": verdict}) + "\n"
-                        )
-                cache[key] = verdict
-            if not verdict:
-                census.rejected_unidentifiable += 1
-                continue
-            circuit = Circuit.parse(text)
-            truth = Truth(
-                truth_id=f"c{size}_{taken}",
-                circuit=text,
-                params=params,
-                n_elements=size,
-                has_inductor=any(leaf.code == "L" for leaf in circuit.leaves),
-            )
-            truths.append(truth)
-            census.accepted += 1
-            taken += 1
-            if verbose:
-                print(f"  accepted {truth.truth_id}: {text}", flush=True)
+                if verbose:
+                    print(f"  discarded (no identifiable draw): {text}", flush=True)
         if taken < TRUTHS_PER_SIZE:
             raise RuntimeError(f"only {taken} identifiable truths found at size {size}")
 
