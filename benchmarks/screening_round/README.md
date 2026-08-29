@@ -75,6 +75,55 @@ measurement. `evolve_probe.py` can see that the truth's class was visited and no
 this one wraps `_shortlist_candidates` and `_refine` and says which of them lost it — the
 answer was neither, and §4.6.1 has it.
 
+## A second truth, and why the round needed one
+
+Everything above ran on **one** reference — the three-block Maxwell-Wagner — in three different
+spaces, which is `docs/SEARCH_ALGORITHM_SCREENING.md` §2.1's stated limitation. Step 5 of
+`docs/EVOLVE_SEARCH_PLAN.md` is where that stopped being a limitation and became a confound: the
+mutation-weight sweep's strongest arm moves weight from insert-series to insert-parallel, and the
+truth is three parallel blocks. An arm can win an arena by knowing the answer's shape.
+
+`landscape.py --reference series` is the answer. It freezes `C1-R1-L1-p(R2,C2)` — a capacitor
+with its ESR and ESL plus one interfacial block, four of five elements in series — and the
+mutation arm that won on the parallel truth loses on this one by a comparable margin
+(`EVOLVE_SEARCH_PLAN.md` §3.5.2). Adding a reference costs one landscape build and one
+`targets.py` run, and it is the only instrument here that can tell a search improvement from a
+prior over the answer.
+
+```powershell
+python landscape.py --pool R,C,L --n-max 6 --reference series --workers 8 `
+                    --out land_series_rcl6.json                          #  1.4 min
+python targets.py land_series_rcl6.json --out targets_series_rcl6.json   #  2 min, 23 targets
+python landscape.py --pool R,C,L --n-max 7 --reference series --workers 8 `
+                    --out land_series_rcl7.json                          # ~12 min
+python targets.py land_series_rcl7.json --out targets_series_rcl7.json
+
+python arms.py land_series_rcl6.json targets_series_rcl6.json `
+       --seeds 480 --budget 40 --max-elements 6 `
+       --arms ga_front,mut_par_hi,mut_series_hi,mut_del_lo,mut_uniform,pars1000,pars1e4
+```
+
+**Calibrate the budget for every new arena before comparing anything on it.** This one is 12x
+denser in targets than `land_rclcpe6` (1.06% against 0.085%), so the 150 fits that leave the CPE
+arena at 59% leave this one saturated at 40/40. Budget 40 puts it at 64%. The README's own
+warning below — *a budget everything clears is a budget that ranks nothing* — is about the arm
+ladder, and it applies just as much to the arena.
+
+## The step-5 arms
+
+`pars*` and `mut_*` are all `ga_front` — the shipped search — with exactly one thing changed, and
+both knobs are the library's own (`discover.PARSIMONY_SCALING`, `discover.MUTATION_WEIGHTS`),
+passed through `_next_generation` rather than restated here. Neither moved a default: the
+parsimony ladder is noise at 480 seeds and the mutation sweep's two significant arms are the two
+that encode the truth's shape.
+
+```powershell
+python arms.py land_rclcpe6.json targets_rclcpe6.json --seeds 120 --budget 150 `
+       --max-elements 6 --arms ga_front,pars0.5,pars2,pars5,pars10,pars20,pars100,pars1000
+python arms.py land_rclcpe6.json targets_rclcpe6.json --seeds 480 --budget 150 `
+       --max-elements 6 --arms ga_front,mut_par_hi,mut_del_lo,mut_uniform,mut_series_hi
+```
+
 ## Five traps this directory walked into, so the next person does not
 
 **A sample is not a rank.** `kpi0_sample.py` on 1,176 topologies reported that nothing

@@ -2252,3 +2252,132 @@ beside them and are not reworded, for the reason section 25 gives.
 the rendered summary ("Evaluated 6 distinct topologies in 1.2 s"). The two readings disagree
 whenever they land either side of a tenth of a second. The string is scrubbed in the test, not in
 the renderer -- a report that tells the user how long the search took is right to.
+
+## 30. Two tuning knobs measured, neither moved, and the round finds it had only ever asked one question
+
+`docs/EVOLVE_SEARCH_PLAN.md` §3.5. Step 5 was the plan's last piece of *tuning* — adaptive
+parsimony in selection, and the mutation weights, which were the only constant in `discover.py`
+carrying no **[measured]** note. Both were built exactly as specified. **Neither default moved,
+and that is the result rather than a failure to find one.** What the step actually produced is a
+hole in the instrument the previous four steps were measured with.
+
+### What ships
+
+**`PARSIMONY_SCALING = 0.0`** and **`MUTATION_WEIGHTS = (0.35, 0.25, 0.25, 0.15)`** — the two
+values the step started with, now with the measurement in their docstrings. Both are module
+constants reachable from the benchmarks and from nothing else, the shape `BREEDING_EXTRA` and
+`WARM_ACCEPT_FACTOR` already have; `mutate` and `_next_generation` take them as keywords so the
+sweep drives the real operator, and `discover()` does not, because "how much should the search
+prefer deleting an element" is exactly the search internal CLAUDE.md says is not a knob.
+
+**The crowding term stays in `discover.py` even though it is off** — a different disposal from
+the islands of §29, deliberately. Those were measurably *worse* and their arm owned its own
+generation loop, so moving them to `arms.py` cost nothing. This is a keyword on `_tournament`,
+and deleting it would force the arm that records the rejection to reimplement
+`_next_generation`, which is the one thing `benchmarks/screening_round/arms.py`'s docstring says
+an arm may not do.
+
+**A second and a third reference for the frozen-landscape round** (`landscape.py --reference
+series`, `targets_series_rcl6.json`, `targets_series_rcl7.json`), and the raw output of both
+sweeps in `results_parsimony.txt` and `results_mutation_weights.txt`.
+
+### The thing worth more than either verdict
+
+**Every arena this round had ever built freezes the same truth.** `land_rcl6`, `land_rcl7` and
+`land_rclcpe6` are three spaces around one circuit — `p(R1,C1)-p(R2,C2)-p(R3,C3)`, five of whose
+six elements are joined in parallel. `SEARCH_ALGORITHM_SCREENING.md` §2.1 lists that as a
+limitation on *transfer*; step 5 is where it became a confound on *results*.
+
+The mutation sweep's strongest arm moves weight from insert-series to insert-parallel and beats
+the shipped tuple 308/480 to 282/480, McNemar p = 0.018. It is not a better search. On a truth
+that is four series elements and one parallel block it *loses*, 281/480 to 306, p = 0.0001, and
+the mirror arm reverses both signs. [measured] The reversal holds when the element cap is raised
+from six to seven, so it is a property of the truth's shape and not of one arena.
+
+So the sweep's answer is not a new tuple; it is that **the insert-series and insert-parallel
+weights must stay equal**, which the shipped tuple already does and which nothing had ever
+checked. An asymmetric setting is the software deciding what kind of part this is, reached from
+inside the search rather than from the CLI.
+
+### The parsimony ladder, and a 77-against-65 for the second time
+
+[measured, `results_parsimony.txt`] Scaling 0.5 through 1e6 on the 21,057-topology arena, 120
+seeds at 150 fits: everything below 300 is inert (the penalty is at most `scaling`, and front
+members' scores differ by hundreds of AICc), everything above wanders between 57/120 and 78/120
+with no ordering, and the degenerate limit — where the term outranks fitness entirely — is the
+*worst* arm on the ladder.
+
+**`pars1000` read 77/120 against `ga_front`'s 65/120 at p = 0.029.** Those are the same counts,
+against the same control, with the same p, as the two-island arm of §29 that 480 seeds demoted.
+At 480 seeds this one is 293/480 against 282/480, p = 0.32, and p = 0.92 on the second reference.
+Twice now this round has produced a 77-against-65 that did not survive; the number to remember is
+that a 120-seed ladder of eight arms hands one of them a p below 0.05 about whenever it is asked.
+
+### Four things not to re-derive
+
+* **A crowding count over the breeding pool is a no-op**, and not for any reason to do with
+  adaptive parsimony. Step 4 left the pool equal to the Pareto front, which holds about one
+  member per complexity by construction. The frequency has to be taken over the **archive**,
+  where 58% of a run's fits land at five and six elements. The plan's own wording implies the
+  pool; following it would have measured nothing and blamed PySR.
+* **PySR's multiplicative form is wrong for this criterion.** It scales the loss by
+  `exp(scaling x frequency)`; AICc here is usually negative (the arena optimum is −1682), so a
+  factor above one *rewards* the crowded level. Additive, in units of the criterion.
+* **`targets.py --max-checks` truncated the band from the cheap end and silently dropped the
+  truth.** The band is sorted by screening cost and the truth sits at its expensive end by
+  construction, so an arena whose band exceeds the cap returns a target set that does not contain
+  the answer — and a 0-target run reads exactly like an arena with no equivalents. Found on the
+  n <= 7 series arena: band 761, default cap 400, 250 rows in and still zero. The truth row is now
+  appended unconditionally and a truncated band prints a warning.
+* **Calibrate the budget for every new arena.** The series arena is 12x denser in targets than
+  the CPE one (1.06% against 0.085%), so the 150 fits that leave the CPE arena at 59% leave this
+  one saturated at 40/40. Budget 40 puts it at 64%. This is the README's "a budget everything
+  clears is a budget that ranks nothing", applied to the arena instead of the arm ladder.
+
+### One arm that never lost, and was still not taken
+
+`mut_del_lo` cuts the delete weight 0.15 → 0.05: 316/480 (p = 0.017), 312/480 (p = 0.61),
+321/480 (p = 0.10) across the three arenas. Significant on one of three, and the obvious mechanism
+— deleting is nearest to waste when the truth is already as large as the search may go — was
+confounded with how the arenas were built, since their truths sit at the cap and one below it.
+The third arena is that confound measured out: same truth, same data, same budget, cap 6 → 7. It
+did not separate. `mut_uniform` is the mirror case, flat on two arenas and significant on the
+third, and it is declined for the same reason. **Significant on one arena of three, in a sweep
+where the real effects are significant on all three and reverse sign on cue, is not a result.**
+
+### The gates
+
+* **EV5 re-measured: 487,364 bytes, byte-identical.** Step 5 touches only operators the
+  exhaustive path never calls, which is the argument and not the evidence — and §3.2.1 records the
+  whole suite agreeing with that kind of argument while a bug was in place. The evolve path has
+  its own check and it is sharper: `arms.py --arms ga_front` over 120 seeds returns the same
+  65/120, the same median 113 fits, the same best AICc −1676.14 and the same size histogram
+  before and after.
+* **EV1's ratchet is not re-run and does not need to be**: no default changed, so the search is
+  the one EV1 already measured at 5/9, 5/9, 3/9.
+* **EV4 clauses 1 and 2 stay open.** Adaptive parsimony was the remedy most directly aimed at
+  clause 1 — keeping every complexity populated is what it exists for in PySR — and it is
+  measured as doing nothing. Both remedies the plan named have now been built and measured, and
+  neither closed a clause. They are not reworded.
+
+### State of the suite
+
+`pytest`: **946 passed, 19 skipped**. Three tests added, all in `tests/test_discover.py`: the
+weights reach the operator, neither knob is reachable from `discover()`, and the crowding term
+changes which parent breeds while leaving every reported score exactly as it was. `ruff check`
+and `mypy` clean. `npm run check` untouched — no browser path uses evolve.
+
+One existing test needed a one-line change: the spy in
+`test_the_search_breeds_from_a_bounded_pool_however_long_it_runs` replaces `_next_generation` and
+now has to forward the keywords `_evolve` passes it.
+
+### What is not done
+
+* Step 6, the documentation pass that marks the plan implemented, is still open.
+* EV4's two failing clauses, and the question §29 left: whether a re-proposal under a best-wins
+  cache is a cost at all.
+* The two EV1 references where `mode="evolve"` scores 0/3 still cannot be put on a landscape.
+  The series reference added here is a *reduction* of one of them (`LARGE_REFERENCES[1]` with the
+  CPE and skin-effect element replaced by their plain counterparts) chosen so that its space can
+  be enumerated — it varies the shape of the truth, which is what step 5 needed, and it does not
+  relieve §2.1's limitation about the two hard references themselves.

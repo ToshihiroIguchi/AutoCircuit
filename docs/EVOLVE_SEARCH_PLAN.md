@@ -614,15 +614,173 @@ Last, because they are tuning and the steps above are structure.
 
 - **Adaptive parsimony.** PySR tracks how crowded each complexity level is and penalises the
   crowded ones, which is what keeps every complexity populated. `_next_generation` approximates
-  this with Pareto elitism (`front[:max(2, population // 6)]`, `discover.py:2239`). Add a
+  this with Pareto elitism (`front[:max(2, population // 6)]`). Add a
   frequency term to the **selection** score only. It must never reach `Candidate.score`: the
   criterion the user chose is what ranks the report (`DiscoveryResult.criterion`), and a
   breeding heuristic that leaked into it would change the published ranking for a reason the
   report cannot state.
-- **Mutation weights.** `[0.35, 0.25, 0.25, 0.15]` (`discover.py:864`) has no measurement behind
+- **Mutation weights.** `[0.35, 0.25, 0.25, 0.15]` has no measurement behind
   it — the only constant in this module that carries no **[measured]** note. Sweep it in the
   benchmark and either justify it or replace it. A sweep that finds nothing is a result and gets
   written down as one.
+
+**Both were built as written, both were measured, and neither moved a default.**
+`PARSIMONY_SCALING = 0` and `MUTATION_WEIGHTS = (0.35, 0.25, 0.25, 0.15)` — the same two values
+the step started with, and what changed is that they now carry the measurement that says so. What
+the step actually produced is in §3.5.1 to §3.5.3, and the middle one is the one worth the reading
+time: it is the first time this round has varied *what circuit it is looking for*, and the
+strongest effect in the whole sweep turned out to be a property of the reference rather than of
+the search.
+
+#### 3.5.1 Adaptive parsimony: measured, and it does nothing
+
+The implementation is one keyword on `_tournament` plus `_complexity_frequencies`, and two
+decisions inside it are worth stating because neither is PySR's.
+
+*The frequency is taken over the **archive**, not over the pool.* Step 4 left the breeding pool
+equal to the Pareto front, which holds about one member per complexity by construction — a
+crowding count over it is 1 everywhere and ranks nothing. What is unevenly populated is the
+history: [measured] 58% of a run's fits land at five and six elements. Written against the pool,
+as the plan's own wording implies, the term would have been a measured no-op for a reason that has
+nothing to do with adaptive parsimony.
+
+*The term is additive, not multiplicative.* PySR scales the loss by `exp(scaling × frequency)`.
+The criterion here is AICc and it is usually **negative** (this arena's optimum is −1682), so
+multiplying by a factor above one *rewards* the crowded level. Additive also puts the constant in
+a unit the sweep can be reasoned about in: one AICc is one parameter's worth of evidence.
+
+**[measured] The ladder, 21,057-topology arena, 120 seeds at 150 fits.** Scaling 0.5 → 65/120,
+2 → 64, 5 → 64, 10 → 64, 20 → 65, 100 → 63, 300 → 63, **1000 → 77**, 3000 → 71, 1e4 → 78,
+1e6 → 57, against the shipped rule's 65/120. Nothing below 300 changes anything — the penalty is
+at most `scaling × 1` and a front member's score differences run to hundreds of AICc — and above
+300 the ladder wanders between 57 and 78 with no ordering at all. The top rung is the limit rather
+than a rung on the way to one: at 1e6 the term outranks every score difference, so the tournament
+is "take the least-crowded complexity, fitness as a tiebreak", and that arm is the *worst* of the
+eleven.
+
+**[measured] At 480 seeds the two apparent winners are noise.** McNemar, exact, on the discordant
+seeds:
+
+| arm | hit @150 | both | only `ga_front` | only this arm | McNemar p |
+| --- | --- | --- | --- | --- | --- |
+| `ga_front` | 282/480 [0.54,0.63] | — | — | — | — |
+| `pars1000` | 293/480 [0.57,0.65] | 236 | 46 | 57 | **0.32** |
+| `pars1e4` | 289/480 [0.56,0.64] | 195 | 87 | 94 | **0.66** |
+
+and on the second reference of §3.5.2, 480 seeds at its own budget, `pars1000` is 308/480 against
+306/480 (p = 0.92). **At 120 seeds `pars1000` was 77/120 against 65/120 — the same counts, the
+same control and the same p = 0.03 as the two-island arm of §3.4.4 that 480 seeds also demoted.**
+Twice now this round has produced a 77-against-65 that did not survive. The number to remember is
+not 77; it is that a 120-seed ladder of eight arms will hand one of them a p below 0.05 about
+whenever it is asked to.
+
+One reading survives, stated at the weight it deserves: the *fits-to-hit* sign test is marginally
+in `pars1000`'s favour on both arenas (p = 0.048 and p = 0.029), in the same direction each time.
+That is the test the benchmark's own README warns about — it drops every seed the two arms
+disagreed on, which at an unsaturated budget is most of the signal — and the median difference it
+reports is **zero fits**. It is not a reason to turn anything on.
+
+`PARSIMONY_SCALING` stays 0 and the implementation stays in `discover.py`, which is a different
+disposal from the islands of §3.4.4, deliberately. The islands were measurably *worse* and their
+arm already owned its own generation loop, so moving them to `arms.py` cost nothing. The crowding
+term is a keyword on `_tournament`; removing it would force the arm that records its rejection to
+reimplement `_next_generation`, which is exactly what `arms.py`'s docstring says an arm may not
+do. So it lives where `BREEDING_EXTRA` and `WARM_ACCEPT_FACTOR` live: a module constant whose
+*value is the measurement*, off by default, reachable by the benchmarks and by nothing else.
+
+#### 3.5.2 The mutation weights, and the second reference this round had never had
+
+Nine weightings, the shipped tuple among them under another name as its own control. The first
+120-seed pass on the 21,057-topology arena looked like a table of results — 78/120, 77, 75, 72
+against the shipped 65, and 52 at the bottom. Escalated to 480 seeds, three of them survive:
+
+| arm | retype / +series / +parallel / delete | hit @150 | McNemar p |
+| --- | --- | --- | --- |
+| `mut_ship` | 0.35 / 0.25 / 0.25 / 0.15 | 282/480 | — |
+| `mut_par_hi` | 0.35 / **0.15** / **0.35** / 0.15 | **308/480** | **0.018** |
+| `mut_series_hi` | 0.35 / **0.35** / **0.15** / 0.15 | **248/480** | **0.0012** |
+| `mut_del_lo` | 0.39 / 0.28 / 0.28 / **0.05** | 316/480 | 0.017 |
+| `mut_uniform` | 0.25 / 0.25 / 0.25 / 0.25 | 283/480 | 1.00 |
+
+**Then look at what the arena's truth is.** `p(R1,C1)-p(R2,C2)-p(R3,C3)`: five of its six elements
+are joined in parallel. The arm that wins is the one that inserts in parallel more often, the arm
+that loses by a comparable margin is its mirror image, and the effect sits on the one axis of the
+tuple that encodes *the shape of the circuit being looked for*. Every arena this round had built —
+`land_rcl6`, `land_rcl7`, `land_rclcpe6` — freezes that same truth in a different space. **The
+round had never once varied the shape of the answer**, which is exactly the confound that cannot
+be seen from inside a single reference.
+
+So a second reference was built: `C1-R1-L1-p(R2,C2)`, a capacitor with its ESR and ESL and one
+interfacial block — `LARGE_REFERENCES[1]` with the CPE and the skin-effect element replaced by
+their plain counterparts, which is the same physics in a pool small enough to enumerate. Four of
+its five elements are in series where five of the Maxwell-Wagner's six are in parallel.
+[measured] Fitting it to its own 1% data leaves 0/5 parameters unresolved and the worst parameter
+deviation is 0.7%, so a failure there is a failure to find the topology rather than a truth the
+data cannot support.
+
+**[measured] The sign reverses, and both directions are significant.** 480 seeds,
+`land_series_rcl6` (2,174 topologies, 23 targets, 40 fits — a budget calibrated to 64% so that
+the arena still has somewhere to fail):
+
+| arm | Maxwell-Wagner truth (parallel) | ESR/ESL + interface truth (series) |
+| --- | --- | --- |
+| `mut_ship` | 282/480 | 306/480 |
+| `mut_par_hi` | **308/480, p = 0.018 better** | **281/480, p = 0.0001 worse** |
+| `mut_series_hi` | **248/480, p = 0.0012 worse** | **319/480, p = 0.015 better** |
+
+Which settles the question the sweep was asked. **The insert-series and insert-parallel weights
+must stay equal, and that symmetry is now the one property of this tuple with a measurement behind
+it.** Any asymmetric setting is a bet on the shape of the answer: it pays on truths of that shape
+and costs about as much on truths of the other. The software is not allowed to make that bet — it
+is the same thing as asking the user what kind of part this is, reached from inside the search
+instead of from the CLI, and CLAUDE.md rules it out in the one place it is hardest to notice.
+
+Two further readings, both smaller than they looked:
+
+* *`mut_uniform` ties on both of these arenas* — 283/480 (p = 1.00) and 308/480 (p = 0.92) — and
+  wins on the third of §3.5.3 (p = 0.0095). So the *level* of the shipped tuple, retype at 0.35
+  rather than 0.25 and delete at 0.15 rather than 0.25, is not something these arenas can
+  distinguish from choosing nothing at all. The tuple is not wrong; on this evidence it is
+  arbitrary in every respect except its symmetry.
+* *`mut_del_lo` is the one arm that never lost*, and it is still not taken. §3.5.3 is why, and it
+  is a confound measured rather than a caveat left standing.
+
+#### 3.5.3 The delete weight, and the confound both arenas shared
+
+`mut_del_lo` cuts the delete weight from 0.15 to 0.05, and it was the one arm in the sweep that
+never lost: 316/480 against 282 on the Maxwell-Wagner arena (p = 0.017) and 312/480 against 306
+on the series one (p = 0.61). The obvious mechanism is that deleting is nearest to pure waste
+when the truth is already as large as the search is allowed to go — and **both arenas are built
+that way**, with truths at the element cap and one below it (6 of 6, 5 of 6). A weight tuned in
+that regime is tuned to the arenas, which is the same mistake §3.5.2 had just caught on the other
+axis of the same tuple.
+
+So the regime was varied the cheapest way there is: **the same truth, the same pool, the same
+data, the same budget — only the cap moves.** `land_series_rcl7` is the five-element series truth
+enumerated to seven elements (11,033 topologies, 82 targets), so its truth sits *two* below the
+cap instead of one.
+
+**[measured] Three arenas, 480 seeds each, McNemar exact against the shipped tuple.**
+
+| arm | Maxwell, cap 6 | series, cap 6 | series, cap 7 |
+| --- | --- | --- | --- |
+| `mut_ship` | 282/480 | 306/480 | 307/480 |
+| `mut_del_lo` | 316/480, **p = 0.017** | 312/480, p = 0.61 | 321/480, p = 0.10 |
+| `mut_uniform` | 283/480, p = 1.00 | 308/480, p = 0.92 | 330/480, **p = 0.0095** |
+| `mut_par_hi` | 308/480, **p = 0.018** | 281/480, **p = 0.0001** | 289/480, **p = 0.0003** |
+| `mut_series_hi` | 248/480, **p = 0.0012** | 319/480, **p = 0.015** | 337/480, **p < 0.0001** |
+
+**Significant on one arena of three is what both remaining candidates are, and in opposite
+places.** `mut_del_lo` wins on Maxwell and is flat on both series arenas; `mut_uniform` is flat on
+Maxwell and both caps of the series truth except the widest, where it wins. Neither survives the
+company it is in — the two arms that *are* real reverse their sign with the truth's shape and hold
+it across the cap change, which is what an effect looks like here when there is one. So
+`MUTATION_WEIGHTS` does not move, and the reason is on the record rather than in a preference.
+
+One thing the third arena settles beyond the delete question: **the series/parallel reversal is
+not an artefact of the small arena.** Raising the cap five-fold in topologies leaves both signs
+and both p-values where they were. That is the finding §3.5.2 rests on, and it now rests on two
+independent arenas rather than one.
 
 ## 4. Gates
 
@@ -740,7 +898,16 @@ Last, because they are tuning and the steps above are structure.
   `benchmarks/ev5_fingerprint.py` rather than being rebuilt by hand each time: three references,
   `mode="exhaustive"` and `mode="auto"`, `exhaustive_limit=4`, every float at `repr` precision
   and every clock stripped — 486,846 bytes, **byte-identical** between `HEAD`'s sources and the
-  changed ones. Identity across two separate processes also re-establishes that the publication
+  changed ones.
+
+  **[measured] Re-run after step 5: 487,364 bytes, byte-identical.** Step 5 edits `mutate`,
+  `_tournament` and `_next_generation`, none of which the exhaustive path calls — but that is the
+  argument, not the evidence, and the argument is exactly the kind §3.2.1 records the test suite
+  agreeing with while a bug was in place. A second fingerprint, cheaper than the reasoning, says
+  the publication path did not move a digit. (The evolve path has its own check and it is
+  sharper: `arms.py --arms ga_front` over 120 seeds returns the same 65/120, the same median of
+  113 fits, the same best AICc of −1676.14 and the same size histogram before and after, which
+  is what says the operator refactor changed no behaviour at the shipped defaults.) Identity across two separate processes also re-establishes that the publication
   path is deterministic at `workers=4`, which the comparison silently depends on.
 - **EV2 — provenance.** Every candidate in `DiscoveryResult.candidates` and `.pareto` from
   `mode="evolve"` was refit at full budget. A test, not an inspection: it asserts on the
@@ -856,6 +1023,17 @@ Last, because they are tuning and the steps above are structure.
   already does; what it may do is measure whether a *cheap* re-proposal is a cost at all, which
   this run suggests and does not establish (541 fits in 5.5 min against 692 in 7.1).
 
+  **[measured] Step 5 was the second remedy and it is not one either. EV4 clauses 1 and 2 stay
+  open.** Adaptive parsimony is the mechanism that would have addressed clause 1 most directly —
+  it exists in PySR to keep every complexity level populated, which is precisely what a 92%
+  first-third hit rate says is not happening — and §3.5.1 measures it as doing nothing at any
+  scaling that is not the degenerate limit, over 480 seeds on two references. The mutation-weight
+  sweep does not touch either clause. So both remedies this plan named have now been built and
+  measured, and neither moved the two clauses; what is left is the question §3.4.4 raised and
+  did not answer, whether a re-proposal under a best-wins cache is a cost at all. **Nothing here
+  licenses closing the clauses**, and the reason to say so plainly is that the search that fails
+  them is also the search that passes clause 3 by the widest margin this plan has recorded.
+
   **[measured] Re-run for the front-only pool of §3.4.3, and it fails a second clause.** Three
   arms, three seeds, 600 s each, interleaved, generation cap 1000 so that the clock is what runs
   out. (**A first attempt was discarded rather than reported**, for the reason the paragraph
@@ -919,7 +1097,7 @@ Last, because they are tuning and the steps above are structure.
 | 2 | tier-2-only reporting in `_evolve`; shared per-size quota helper; `REFINE_DEFAULT["evolve"]`; EV2 test; withdraw G5 in `DISCOVERY_V2_PLAN.md` | M | 1 | **done** — EV2 and EV5 both measured; see §3.2.1. **Reopened once**: the deadline this step added had no refit *order* behind it and lost a first-ranked candidate (§3.2.1, fourth bullet); fixed and re-gated |
 | 3 | structural parameter inheritance, two-stage evaluation, best-wins cache; sweep `WARM_ACCEPT_FACTOR`; EV3 | L | 2 | **done** — EV3 passes both halves (§4); §3.3.1 records the polish budget that decided it, and the two readings that nearly got it wrong |
 | 4 | bounded selection pool, scaled tournament, islands with shared cache; EV4 | M | 3 | **done, EV4 open on two clauses and saying so** — `_breeding_pool`: 120/120 against 87/120 (§3.4.1), and its *width* then measured down to zero, so what ships is the Pareto front alone (`BREEDING_EXTRA`, §3.4.3: 65/120 against 7/120 at an unsaturated budget). **Islands were built and removed** (§3.4.4): indistinguishable at two, significantly worse at four, far worse with migration off. The scaled tournament stays unmotivated once the pool is bounded. EV4's clause 1 fails for every arm and **clause 2 now fails for the shipped one**, both recorded rather than reworded; clause 3 passes with EV1 at 5/9, 5/9, 3/9 against an interleaved control's 4/9, 3/9, 2/9 (§4) |
-| 5 | adaptive parsimony in selection only; mutation-weight sweep | M | 4 | planned |
+| 5 | adaptive parsimony in selection only; mutation-weight sweep | M | 4 | **done, and neither default moved** — both built as specified and both measured (§3.5). Adaptive parsimony does nothing: the ladder is inert below scaling 300, unordered above it, and its best rung is 293/480 against 282/480 at p = 0.32 after looking like p = 0.03 at 120 seeds. The mutation sweep's two significant arms are the two that encode **the truth's shape**, which is what forced the round's first second reference (§3.5.2) and then a third to separate the delete weight from the element cap (§3.5.3). `PARSIMONY_SCALING = 0` and `MUTATION_WEIGHTS = (0.35, 0.25, 0.25, 0.15)` now carry the measurement that says so, and EV5 is byte-identical |
 | 6 | docs: this file marked implemented with its corrections, `CLAUDE.md` "Start here" entry 10, `benchmarks/README.md`, `DISCOVERY_V2_PLAN.md` §4 G5 withdrawal note | S | 5 | planned |
 
 Step 2 is severable and worth landing on its own even if 3–5 are never done: it is the only step

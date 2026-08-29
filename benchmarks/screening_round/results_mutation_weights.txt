@@ -1,0 +1,142 @@
+# Step 5 of docs/EVOLVE_SEARCH_PLAN.md, sections 3.5.2 and 3.5.3 -- the mutation weights.
+# Every arm is ga_front (the shipped search) with only discover.MUTATION_WEIGHTS changed,
+# and mut_ship is that constant itself, carried as each run's own control.
+#
+# The verdict is in the three arenas below rather than in any one of them: the two arms that
+# are significant everywhere are the two that move weight between insert-series and
+# insert-parallel, and they REVERSE SIGN with the shape of the truth. The tuple does not move.
+
+## Arena 1: three-block Maxwell-Wagner, p(R,C)-p(R,C)-p(R,C) -- 5 of 6 elements in parallel
+## R,C,L,CPE n<=6, 21,057 topologies, 18 targets, 150 fits
+
+### 120 seeds, the whole sweep
+
+arena: land_rclcpe6.json  pool=('R', 'C', 'L', 'CPE')  n<=6  21057 topologies, 18 targets (0.085%)
+budget: 150 fits per run, 120 seeds, population 40
+landscape optimum AICc -1682.511
+
+arm               hit rate          95% CI  median fits  mean fits   best AICc          pressure
+------------------------------------------------------------------------------------------------
+mut_ship         65/120   [0.45,0.63]               113        110    -1676.14      0.539->0.386  n1:3% n2:6% n3:14% n4:19% n5:29% n6:29%
+mut_uniform      75/120   [0.54,0.71]               115        110    -1675.43      0.539->0.390  n1:3% n2:7% n3:15% n4:19% n5:30% n6:27%
+mut_retype_hi    72/120   [0.51,0.68]               109        107    -1675.20      0.539->0.392  n1:3% n2:7% n3:14% n4:20% n5:29% n6:27%
+mut_retype_lo    52/120   [0.35,0.52]               109        107    -1677.57      0.539->0.371  n1:2% n2:6% n3:14% n4:18% n5:31% n6:29%
+mut_struct_hi    52/120   [0.35,0.52]               109        104    -1676.59      0.539->0.382  n1:2% n2:7% n3:15% n4:18% n5:30% n6:28%
+mut_del_hi       63/120   [0.44,0.61]               102        103    -1675.30      0.539->0.377  n1:3% n2:7% n3:15% n4:20% n5:30% n6:26%
+mut_del_lo       78/120   [0.56,0.73]               108        109    -1677.07      0.539->0.397  n1:2% n2:6% n3:14% n4:19% n5:28% n6:30%
+mut_series_hi    58/120   [0.40,0.57]               109        106    -1674.10      0.539->0.384  n1:3% n2:6% n3:15% n4:19% n5:29% n6:28%
+mut_par_hi       77/120   [0.55,0.72]               108        106    -1677.15      0.539->0.390  n1:3% n2:6% n3:14% n4:20% n5:29% n6:28%
+
+Hit/miss paired against mut_ship (McNemar, exact):
+arm                both  only base  only arm  neither        p
+mut_uniform          52         13        23       32   0.1325
+mut_retype_hi        44         21        28       27   0.3916
+mut_retype_lo        30         35        22       33   0.1112
+mut_struct_hi        36         29        16       39   0.0725
+mut_del_hi           45         20        18       37   0.8714
+mut_del_lo           46         19        32       23   0.0919
+mut_series_hi        48         17        10       45   0.2478
+mut_par_hi           56          9        21       34   0.0428
+
+Paired against mut_ship, seed by seed (a seed either arm missed is dropped):
+arm               faster  slower  tied  median dfits  sign test p
+mut_uniform           29      22     1            -8       0.4011
+mut_retype_hi         27      15     2           -10       0.0884
+mut_retype_lo         16      14     0            -2       0.8555
+mut_struct_hi         19      16     1            -2       0.7359
+mut_del_hi            32      13     0           -13       0.0066
+mut_del_lo            22      22     2             0       1.0000
+mut_series_hi         11      27    10             1       0.0139
+mut_par_hi            42       9     5            -4       0.0000
+
+### 480 seeds, the four arms that moved
+
+arena: land_rclcpe6.json  pool=('R', 'C', 'L', 'CPE')  n<=6  21057 topologies, 18 targets (0.085%)
+budget: 150 fits per run, 480 seeds, population 40
+landscape optimum AICc -1682.511
+
+arm               hit rate          95% CI  median fits  mean fits   best AICc          pressure
+------------------------------------------------------------------------------------------------
+ga_front         282/480   [0.54,0.63]               112        106    -1675.84      0.525->0.385  n1:2% n2:6% n3:14% n4:19% n5:29% n6:28%
+mut_par_hi       308/480   [0.60,0.68]               106        103    -1677.50      0.525->0.386  n1:3% n2:6% n3:14% n4:20% n5:29% n6:28%
+mut_del_lo       316/480   [0.61,0.70]               111        107    -1677.48      0.525->0.391  n1:2% n2:6% n3:14% n4:19% n5:28% n6:30%
+mut_uniform      283/480   [0.55,0.63]               113        108    -1675.59      0.525->0.385  n1:3% n2:7% n3:14% n4:19% n5:30% n6:27%
+mut_series_hi    248/480   [0.47,0.56]               109        106    -1672.50      0.525->0.384  n1:2% n2:7% n3:14% n4:19% n5:29% n6:28%
+
+Hit/miss paired against ga_front (McNemar, exact):
+arm                both  only base  only arm  neither        p
+mut_par_hi          239         43        69      129   0.0178
+mut_del_lo          203         79       113       85   0.0170
+mut_uniform         192         90        91      107   1.0000
+mut_series_hi       212         70        36      162   0.0012
+
+Paired against ga_front, seed by seed (a seed either arm missed is dropped):
+arm               faster  slower  tied  median dfits  sign test p
+mut_par_hi           170      43    26            -3       0.0000
+mut_del_lo            97      97     9             0       1.0000
+mut_uniform           95      90     7             0       0.7688
+mut_series_hi         55     133    24             1       0.0000
+
+## Arena 2: C1-R1-L1-p(R2,C2) -- 4 of 5 elements in series, truth one below the cap
+## R,C,L n<=6, 2,174 topologies, 23 targets, 40 fits, 480 seeds
+
+arena: land_series_rcl6.json  pool=('R', 'C', 'L')  n<=6  2174 topologies, 23 targets (1.058%)
+budget: 40 fits per run, 480 seeds, population 40
+landscape optimum AICc -1307.850
+
+arm               hit rate          95% CI  median fits  mean fits   best AICc          pressure
+------------------------------------------------------------------------------------------------
+ga_front         306/480   [0.59,0.68]                28         26    -1119.53      0.542->0.470  n1:7% n2:12% n3:20% n4:26% n5:24% n6:12%
+mut_par_hi       281/480   [0.54,0.63]                27         25    -1071.55      0.542->0.481  n1:7% n2:12% n3:21% n4:26% n5:23% n6:11%
+mut_series_hi    319/480   [0.62,0.71]                27         25    -1159.39      0.542->0.463  n1:7% n2:12% n3:20% n4:25% n5:24% n6:12%
+mut_del_lo       312/480   [0.61,0.69]                27         25    -1142.90      0.542->0.471  n1:7% n2:12% n3:20% n4:25% n5:24% n6:13%
+mut_uniform      308/480   [0.60,0.68]                27         25    -1129.66      0.542->0.472  n1:7% n2:12% n3:21% n4:26% n5:23% n6:12%
+pars1000         308/480   [0.60,0.68]                28         25    -1121.25      0.542->0.472  n1:7% n2:12% n3:21% n4:24% n5:23% n6:13%
+pars1e4          300/480   [0.58,0.67]                28         26    -1076.36      0.542->0.479  n1:7% n2:12% n3:23% n4:25% n5:21% n6:12%
+
+Hit/miss paired against ga_front (McNemar, exact):
+arm                both  only base  only arm  neither        p
+mut_par_hi          273         33         8      166   0.0001
+mut_series_hi       300          6        19      155   0.0146
+mut_del_lo          262         44        50      124   0.6063
+mut_uniform         263         43        45      129   0.9152
+pars1000            255         51        53      121   0.9219
+pars1e4             240         66        60      114   0.6562
+
+Paired against ga_front, seed by seed (a seed either arm missed is dropped):
+arm               faster  slower  tied  median dfits  sign test p
+mut_par_hi            18      63   192             0       0.0000
+mut_series_hi         86       9   205             0       0.0000
+mut_del_lo            73      43   146             0       0.0068
+mut_uniform           75      49   139             0       0.0244
+pars1000              68      44   143             0       0.0293
+pars1e4               46      63   131             0       0.1250
+
+## Arena 3: the same truth and data, cap raised to 7 -- the delete weight's confound
+## R,C,L n<=7, 11,033 topologies, 82 targets, 40 fits, 480 seeds
+
+arena: land_series_rcl7.json  pool=('R', 'C', 'L')  n<=7  11033 topologies, 82 targets (0.743%)
+budget: 40 fits per run, 480 seeds, population 40
+landscape optimum AICc -1309.920
+
+arm               hit rate          95% CI  median fits  mean fits   best AICc          pressure
+------------------------------------------------------------------------------------------------
+ga_front         307/480   [0.60,0.68]                25         23    -1168.40      0.519->0.468  n1:6% n2:11% n3:18% n4:23% n5:22% n6:14% n7:5%
+mut_del_lo       321/480   [0.63,0.71]                26         23    -1182.29      0.519->0.467  n1:6% n2:11% n3:17% n4:23% n5:22% n6:15% n7:6%
+mut_par_hi       289/480   [0.56,0.64]                25         23    -1122.21      0.519->0.478  n1:6% n2:11% n3:18% n4:23% n5:22% n6:14% n7:5%
+mut_series_hi    337/480   [0.66,0.74]                26         24    -1210.23      0.519->0.463  n1:6% n2:11% n3:18% n4:23% n5:22% n6:14% n7:5%
+mut_uniform      330/480   [0.64,0.73]                26         24    -1178.70      0.519->0.469  n1:6% n2:11% n3:18% n4:23% n5:22% n6:14% n7:5%
+
+Hit/miss paired against ga_front (McNemar, exact):
+arm                both  only base  only arm  neither        p
+mut_del_lo          282         25        39      134   0.1034
+mut_par_hi          286         21         3      170   0.0003
+mut_series_hi       305          2        32      141   0.0000
+mut_uniform         282         25        48      125   0.0095
+
+Paired against ga_front, seed by seed (a seed either arm missed is dropped):
+arm               faster  slower  tied  median dfits  sign test p
+mut_del_lo            49      41   192             0       0.4608
+mut_par_hi             9      54   223             0       0.0000
+mut_series_hi         49       9   247             0       0.0000
+mut_uniform           50      47   185             0       0.8392

@@ -32,6 +32,14 @@ python benchmarks/pyodide/bench.py                      # CPython baseline for t
 holds the frozen-landscape instruments behind `docs/SEARCH_ALGORITHM_SCREENING.md` and has one
 too.
 
+**Step 5's two sweeps are in `benchmarks/screening_round/`, not here**, because both are
+comparisons of arms rather than gates and the fits budget is what makes them affordable: eleven
+parsimony settings and nine mutation weightings at 120 seeds each, then 480 seeds on whatever
+survived. Neither moved a default. That directory's README has the commands, including the
+`--reference series` arena step 5 had to build — the round's *second* truth, and the instrument
+that showed the sweep's strongest arm to be a prior over the answer's shape rather than a better
+search (`docs/EVOLVE_SEARCH_PLAN.md` §3.5.2).
+
 **`ev5_fingerprint.py` is a comparison, not a report.** Run it once against the unchanged
 sources and once against the changed ones and `diff` the two files; a difference is the gate
 failing, and identity is also what says the publication path is still deterministic. Extract the

@@ -30,6 +30,7 @@ import argparse
 import json
 import multiprocessing
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -45,9 +46,52 @@ from autocircuit.core.spectrum import Spectrum
 #: verbatim from `benchmarks/discovery_v2.py::LARGE_REFERENCES[0]`. It is the one reference on
 #: which the genetic search recovers anything at all (EV1: 1/3, and 6/10 with warm start), which
 #: is what makes it the reference a *shortlisting* round can resolve differences on.
+#:
+#: The module-level names stay bound to it so that every arena built before this file grew a
+#: `--reference` option rebuilds byte-for-byte from the same command.
 TRUTH = "p(R1,C1)-p(R2,C2)-p(R3,C3)"
 PARAMS = {"R1.R": 1e4, "C1.C": 1e-10, "R2.R": 5e5, "C2.C": 2e-8, "R3.R": 8e4, "C3.C": 5e-7}
 F_MIN, F_MAX, NOISE = 1e-2, 1e7, 0.01
+
+
+@dataclass(frozen=True)
+class Reference:
+    """A truth to freeze a landscape around."""
+
+    truth: str
+    params: dict[str, float]
+    f_min: float
+    f_max: float
+    noise: float = 0.01
+
+
+#: Why there is more than one.
+#:
+#: Every arena this round built before step 5 -- `land_rcl6`, `land_rcl7`, `land_rclcpe6` --
+#: freezes the **same** truth in a different space, so the round has never once varied the shape
+#: of the circuit it is looking for. Step 5's mutation sweep is where that stopped being
+#: harmless: the operator weights are a prior over *structure*, and the arm that moves weight
+#: from insert-series to insert-parallel wins on a truth that is three parallel blocks in
+#: series. A prior tuned on one truth's shape is not a search improvement, it is the answer
+#: written into the question, and only a second truth of the opposite shape can tell the two
+#: apart.
+#:
+#: `series` is that second truth: a capacitor with its ESR and ESL and one interfacial RC
+#: block, which is `LARGE_REFERENCES[1]` with the CPE and the skin-effect element replaced by
+#: their plain counterparts -- the same physics, in a pool small enough to enumerate. Four of
+#: its five elements are in series where five of the Maxwell-Wagner's six are in parallel.
+#: [measured] Fitting it to its own 1% data leaves 0/5 parameters unresolved on seeds 0-2, worst
+#: parameter deviation 0.7%, so a search that fails here fails at finding the topology rather
+#: than at a truth the data cannot support.
+REFERENCES: dict[str, Reference] = {
+    "maxwell": Reference(TRUTH, PARAMS, F_MIN, F_MAX, NOISE),
+    "series": Reference(
+        "C1-R1-L1-p(R2,C2)",
+        {"C1.C": 1e-6, "R1.R": 0.05, "L1.L": 5e-10, "R2.R": 5.0, "C2.C": 1e-7},
+        1e2,
+        1e9,
+    ),
+}
 
 _WORKER: dict[str, Any] = {}
 
@@ -63,14 +107,27 @@ def _screen_one(text: str) -> float:
         return float("inf")
 
 
-def reference_spectrum(seed: int = 0) -> Spectrum:
+def reference_spectrum(seed: int = 0, reference: Reference | None = None) -> Spectrum:
+    ref = reference or REFERENCES["maxwell"]
     return simulate(
-        TRUTH, log_frequencies(F_MIN, F_MAX, 10), PARAMS, noise=NOISE, seed=seed
+        ref.truth,
+        log_frequencies(ref.f_min, ref.f_max, 10),
+        ref.params,
+        noise=ref.noise,
+        seed=seed,
     )
 
 
-def build(pool: tuple[str, ...], n_max: int, workers: int, out: Path, seed: int) -> None:
-    spectrum = reference_spectrum(seed)
+def build(
+    pool: tuple[str, ...],
+    n_max: int,
+    workers: int,
+    out: Path,
+    seed: int,
+    reference: Reference | None = None,
+) -> None:
+    ref = reference or REFERENCES["maxwell"]
+    spectrum = reference_spectrum(seed, ref)
     texts: list[str] = []
     meta: list[tuple[int, int]] = []
     for node in enumerate_up_to(pool, n_max):
@@ -100,8 +157,15 @@ def build(pool: tuple[str, ...], n_max: int, workers: int, out: Path, seed: int)
     elapsed = time.perf_counter() - started
 
     payload = {
-        "truth": TRUTH,
-        "truth_canonical": Circuit.parse(TRUTH).canonical_form(),
+        "truth": ref.truth,
+        "truth_canonical": Circuit.parse(ref.truth).canonical_form(),
+        # Written so that `targets.py` can rebuild the spectrum from the file rather than from
+        # this module's constants. The arenas built before these keys existed do not carry
+        # them, and that is what the fallback in `targets.py` is for.
+        "params": ref.params,
+        "f_min": ref.f_min,
+        "f_max": ref.f_max,
+        "noise": ref.noise,
         "pool": list(pool),
         "n_max": n_max,
         "data_seed": seed,
@@ -123,9 +187,17 @@ def main() -> None:
     ap.add_argument("--n-max", type=int, default=6)
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--reference", default="maxwell", choices=sorted(REFERENCES))
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
-    build(tuple(args.pool.split(",")), args.n_max, args.workers, args.out, args.seed)
+    build(
+        tuple(args.pool.split(",")),
+        args.n_max,
+        args.workers,
+        args.out,
+        args.seed,
+        REFERENCES[args.reference],
+    )
 
 
 if __name__ == "__main__":

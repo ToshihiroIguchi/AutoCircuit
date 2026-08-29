@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 
 import numpy as np
-from landscape2 import reference_spectrum
+from landscape import Reference, reference_spectrum
 
 from autocircuit.core.circuit import Circuit
 from autocircuit.core.discover import EQUIVALENCE_RTOL
@@ -31,7 +31,18 @@ def main() -> None:
 
     data = json.loads(args.landscape.read_text(encoding="utf-8"))
     rows = data["rows"]
-    spectrum = reference_spectrum(data["data_seed"])
+    # An arena built before `landscape.py` grew a `--reference` option carries no parameters of
+    # its own, and for those the module default *is* the truth they were built from. Falling
+    # back rather than requiring the keys is what keeps `targets_rcl6/7` and `targets_rclcpe6`
+    # rebuildable from the files already on disk.
+    spectrum = reference_spectrum(
+        data["data_seed"],
+        None
+        if "params" not in data
+        else Reference(
+            data["truth"], data["params"], data["f_min"], data["f_max"], data["noise"]
+        ),
+    )
     truth_key = data["truth_canonical"]
 
     for r in rows:
@@ -46,6 +57,21 @@ def main() -> None:
     band.sort(key=lambda r: r["cost"])
     print(f"truth screening cost {truth_row['cost']:.6g}; {len(band)} rows within {args.band}x")
     checked = band[: args.max_checks]
+    # `--max-checks` truncates from the *cheap* end, and the truth sits at the expensive end of
+    # its own band by construction -- so a band longer than the cap drops the truth itself and
+    # the run reports a target set that does not contain the answer, with nothing on either
+    # stream to say so. [measured] The five-element series truth at n <= 7 has a band of 761 and
+    # the default cap is 400: 250 rows in, the count was still zero. Put the truth back and say
+    # what was cut; a silent 0/N here would be read as "this arena has no equivalents".
+    if truth_row not in checked:
+        checked.append(truth_row)
+    if len(band) > args.max_checks:
+        print(
+            f"  WARNING: band truncated to {args.max_checks} of {len(band)} rows; "
+            f"{len(band) - args.max_checks} possible equivalents were not checked. "
+            f"Raise --max-checks to count them all.",
+            flush=True,
+        )
 
     targets: list[str] = []
     for i, r in enumerate(checked, 1):

@@ -30,7 +30,7 @@ import math
 import multiprocessing
 import multiprocessing.pool
 import time
-from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
+from collections.abc import Callable, Generator, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, NamedTuple, cast
 
@@ -201,6 +201,49 @@ WARM_ACCEPT_FACTOR = math.inf
 #: and `benchmarks/screening_round/arms.py` re-measure the ladder by passing other values, and a
 #: search internal that a user cannot set correctly is not a knob (CLAUDE.md).
 BREEDING_EXTRA = 0
+
+#: Relative weights of `mutate`'s four operations: retype, insert-series, insert-parallel,
+#: delete.
+#:
+#: **The equality of the middle two is the measured part, and it is the only part.** [measured,
+#: docs/EVOLVE_SEARCH_PLAN.md section 3.5.2] Nine weightings over 480 seeds on two frozen arenas
+#: whose truths have opposite shape. Moving weight from insert-series to insert-parallel
+#: (0.15/0.35) reaches the truth's class in 308/480 against this tuple's 282 on a truth that is
+#: three parallel RC blocks (McNemar p = 0.018) -- and 281/480 against 306 on a truth that is
+#: four series elements and one parallel block (p = 0.0001). The mirror weighting reverses both
+#: signs. So an asymmetric setting is not a better search, it is a bet on the shape of the
+#: answer, and CLAUDE.md rules that out: it is the software deciding what kind of part this is,
+#: reached from inside the search rather than from the CLI.
+#:
+#: The rest of the tuple is arbitrary and measured to be so: uniform weights, (0.25, 0.25, 0.25,
+#: 0.25), tie it on both arenas (p = 1.00 and p = 0.92). One arm never lost -- delete cut to 0.05
+#: -- and was not taken, because both arenas' truths sit at or one below the element cap, which
+#: is the regime that flatters a low delete weight; section 3.5.3 measures that confound out.
+#:
+#: A parameter of `mutate` and of `_next_generation` so that the sweep can drive the real
+#: operator, and not of `discover()`, for the reason :data:`BREEDING_EXTRA` is not.
+MUTATION_WEIGHTS: tuple[float, float, float, float] = (0.35, 0.25, 0.25, 0.15)
+
+#: How hard a crowded complexity level is penalised **when choosing a parent**, in units of the
+#: criterion. PySR's adaptive parsimony; see :func:`_tournament` for the two ways this differs
+#: from PySR's own form and why.
+#:
+#: **[measured] Zero, because the term does nothing.** docs/EVOLVE_SEARCH_PLAN.md section 3.5.1.
+#: The ladder runs 0.5, 2, 5, 10, 20, 100, 300, 1000, 3000, 1e4, 1e6 on the 21,057-topology
+#: arena: everything below 300 is inert (the penalty is at most `scaling`, and front members'
+#: scores differ by hundreds of AICc), and above it the ladder wanders between 57/120 and 78/120
+#: with no ordering. The best-looking rung was 77/120 against 65/120 at 120 seeds, p = 0.03 --
+#: the same counts, control and p as the two-island arm that section 3.4.4 also had to demote --
+#: and at 480 seeds it is 293/480 against 282/480, p = 0.32, with p = 0.92 on the second
+#: reference. The limit of the ladder is the worst arm on it: at 1e6 the crowding term outranks
+#: every score difference, so selection stops consulting fitness.
+#:
+#: Kept rather than deleted, which is the opposite disposal from the islands of section 3.4.4
+#: and deliberately so. Those were measurably worse and their arm owned its own generation loop;
+#: this is a keyword on `_tournament`, and removing it would force the benchmark arm that
+#: records the rejection to reimplement `_next_generation` -- the one thing
+#: `benchmarks/screening_round/arms.py` says an arm may not do.
+PARSIMONY_SCALING = 0.0
 
 #: Tier-1 tasks handed to a worker process at a time. Large enough to amortise the ~1 s
 #: interpreter start-up on Windows, small enough that the early-abandon threshold keeps up.
@@ -969,17 +1012,27 @@ def random_topology(
 
 
 def mutate(
-    node: Node, rng: np.random.Generator, pool: Sequence[str], max_elements: int
+    node: Node,
+    rng: np.random.Generator,
+    pool: Sequence[str],
+    max_elements: int,
+    *,
+    weights: Sequence[float] = MUTATION_WEIGHTS,
 ) -> Node:
-    """Apply one random structural or element-type change."""
+    """Apply one random structural or element-type change.
+
+    ``weights`` is :data:`MUTATION_WEIGHTS` and is a parameter only so that the benchmarks can
+    sweep it; it is not reachable from :func:`discover`, for the reason
+    :data:`BREEDING_EXTRA` is not.
+    """
     operations = ["retype", "insert_series", "insert_parallel", "delete"]
-    weights = np.array([0.35, 0.25, 0.25, 0.15])
+    active = np.array(weights, dtype=float)
     if count_elements(node) >= max_elements:
-        weights[1] = weights[2] = 0.0
+        active[1] = active[2] = 0.0
     if count_elements(node) <= 1:
-        weights[3] = 0.0
-    weights = weights / weights.sum()
-    operation = str(rng.choice(operations, p=weights))
+        active[3] = 0.0
+    active = active / active.sum()
+    operation = str(rng.choice(operations, p=active))
 
     if operation == "retype":
         path = _element_paths(node)[int(rng.integers(len(_element_paths(node))))]
@@ -1920,6 +1973,13 @@ def _evolve(
             max_elements,
             population,
             criterion,
+            # Crowding is a property of the whole archive, not of the front the pool is
+            # (:func:`_complexity_frequencies`). Computed only when it can change something:
+            # the default scaling is zero and the count would otherwise walk the archive once
+            # per generation to be multiplied away.
+            frequencies=(
+                _complexity_frequencies(alive) if PARSIMONY_SCALING else None
+            ),
         )
 
     # Only refitted candidates are reported, which is the rule SCREEN_POPSIZE states and the
@@ -2819,6 +2879,21 @@ def _breeding_pool(
     return front + [c for c in ranked[:extra] if id(c) not in on_front]
 
 
+def _complexity_frequencies(archive: Sequence[Candidate]) -> dict[float, float]:
+    """What fraction of the archive sits at each complexity level.
+
+    The input is the whole archive rather than the breeding pool on purpose. The pool is the
+    Pareto front (:data:`BREEDING_EXTRA`), which holds about *one* member per complexity by
+    construction, so a crowding count taken over it is 1 everywhere and says nothing. What is
+    unevenly populated is the history: where the search has actually spent its fits.
+    """
+    counts: dict[float, float] = {}
+    for candidate in archive:
+        counts[candidate.complexity] = counts.get(candidate.complexity, 0.0) + 1.0
+    total = float(len(archive)) or 1.0
+    return {key: value / total for key, value in counts.items()}
+
+
 def _next_generation(
     alive: list[Candidate],
     rng: np.random.Generator,
@@ -2826,6 +2901,10 @@ def _next_generation(
     max_elements: int,
     population: int,
     criterion: Criterion = DEFAULT_CRITERION,
+    *,
+    frequencies: Mapping[float, float] | None = None,
+    parsimony: float = PARSIMONY_SCALING,
+    weights: Sequence[float] = MUTATION_WEIGHTS,
 ) -> list[_Offspring]:
     """Elitism over the Pareto front, then tournament selection with mutation/crossover.
 
@@ -2844,13 +2923,17 @@ def _next_generation(
     trees: list[_Offspring] = [(candidate.circuit.root, candidate) for candidate in elite]
 
     while len(trees) < population:
-        parent = _tournament(alive, rng, criterion=criterion)
+        parent = _tournament(
+            alive, rng, criterion=criterion, frequencies=frequencies, parsimony=parsimony
+        )
         if rng.random() < 0.3 and len(alive) > 1:
-            other = _tournament(alive, rng, criterion=criterion)
+            other = _tournament(
+                alive, rng, criterion=criterion, frequencies=frequencies, parsimony=parsimony
+            )
             child = crossover(parent.circuit.root, other.circuit.root, rng)
         else:
             child = parent.circuit.root
-        child = mutate(child, rng, pool, max_elements)
+        child = mutate(child, rng, pool, max_elements, weights=weights)
         if count_elements(child) <= max_elements:
             trees.append((child, parent))
     return trees
@@ -2861,9 +2944,31 @@ def _tournament(
     rng: np.random.Generator,
     size: int = 3,
     criterion: Criterion = DEFAULT_CRITERION,
+    *,
+    frequencies: Mapping[float, float] | None = None,
+    parsimony: float = 0.0,
 ) -> Candidate:
+    """Draw three of the pool and keep the best, optionally discounted for crowding.
+
+    The crowding term is PySR's adaptive parsimony, and it lives **here and nowhere else**.
+    :meth:`Candidate.score` is what ranks the report under the criterion the user chose
+    (:attr:`DiscoveryResult.criterion`); a breeding heuristic that reached it would change the
+    published ranking for a reason the report cannot state. So the adjusted value is computed
+    inside this call, used to pick a parent, and discarded.
+
+    PySR multiplies the loss by ``exp(scaling * frequency)``. That is wrong for a criterion
+    that can be negative -- AICc usually is here, and multiplying a negative loss by a number
+    above one *rewards* the crowded level. The term is therefore additive, in units of the
+    criterion, which is also the unit a scaling constant can be reasoned about in: a penalty of
+    1 AICc is a penalty of one parameter's worth of evidence.
+    """
     picks = rng.integers(0, len(alive), size=min(size, len(alive)))
-    return min((alive[int(i)] for i in picks), key=lambda c: c.score(criterion))
+    if not parsimony or frequencies is None:
+        return min((alive[int(i)] for i in picks), key=lambda c: c.score(criterion))
+    return min(
+        (alive[int(i)] for i in picks),
+        key=lambda c: c.score(criterion) + parsimony * frequencies.get(c.complexity, 0.0),
+    )
 
 
 def _refine(

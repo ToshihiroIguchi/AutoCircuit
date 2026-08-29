@@ -36,7 +36,9 @@ from autocircuit.core.circuit import (
     subtree_paths,
 )
 from autocircuit.core.discover import (
+    MUTATION_WEIGHTS,
     _breeding_pool,
+    _complexity_frequencies,
     _next_generation,
     _screening_score,
     _unique_best,
@@ -176,7 +178,9 @@ def arm_current(table: Table, rng: np.random.Generator, pool: tuple[str, ...],
 
 
 def arm_ga_bounded(table: Table, rng: np.random.Generator, pool: tuple[str, ...],
-                   max_elements: int, population: int, *, pool_bound: int | None = None) -> Trace:
+                   max_elements: int, population: int, *, pool_bound: int | None = None,
+                   parsimony: float = 0.0,
+                   weights: Sequence[float] = MUTATION_WEIGHTS) -> Trace:
     """Step 4's minimal half: the same search, but the breeding pool stops growing.
 
     `_evolve` breeds from the entire history, so `_tournament` draws 3 of N with N rising every
@@ -224,7 +228,17 @@ def arm_ga_bounded(table: Table, rng: np.random.Generator, pool: tuple[str, ...]
         bound = population if pool_bound is None else pool_bound
         alive = _breeding_pool(alive_all, bound, CRITERION)
         pressure.append(1.0 - (1.0 - 1.0 / len(alive)) ** 3)
-        trees = _next_generation(alive, rng, pool, max_elements, population, CRITERION)
+        # Step 5's two knobs, both of them the library's own and both defaulting to what ships,
+        # so `ga_front` is still the shipped search and the sweeps below differ from it in
+        # exactly one thing. The frequency map is taken over `alive_all` rather than `alive`
+        # for the reason `_complexity_frequencies` gives: the pool is the front, which is one
+        # member per complexity and therefore uniformly "crowded".
+        trees = _next_generation(
+            alive, rng, pool, max_elements, population, CRITERION,
+            frequencies=_complexity_frequencies(alive_all) if parsimony else None,
+            parsimony=parsimony,
+            weights=weights,
+        )
         generation += 1
     return Trace(table.hit_at, table.fits, table.best, pressure, table.sizes)
 
@@ -630,6 +644,54 @@ ARMS: dict[str, Callable[..., Trace]] = {
                                                   pool_bound=0, **k),
     "islands4_front_iso": lambda *a, **k: arm_islands(*a, islands=4, migration=0.0,
                                                       pool_bound=0, **k),
+    # -- Step 5, both sweeps run on top of `ga_front` (the shipped arm) ---------------------
+    # Adaptive parsimony: a crowding penalty in units of AICc, applied when picking a parent
+    # and nowhere else. The ladder spans four orders of magnitude on purpose -- the frequency
+    # is a fraction in [0,1] and the levels a run visits are a handful, so the term a level
+    # actually receives is roughly `scaling / (number of levels)`, and anything below ~1 AICc
+    # cannot outrank a real score difference.
+    "pars0.5": lambda *a, **k: arm_ga_bounded(*a, pool_bound=0, parsimony=0.5, **k),
+    "pars2": lambda *a, **k: arm_ga_bounded(*a, pool_bound=0, parsimony=2.0, **k),
+    "pars5": lambda *a, **k: arm_ga_bounded(*a, pool_bound=0, parsimony=5.0, **k),
+    "pars10": lambda *a, **k: arm_ga_bounded(*a, pool_bound=0, parsimony=10.0, **k),
+    "pars20": lambda *a, **k: arm_ga_bounded(*a, pool_bound=0, parsimony=20.0, **k),
+    "pars100": lambda *a, **k: arm_ga_bounded(*a, pool_bound=0, parsimony=100.0, **k),
+    # The top of the ladder is here to answer a question the middle cannot: `pars20` and
+    # `pars100` were byte-identical on the first twelve seeds, which is either saturation --
+    # the penalty already outranks every score difference a tournament can show it -- or a
+    # sweep that stopped one rung short. Three orders of magnitude past the last change says
+    # which.
+    "pars300": lambda *a, **k: arm_ga_bounded(*a, pool_bound=0, parsimony=300.0, **k),
+    "pars1000": lambda *a, **k: arm_ga_bounded(*a, pool_bound=0, parsimony=1000.0, **k),
+    "pars3000": lambda *a, **k: arm_ga_bounded(*a, pool_bound=0, parsimony=3000.0, **k),
+    "pars1e4": lambda *a, **k: arm_ga_bounded(*a, pool_bound=0, parsimony=1e4, **k),
+    # The limit of the ladder rather than another rung on it. At 1e6 the crowding term outranks
+    # every score difference the front can show, so the tournament is "take the least-crowded
+    # complexity, score only as a tiebreak" -- selection that has stopped consulting fitness.
+    # It is here because a ladder whose top rung wins needs to say whether the win belongs to a
+    # setting or to the limit.
+    "pars1e6": lambda *a, **k: arm_ga_bounded(*a, pool_bound=0, parsimony=1e6, **k),
+    # The mutation weights, in the order `mutate` reads them: retype, insert-series,
+    # insert-parallel, delete. `mut_ship` is the shipped tuple under another name, so a run
+    # can carry its own control without relying on `ga_front` being listed first.
+    "mut_ship": lambda *a, **k: arm_ga_bounded(*a, pool_bound=0,
+                                               weights=MUTATION_WEIGHTS, **k),
+    "mut_uniform": lambda *a, **k: arm_ga_bounded(*a, pool_bound=0,
+                                                  weights=(0.25, 0.25, 0.25, 0.25), **k),
+    "mut_retype_hi": lambda *a, **k: arm_ga_bounded(*a, pool_bound=0,
+                                                    weights=(0.55, 0.175, 0.175, 0.10), **k),
+    "mut_retype_lo": lambda *a, **k: arm_ga_bounded(*a, pool_bound=0,
+                                                    weights=(0.15, 0.325, 0.325, 0.20), **k),
+    "mut_struct_hi": lambda *a, **k: arm_ga_bounded(*a, pool_bound=0,
+                                                    weights=(0.10, 0.35, 0.35, 0.20), **k),
+    "mut_del_hi": lambda *a, **k: arm_ga_bounded(*a, pool_bound=0,
+                                                 weights=(0.30, 0.20, 0.20, 0.30), **k),
+    "mut_del_lo": lambda *a, **k: arm_ga_bounded(*a, pool_bound=0,
+                                                 weights=(0.39, 0.28, 0.28, 0.05), **k),
+    "mut_series_hi": lambda *a, **k: arm_ga_bounded(*a, pool_bound=0,
+                                                    weights=(0.35, 0.35, 0.15, 0.15), **k),
+    "mut_par_hi": lambda *a, **k: arm_ga_bounded(*a, pool_bound=0,
+                                                 weights=(0.35, 0.15, 0.35, 0.15), **k),
     "staged": arm_staged,
     "mapelites": arm_mapelites,
     "mapelites_alps": lambda *a, **k: arm_mapelites(*a, alps=True, **k),

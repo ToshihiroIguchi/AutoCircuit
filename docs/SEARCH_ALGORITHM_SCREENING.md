@@ -41,7 +41,8 @@ wall-clock budget measured the machine rather than the search, and `EVOLVE_SEARC
 says outright that its own baseline "is a description of the search rather than a fixed point to
 diff against" for exactly that reason.
 
-Three arenas were built, all on the same reference and spectrum:
+Three arenas were built, all on the same reference and spectrum (§5.2 is why that last clause
+turned out to matter, and the two arenas step 5 added to fix it):
 
 | arena | topologies | build |
 |---|---:|---|
@@ -63,6 +64,11 @@ Four limitations, stated here rather than discovered later:
   which parent proposed it, so every arm is measured in the `warm_accept=0` world — the control
   arm gate EV3 already uses.
 * Early abandon is off, so every entry is comparable.
+* **All three arenas freeze the same truth**, and until step 5 the round had never once varied
+  the shape of the circuit it was looking for. That is fine for arms that differ in how they
+  *select*, and it is a confound for any arm carrying a prior over *structure* — §5.2 is where one
+  of those won an arena by knowing the answer's shape, and it is the section to read before
+  trusting a single-truth result.
 * **Only the easiest of EV1's three references can be put on a landscape at all.** The
   capacitor + interfacial reference has 107,534 topologies at n ≤ 6 on its pool, and the
   Randles + ESL truth has seven elements. Those are the two references where the search scores
@@ -424,6 +430,48 @@ is more seeds.
 topology without incrementing the fit counter, so the tighter arms re-propose what they already
 know and take far longer in wall clock while spending fewer fits. Budget in fits is the right
 unit for the comparison and the wrong unit for an ETA; a tight arm that looks hung is not.
+
+### 5.2 A later round again: the round had only ever asked about one circuit
+
+§2.1's fourth limitation says this round ranks algorithms on the one reference whose space can be
+enumerated, and that the transfer to the other two is untested. That is true and it understates
+the problem, which step 5 of `docs/EVOLVE_SEARCH_PLAN.md` found by walking into it.
+
+All three arenas above — `land_rcl6`, `land_rcl7`, `land_rclcpe6` — are three *spaces* around one
+**truth**: `p(R1,C1)-p(R2,C2)-p(R3,C3)`, five of whose six elements are joined in parallel. Every
+mitigation §2.1 offers varies the space (10x in size, two element caps) and none of them varies
+the answer. For the arms this round compared — operators, archives, breeding pools — that is
+probably harmless. For anything carrying a **prior over structure** it is not.
+
+[measured, `EVOLVE_SEARCH_PLAN.md` §3.5.2, `results_mutation_weights.txt`] The mutation-weight arm
+that shifts weight from insert-series to insert-parallel reaches the truth's class in 308/480
+against the incumbent's 282, McNemar p = 0.018 — a clean win on every reading this round has, on
+its largest arena, at 480 seeds. On a truth of the opposite shape it loses by a comparable margin
+(281/480 against 306, p = 0.0001) and the mirror arm reverses both signs; the reversal survives
+raising the element cap from six to seven. **The arm was not searching better. It knew the answer's
+shape.**
+
+So the round now has a second truth, and the instrument is cheap: `landscape.py --reference series`
+freezes `C1-R1-L1-p(R2,C2)` — `LARGE_REFERENCES[1]` with the CPE and the skin-effect element
+replaced by their plain counterparts, the same physics in a pool small enough to enumerate — at a
+cost of one landscape build and one `targets.py` run. Nothing in §4 is re-opened by this: no arm
+there varies a structural prior, and the two that came closest (`arm_beam`'s growth operator and
+`arm_map_elites`' cells) were rejected on other grounds. But **any future arm that biases *what
+kind of circuit* gets proposed has to be run on both truths before its number means anything**,
+and a single-truth win is now known to be a thing this round can produce.
+
+Two smaller instrument notes from the same step:
+
+**A new arena needs its budget calibrated before it can rank anything.** The series arena is 12x
+denser in targets than the CPE one (1.06% against 0.085%), so the 150 fits that leave the CPE
+arena at 59% leave this one saturated at 40/40. §5.1's rule — check the arena still has somewhere
+to fail — turns out to apply to the arena as well as to the ladder.
+
+**`targets.py --max-checks` could silently drop the truth.** It truncates the cost-sorted band
+from the cheap end and the truth sits at that band's expensive end by construction, so an arena
+whose band exceeds the cap returned a target set not containing the answer — indistinguishable
+from an arena with no equivalents. The n ≤ 7 series arena has a band of 761 against a default cap
+of 400. The truth row is now appended unconditionally and a truncated band prints a warning.
 
 **What this round cannot decide:**
 

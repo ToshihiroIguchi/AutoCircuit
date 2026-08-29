@@ -699,9 +699,9 @@ def test_the_search_breeds_from_a_bounded_pool_however_long_it_runs(
     offered: list[tuple[int, int]] = []
     original = discover_module._next_generation
 
-    def spy(alive, rng, pool, max_elements, pop, criterion=discover_module.DEFAULT_CRITERION):  # type: ignore[no-untyped-def]
+    def spy(alive, rng, pool, max_elements, pop, criterion=discover_module.DEFAULT_CRITERION, **kw):  # type: ignore[no-untyped-def]
         offered.append((len(alive), len(pareto_front(alive, criterion))))
-        return original(alive, rng, pool, max_elements, pop, criterion)
+        return original(alive, rng, pool, max_elements, pop, criterion, **kw)
 
     monkeypatch.setattr(discover_module, "_next_generation", spy)  # type: ignore[attr-defined]
     result = discover(
@@ -753,3 +753,117 @@ def test_the_front_alone_and_the_front_plus_its_best_are_the_same_set() -> None:
     assert front == [c.circuit.canonical_form() for c in pareto_front(archive, "aicc")]
     # And the default is that rule rather than a number that happens to equal it today.
     assert front == [c.circuit.canonical_form() for c in _breeding_pool(archive, criterion="aicc")]
+
+
+# -- Step 5: the mutation weights and the crowding penalty -----------------------------------
+#
+# docs/EVOLVE_SEARCH_PLAN.md §3.5. Both are tuning rather than structure, and both are reachable
+# from the benchmarks and from nothing else; what these tests pin is that second half, because
+# the numbers themselves are settled by measurement and not by assertion.
+
+
+def test_the_mutation_weights_choose_the_operator_and_default_to_the_shipped_tuple() -> None:
+    """`MUTATION_WEIGHTS` is the operator's own prior over structure, so it has to be aimable.
+
+    The sweep of §3.5 measures arms that differ from the shipped search in this tuple alone, and
+    an arm that quietly ignored the tuple it was given would produce a whole table of ties. So
+    the weights are asserted to *reach* the choice: a tuple that leaves only one operator
+    possible makes every mutation that operator.
+    """
+    rng = np.random.default_rng(0)
+    node = Circuit.parse("R1-C1-p(R2,C2)").root
+
+    retype_only = [mutate(node, rng, ("R", "C", "L"), 6, weights=(1.0, 0.0, 0.0, 0.0))
+                   for _ in range(20)]
+    assert all(count_elements(child) == 4 for child in retype_only)
+
+    delete_only = [mutate(node, rng, ("R", "C", "L"), 6, weights=(0.0, 0.0, 0.0, 1.0))
+                   for _ in range(20)]
+    assert all(count_elements(child) == 3 for child in delete_only)
+
+    insert_only = [mutate(node, rng, ("R", "C", "L"), 6, weights=(0.0, 0.5, 0.5, 0.0))
+                   for _ in range(20)]
+    assert all(count_elements(child) == 5 for child in insert_only)
+
+    assert discover_module.MUTATION_WEIGHTS == (0.35, 0.25, 0.25, 0.15)
+
+
+def test_neither_step_five_knob_is_reachable_from_discover() -> None:
+    """CLAUDE.md's rule, held by the signature rather than by convention.
+
+    "How much should the search prefer deleting an element" and "how hard should a crowded
+    complexity be penalised" are exactly the search internals a non-expert cannot set
+    correctly, and the project's answer to those is a measured module constant -- the shape
+    `BREEDING_EXTRA` already has. A byte-identical wire payload cannot say this; only the
+    absence of the parameter can.
+    """
+    import inspect
+
+    taken = set(inspect.signature(discover).parameters)
+    assert not taken & {"weights", "mutation_weights", "parsimony", "parsimony_scaling"}
+    assert discover_module.PARSIMONY_SCALING == 0.0
+
+
+def test_the_crowding_penalty_changes_which_parent_breeds_and_no_reported_number() -> None:
+    """PySR's adaptive parsimony, and the one line of it that matters here.
+
+    The archive is deliberately lopsided: the well-scoring candidate sits at the complexity the
+    search has already spent almost all of its fits on, and the poor one sits alone. With the
+    penalty off, selection is fitness and the crowded candidate is nearly every parent; turned
+    up, it is nearly none of them. That is the *whole* intended effect.
+
+    The other half is the invariant §3.5 states: the term may reach the tournament and nothing
+    else. So the same candidates are asked for their scores afterwards and must answer exactly
+    what they answered before -- a penalty folded into `Candidate.score` would re-rank the
+    published report for a reason the report cannot state.
+    """
+    data = simulate(
+        "R1-p(R2,C1)",
+        log_frequencies(1e-1, 1e6, 8),
+        {"R1.R": 50.0, "R2.R": 1e3, "C1.C": 1e-8},
+        noise=0.005,
+        seed=0,
+    )
+    crowded = _fitted("R1-p(R2,C1)", data)
+    lonely = _fitted("R1-C1", data)
+    assert crowded.score("aicc") < lonely.score("aicc"), "the fixture must have a clear winner"
+    assert crowded.complexity != lonely.complexity
+    before = [crowded.score("aicc"), lonely.score("aicc")]
+
+    # 40 fits at the crowded complexity against one at the lonely: what an archive looks like
+    # after the search has settled on a size.
+    archive = [crowded] * 40 + [lonely]
+    frequencies = discover_module._complexity_frequencies(archive)
+    assert math.isclose(sum(frequencies.values()), 1.0)
+
+    def parents(parsimony: float, seed: int) -> int:
+        offspring = discover_module._next_generation(
+            [crowded, lonely],
+            np.random.default_rng(seed),
+            ("R", "C", "L"),
+            5,
+            40,
+            "aicc",
+            frequencies=frequencies,
+            parsimony=parsimony,
+        )
+        return sum(
+            1
+            for _tree, parent in offspring
+            if parent is not None and parent.complexity == crowded.complexity
+        )
+
+    # Compared seed by seed rather than as two totals, for the reason §3.4.4 of the plan gives
+    # about every other comparison in this round: a threshold on one draw of a stochastic count
+    # is a threshold on the draw. A two-member pool also caps the effect -- a tournament of
+    # three drawn with replacement from two picks the crowded one only 3 times in 4, so "every
+    # parent" is about 30 of 40 and not 40.
+    off = [parents(0.0, seed) for seed in range(5)]
+    on = [parents(1e6, seed) for seed in range(5)]
+    assert all(a > b for a, b in zip(off, on, strict=True)), (
+        f"the crowding penalty did not move selection: {off} against {on}"
+    )
+    assert min(off) > 20, f"fitness selection did not favour the better score ({off})"
+    assert max(on) < 20, f"the crowding penalty left the crowded parent in charge ({on})"
+
+    assert [crowded.score("aicc"), lonely.score("aicc")] == before
