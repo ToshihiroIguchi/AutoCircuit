@@ -265,7 +265,39 @@ topology space. That is a statement about the other tool's default assumptions r
 its search, and it is why arena C samples inside the admissible set instead of sampling freely and
 reporting a landslide of `filtered` events that would say nothing about either search.
 
-### 1.3 Stopping rule, fixed now so that it cannot be chosen later
+### 1.3 The arena as it came out, including the bias the sampler was not designed to avoid
+
+[measured] Eight truths, two per size, from 4 / 24 / 128 / 692 admissible topologies at sizes
+3–6. The census: **4820 draws rejected for having no series ohmic resistance**, 8 for no parallel
+route, and **132 parameter draws rejected as unidentifiable** before any tool ran.
+
+| id | circuit | L? |
+|---|---|---|
+| c3_0 | `p(CPE1,CPE2)-R1` | no |
+| c3_1 | `p(R1,L1)-R2` | yes |
+| c4_0 | `p(R1,L1)-R2-L2` | yes |
+| c4_1 | `p(L1,CPE1)-R1-CPE2` | yes |
+| c5_0 | `p(CPE1-CPE2,CPE3)-R1-L1` | yes |
+| c5_1 | `p(R1-L1,CPE1)-R2-L2` | yes |
+| c6_0 | `p(p(R1,CPE1)-p(R2,CPE2),R3)-R4` | no |
+| c6_1 | `p(p(L1-CPE1,CPE2)-L2,L3)-R1` | yes |
+
+**Six of the eight contain an inductor.** Uniform sampling over a pool of `R`, `L`, `CPE` makes
+`L` common — foreseeable, and not foreseen when the sampler was written. It matters because §0.5
+measured that AutoEIS's default preprocessing deletes the inductive tail before its search sees
+it, so on six of these eight truths the headline number would be measuring the other tool's
+preprocessing rather than its search.
+
+**The arena was not re-drawn.** Changing a pre-registered sampler after seeing its draw is the
+move this plan exists to forbid, and it would be no less a selection for having been made on the
+arena rather than on a score. What is done instead is stated here in advance of any result: the
+**`L`-free subgroup is the search comparison and the `L`-containing subgroup is the preprocessing
+effect**, they are reported separately, and the `L`-free subgroup is **thin** — two truths, so ten
+pairs at the first stage and forty only if the round reaches twenty seeds. A difference inside the
+`L`-free group at five seeds cannot be resolved (`d = 6` against ten pairs is possible but only
+for a near-total split), and saying so now is cheaper than discovering it afterwards.
+
+### 1.4 Stopping rule, fixed now so that it cannot be chosen later
 
 The seed list (1–20) and the stage boundaries (5, 10, 20 seeds) are written into `arena.py` before
 the first run. Extending the round runs more of an already-written list; it never chooses seeds
