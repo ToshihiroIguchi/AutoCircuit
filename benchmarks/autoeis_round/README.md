@@ -36,6 +36,10 @@ Not created by anything in this repository, and deliberately outside it:
 winget install --id Python.Python.3.12 --exact --scope user
 & "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe" -m venv C:\Users\toshi\python\autoeis-env
 & C:\Users\toshi\python\autoeis-env\Scripts\python.exe -m pip install autoeis
+# Required: autoeis 0.0.44 requires `arviz` with no upper bound, pip resolves 1.3.0, and arviz
+# 1.x removed `az.waic`, so `compute_fitness_metrics` -- the stage AutoEIS's own WAIC ranking
+# comes from -- dies with an AttributeError. 0.23.4 is the last release that has it.
+& C:\Users\toshi\python\autoeis-env\Scripts\python.exe -m pip install "arviz==0.23.4"
 ```
 
 The first import of the Julia runtime takes about 147 s: `juliapkg` fetches Julia 1.10 (its

@@ -31,7 +31,7 @@ does.
 | numpyro | 0.19.0 |
 | juliacall / juliapkg | 0.9.35 / 0.1.26 |
 | pyimpspec | 5.1.3 |
-| arviz | 1.3.0 |
+| arviz | **0.23.4, pinned by hand — see below** |
 | numpy / scipy / pandas (AutoEIS env) | 2.5.2 / 1.18.1 / 3.0.5 |
 | Python (AutoEIS env) | 3.12.10 |
 | Python / numpy / scipy (project env) | 3.13.14 / 2.5.1 / 1.17.1 |
@@ -45,6 +45,14 @@ Two installation facts worth keeping, because both cost time to find:
   0.0.35 as the newest candidate. Comparing against a release eight versions behind would be a
   worse round than installing an interpreter, so Python 3.12.10 was installed (winget, user
   scope) and the environment built on that.
+- **A clean `pip install autoeis` today produces a build whose last stage crashes.** AutoEIS
+  0.0.44 requires `arviz` with no upper bound, pip resolves it to 1.3.0, and arviz 1.x no longer
+  has `az.waic` — so `compute_fitness_metrics` dies with
+  `AttributeError: module 'arviz' has no attribute 'waic'`. That is the stage the tool's *own*
+  ranking rule comes from, so it cannot be skipped. Fixed by pinning `arviz==0.23.4`, the last
+  release that has `waic`; stages 4 and 5 then complete. This is recorded rather than quietly
+  repaired because "the other tool at its defaults" has to mean a build that runs, and the next
+  person to install it will hit the same wall.
 - **`perform_full_analysis()` raises `NotImplementedError`.** There is no single end-to-end call.
   The supported path, and therefore the definition of "AutoEIS at its defaults" for this round,
   is the documented step-by-step pipeline: `generate_equivalent_circuits` →
@@ -97,10 +105,15 @@ and **every AutoEIS run in this round is an independent draw**. Consequences:
 - Unrelated but in the same function: `seed = seed or time.time_ns() % 2**32`, so **`seed=0` is
   not a seed** — it falls back to the clock. Seeds start at 1.
 
-**5. Cost: about 21 s per generation iteration, so ~35 min per spectrum at the default budget.**
-Ten iterations took 221.7 s, 209.4 s and 205.7 s. The default is `iters=100`, which puts the
-generation stage alone at roughly **35 minutes per spectrum**, before filtering and before the
-NUTS stage (`num_warmup=2500`, `num_samples=1000` per surviving circuit, not yet timed).
+**5. Cost: about 40 minutes per spectrum, and the generation stage is nearly all of it.**
+Ten generation iterations took 221.7 s, 209.4 s and 205.7 s, and the default is `iters=100`, so
+the generation stage alone is roughly **35 minutes per spectrum**. The Bayesian stage was then
+measured separately at its defaults (`num_warmup=2500`, `num_samples=1000`), on two circuits fitted
+to one spectrum: **35.7 s per circuit on one run and 52.7 s on another** — the spread is this
+machine's own drift, which `docs/HANDOFF.md` §4 documents at 2× — with both circuits converged and
+zero divergences. `compute_fitness_metrics` costs about 2 s. So the total is the generation stage
+plus roughly 40 s per circuit that survives the filters, and the fear that a single run might take
+hours is not borne out.
 
 ### 0.3 A reading that was withdrawn, kept here because the mistake is the useful part
 
@@ -120,6 +133,20 @@ work**, and the instrument — CPU time of one process — could not see the com
 Two things to keep from it. Measuring the wrong process looks exactly like measuring a stalled
 one. And the parallelism here is fixed at the physical core count with no argument exposed, so
 "how many cores AutoEIS uses" is not a knob this round can set or report as a choice.
+
+**Withdrawn, the same mistake a second time: "stage 4's multiprocessing is broken under the
+venv."** `perform_bayesian_inference` at its default `parallel=True` spawns a worker for each
+circuit, and on Windows that worker appears as the *base* interpreter
+(`...\Programs\Python\Python312\python.exe`) rather than the virtual environment's. That looked
+like a child that could not import `autoeis`, and the run it was diagnosed from was indeed sitting
+still. It was reported as broken and it is not: the same call, left alone, completed in 71.4 s
+with both chains converged. A venv's spawned child is launched from the base executable by design
+and inherits the environment's paths.
+
+Twice now a stall has been diagnosed from the process table and twice it was wrong. The rule this
+round now follows is that **a run is judged when it finishes or fails, not from a snapshot of what
+its processes look like** — process inspection can say what is running, never that nothing is
+progressing.
 
 ### 0.4 What step 0 changes in the plan
 
