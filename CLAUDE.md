@@ -275,7 +275,12 @@ static-site Web UI running the same core via WASM (Pyodide).
 
 10. `docs/EVOLVE_SEARCH_PLAN.md` — the genetic search, which is what `mode="auto"` falls back to
    above five elements and the only part of discovery that had **no quality gate at all**.
-   **Steps 1–5 of 6 implemented; step 6 (the documentation pass) planned.** Its §1 is four measurements saying the
+   **Implemented, all six steps; gates EV1, EV2, EV3 and EV5 measured, and EV4 shipped with two
+   of its three clauses recorded as failed rather than reworded.** The claim this fallback is now
+   allowed to make is EV1's, and it is a ratchet with a ceiling: [measured] **5 of 9 truths
+   reported and 3 of 9 recommended** on the three 6–7 element references, against a 1/9, 1/9, 0/9
+   baseline — which must never be reported in the same breath as the exhaustive stage's 30/30,
+   and which leaves one of the three references at 0/3. Its §1 is four measurements saying the
    fallback is worse than merely unmeasured — a six-element truth never evaluated in 349 s, an
    archive that is never retired so selection pressure falls 8.2× over 12 generations, and
    **82% of the reported Pareto rows carrying screening-grade numbers** in violation of the rule

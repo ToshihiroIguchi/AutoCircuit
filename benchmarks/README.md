@@ -2,8 +2,8 @@
 
 Measurements, not tests. The test suite asserts that things *work*; these scripts say *how
 well*, and they are the evidence behind every claim marked **[measured]** in
-`docs/IMPLEMENTATION_PLAN.md`, `docs/DISCOVERY_V2_PLAN.md` and
-`docs/PARTIAL_TOPOLOGY_PLAN.md`.
+`docs/IMPLEMENTATION_PLAN.md`, `docs/DISCOVERY_V2_PLAN.md`, `docs/PARTIAL_TOPOLOGY_PLAN.md` and
+`docs/EVOLVE_SEARCH_PLAN.md`.
 
 Run with the package on the path (it is not pip-installed on the dev machine):
 
@@ -295,6 +295,94 @@ to **rank 1 of 657 at every budget**, margin 0.14, with 4×20 finishing in 0.9�
 8×40's 3.6–4.9. That reference is the one whose runtime motivated cutting the budget in the
 first place, and measured alone it says the cut is free. It is free only there. Same shape as
 the `_shortlist` bug: invisible on the easy case, expensive on the real space.
+
+### `discovery_v2.py evolve-gate` — gates EV1 and EV3, added 2026-08-29
+
+The genetic search is what `mode="auto"` falls back to above five elements, and until this round
+it had **no quality gate at all**. The instrument is three references beyond exhaustive reach
+(`LARGE_REFERENCES`: two six-element, one seven-element), three seeds each, **600 s of wall-clock
+per run, one run at a time**. "Reported" means the truth or a verified exact equivalent appears in
+`DiscoveryResult.candidates`; "on the front" and "is the recommendation" are strictly harder and
+counted separately, exactly as G1 does.
+
+| arm | truth reported | on the front | is the recommendation |
+|---|---:|---:|---:|
+| baseline — the search as this round found it | **1/9** | **1/9** | **0/9** |
+| + parameter inheritance (step 3), against its interleaved control | 3/9 | 1/9 | 1/9 |
+| + breeding pool bounded to the Pareto front (step 4, **ships**) | **5/9** | **5/9** | **3/9** |
+
+Per reference, for the arm that ships: three-block Maxwell-Wagner **3/3, 3/3, 3/3**; capacitor +
+interfacial block **2/3, 2/3, 0/3**; Randles + ESL + second block **0/3, 0/3, 0/3**.
+
+**Four things this table is not.** It is *not* three points on one curve — the first row is the
+baseline itself, each later row is one half of a same-day interleaved pair against its own
+control, and the rows are only loosely comparable to each other, because the budget is wall-clock
+and this machine drifts by a factor of two within an hour. An earlier **6/9** appears in `docs/HANDOFF.md` §25 and is *not* this row: it is the pool at
+its first width (the front plus about forty), run uncontrolled and stopped at the 30-generation
+cap. Interleaved against a same-day control, that same earlier width reads **4/9** and the
+front-only arm that ships reads 5/9 — so 5/9 against 4/9 is the comparison, and the uncontrolled
+number is not to be diffed against either. It is *not* a claim that can be added to the exhaustive stage's
+30/30 on G1 — **the fallback recovers 5 truths in 9 and recommends 3, and those two numbers must
+never be reported as one capability.** And it is *not* significance: 4/9 against 5/9 on nine runs
+separates nothing, which is why EV1's bar is written as a **ratchet plus a ceiling** — no step
+may report below the 1/9, 1/9, 0/9 floors, and the best measured number is also the largest claim
+this project may make for `mode="auto"` above five elements. The gate-grade comparative evidence
+for the pool change is not here at all; it is `benchmarks/screening_round/` at 120 seeds counted
+in **fits** (65/120 against 7/120), where the arms cannot measure the machine.
+
+**Relative error is the part that says which failures are search failures.** The baseline's best
+front error was 1.24–1.34% against a 1% noise floor on the six-element references — circuits that
+describe the data and are not the truth — and **2.09–5.42% against a ~1.3% floor on Randles**,
+where the search did not return even a good fit. The shipped arm brings Randles to 1.24–1.65%: a
+good fit of the wrong topology, still **0/3**. §6 of `EVOLVE_SEARCH_PLAN.md` therefore stays live
+— reporting an under-fitted exhaustive front may yet be the honest answer above five elements.
+
+**EV3, parameter inheritance, two-sided at ten seeds** (`--only Maxwell --seeds 10 --warm 0,inf`,
+arms interleaved seed by seed; `warm_accept=0` is the pre-step-3 search exactly):
+
+| | warm off (control) | warm on |
+|---|---:|---:|
+| truth reported / on front / recommended | 3/10, 3/10, 2/10 | **6/10, 4/10, 4/10** |
+| mean topologies evaluated | 550 | **709** (up in 9/10 pairs) |
+| mean wall-clock | 12.8 min | **5.2 min** |
+| runs hitting the 30-generation cap | 2/10 | 10/10 |
+
+The last row is why `--generations` now defaults to 1000 in this script (see the header): a
+600 s budget that never binds is not a budget.
+
+### `ev4_diversity.py` — gate EV4, two clauses failed and left failed
+
+Three arms, three seeds, 600 s, interleaved, generation cap 1000. Hit rate is the mean of the
+first third of the generations against the mean of the last third.
+
+| arm | generations | topologies | hit rate, first → last third | P(best enters a tournament) |
+|---|---:|---:|---|---|
+| unbounded (the old rule) | 117 | 2,473 | 41.7% → 51.7% (+10.0 pt) | 0.0139 → 0.0017 (÷8.3) |
+| bounded, front + 40 | 211 | 1,564 | 65.7% → 91.7% (+26.0 pt) | 0.0654 → 0.0635 (÷1.03) |
+| front only (**ships**) | 479 | 1,039 | 92.3% → 95.3% (+3.0 pt) | 0.3763 → 0.2750 (÷1.37) |
+
+**Clause 1 ("the cache-hit rate does not rise") fails for all three arms**, including the search
+this round started from — so it was never a bar only the new code had to clear. The shipped arm
+fails it by the smallest margin and that is not good news: its hit rate is 92% in the *first*
+third, so there is no room left to rise and the clause's shape test cannot see the concentration
+it was written to detect. **Clause 2 ("P(best) does not fall") now fails for the shipped arm and
+passed for the rule it replaces** — ÷1.37 against ÷1.03 — though it falls from a level 4–6× higher,
+and §1.2's actual mechanism (an archive growing without bound) is what the unbounded arm's ÷8.3
+at N = 2,104 shows. **Clause 3 passes**, by the widest margin in the plan. Both remedies the plan
+named for clauses 1 and 2 — island populations and adaptive parsimony — were built, measured and
+removed. The clauses are recorded as failed and **not reworded**; the open question they leave is
+whether a re-proposal under a best-wins cache is a cost at all, since the arm that re-proposes
+most is also the arm that recovers most.
+
+### `ev5_fingerprint.py` — gate EV5, nothing else moved
+
+Every candidate's circuit, AICc, reduced χ² and relative error to 12 figures, the restart count,
+the Pareto front, the equivalence classes, the coverage sentence and the recommendation, over
+three references in `mode="exhaustive"` and `mode="auto"` at `exhaustive_limit=4`, every clock
+stripped. **[measured] Byte-identical** across step 3 (486,846 bytes) and again across step 5
+(487,364 bytes). This is the check that caught the lost tiebreak in `_quota_by_size` that the
+entire test suite passed with in place, and identity across two processes is also what says the
+publication path is still deterministic at `workers=4`.
 
 ### `fitting.py accuracy` — suite extended 2026-08-22
 

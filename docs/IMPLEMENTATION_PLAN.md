@@ -276,8 +276,15 @@ Genetic programming over the circuit grammar:
 - **Fitness**: AICc from a *budget-limited* fit (small DE population + polish) — full-rigor
   fitting only for surviving candidates. Complexity = Σ per-element cost (CPE costs more
   than R, discouraging "CPE fixes everything").
-- **Selection**: regularized evolution (age-based) with island populations; deduplicate via
-  canonical form; cache fitted results keyed by canonical string.
+- **Selection**: deduplicate via canonical form; cache fitted results keyed by canonical string;
+  breed from a **bounded** set rather than from the whole archive. **[measured, §6.3] This bullet
+  originally said "regularized evolution (age-based) with island populations", and neither of
+  those is what ships.** The problem age-regularization exists to solve is real and was measured
+  (selection pressure falling 8.2× over twelve generations), but the fix that beat it is a bound
+  on the *set bred from*, and that bound turned out not to be a width at all — a ladder run down
+  to zero says the Pareto front by itself is the answer, because the best-scoring candidate
+  cannot be dominated. The islands were **built and then removed**: indistinguishable at two over
+  480 seeds, significantly worse at four. See `docs/EVOLVE_SEARCH_PLAN.md` §3.4.3 and §3.4.4.
 - **Output**: Pareto front (complexity vs. fit quality) + per-candidate statistics, never a
   single "the answer". AutoEIS-style post-filters prune unphysical/redundant candidates
   (series R merging, nested parallel simplification, dangling elements).
@@ -302,12 +309,13 @@ groups candidates whose fitted responses agree to better than 1e-6 everywhere an
 as indistinguishable. This is the honest form of the degeneracy caveat, and it turns what
 would look like a search failure into information.
 
-**[measured] Current capability of the genetic search.** On synthetic data it recovers the true
-topology (or an exact equivalent) onto the Pareto front for capacitor models and
-single-relaxation models. For multi-relaxation electrochemical spectra (two Maxwell-Wagner
-blocks, Randles) it reliably finds topologies that fit *as well as* the truth at the same or
-lower complexity, but does not consistently surface the textbook form within a two-minute
-budget — it evaluated only 113–257 topologies in that time.
+**[measured] Current capability of the genetic search** — *this paragraph is the pre-2026-08
+reading and is kept because §6.1 was written against it; §6.3 supersedes it with a gate.* On
+synthetic data it recovers the true topology (or an exact equivalent) onto the Pareto front for
+capacitor models and single-relaxation models. For multi-relaxation electrochemical spectra (two
+Maxwell-Wagner blocks, Randles) it reliably finds topologies that fit *as well as* the truth at
+the same or lower complexity, but does not consistently surface the textbook form within a
+two-minute budget — it evaluated only 113–257 topologies in that time.
 
 ### 6.1 Discovery v2 — exhaustive first (implemented; see `docs/DISCOVERY_V2_PLAN.md`)
 
@@ -376,6 +384,35 @@ unconstrained problem, where GCV is valid; the reported distribution is then rec
   represent a distributed inductive process, so on a capacitor with skin effect the inversion
   returns no peaks, a 7×-wrong series resistance and a 64% residual. `well_described` says so
   and the CLI exits non-zero, rather than presenting "0 relaxations" as a finding.
+
+### 6.3 The fallback gets a gate (implemented; see `docs/EVOLVE_SEARCH_PLAN.md`)
+
+§6.1 removed the genetic search from the range enumeration can reach and left it owning the range
+above five elements — where `mode="auto"` routes *exactly when the exhaustive front is
+under-fitted*, that is, when the user needs it most, and where it had no quality gate at all.
+
+- **[measured] It was worse than merely unmeasured.** A six-element truth was never evaluated in
+  349 s; the archive is never retired, so the best-known candidate's chance of being drawn as a
+  parent fell 8.2× over twelve generations; and **82% of reported Pareto rows carried
+  screening-grade numbers**, in violation of the rule `discover.py` states at its top. That last
+  is a correctness bug in the report, not an optimisation, and it was fixed first: every reported
+  candidate is now refit at full budget (gate EV2), over 36 further front rows at **0**.
+- **[measured] What the fallback may now claim, and no more.** Gate EV1, three references ×
+  three seeds × 600 s: **5 of 9 truths reported, 3 of 9 recommended**, against a 1/9, 1/9, 0/9
+  baseline. That number is a **ratchet plus a ceiling** — no later change may report below the
+  floors, and the best measured value is also the largest claim allowed. It may never be added to
+  the exhaustive stage's 30/30 on G1; one of the three references is still 0/3, and §6 of that
+  plan — that the honest answer above five elements may be an under-fitted exhaustive front
+  rather than a hand-off — stays live.
+- **[measured] Two of the three EV4 clauses are failed and left failed.** The shipped search
+  re-proposes topologies it has already fitted 92–95% of the time, and its best candidate's
+  tournament probability falls 1.37× across a run. Both remedies the plan named — islands and
+  adaptive parsimony — were built, measured to do nothing or worse, and removed. The clauses are
+  not reworded to match what the build does; what the measurements suggest and do not establish
+  is that under a best-wins cache a re-proposal is a *refit*, not a stall.
+- **[measured] Nothing in §6.1 moved a digit.** Gate EV5 fingerprints the exhaustive path to 12
+  figures and is byte-identical across every step. It is also what caught a lost tiebreak in the
+  exhaustive shortlist that the full test suite passed with in place.
 
 ## 7. SPICE export
 
@@ -488,7 +525,7 @@ one-off 1.6 s import. Consequences, all now measured rather than guessed:
 | 2 | Fitting engine | **done** — recovers a 9-circuit synthetic suite at 0% and 1% noise with no initial values; calibrated uncertainties; Lin-KK |
 | 3 | CLI | **done** — `fit`, `discover`, `validate`, `simulate`, `convert`, `elements` |
 | 4 | SPICE export | **done** — NNLS Foster-form ladder synthesis; netlist verified by nodal analysis and, in CI, by a real ngspice (agreement 5e-15 .. 4.5e-12 over nine circuits). |
-| 5 | Topology discovery | **done** — genetic search, then the exhaustive-first redesign of §6.1, all seven steps of `docs/DISCOVERY_V2_PLAN.md` including DRT structure probing (§6.2) |
+| 5 | Topology discovery | **done** — genetic search, then the exhaustive-first redesign of §6.1, all seven steps of `docs/DISCOVERY_V2_PLAN.md` including DRT structure probing (§6.2), and then all six steps of `docs/EVOLVE_SEARCH_PLAN.md`, which gave the genetic fallback the first quality gate it has ever had (§6.3) |
 | 6 | Web UI | **done** — all seven steps of `docs/WEB_UI_PLAN.md`; the site is live at <https://toshihiroiguchi.github.io/AutoCircuit/>. Gates W1, W2, W4 and W6 pass, W3 passes on a rested machine and not on a loaded one, W5 is retired. |
 
 Test corpus actually used: series/parallel RC, capacitor C+ESR+ESL, capacitor with `SKINF`,

@@ -1,8 +1,13 @@
 # The Genetic Search — Making the Fallback Answerable
 
-Status: steps 1-3 implemented (2026-08-22); steps 4-6 planned. §3.2.1 and §3.3.1 record what
-steps 2 and 3 needed that this plan did not specify; §4 carries EV1's completed baseline, the
-pass bar written from it, and EV3's verdict.
+Status: **implemented (2026-08-29), all six steps, with two gate clauses recorded as failed.**
+EV1's ratchet, EV2, EV3 and EV5 pass; EV4 passes clause 3 and **fails clauses 1 and 2**, and both
+remedies this plan named for them (islands, adaptive parsimony) were built, measured and removed
+rather than the clauses being reworded (§3.4.4, §3.5.1, §4). §3.2.1, §3.3.1, §3.4.1–§3.4.4 and
+§3.5.1–§3.5.3 record what steps 2–5 needed that this plan did not specify — read those before
+changing any of it, because several of the round's readings were withdrawn by a later measurement
+and each one is written down beside the number that withdrew it. §4 carries EV1's completed
+baseline and the pass bar written from it.
 Prerequisite reading: `docs/DISCOVERY_V2_PLAN.md` §1 and §3.3 (why enumeration took over from the
 genetic search, and the measurement that says a cheaper screen trades the answer for the clock).
 
@@ -1098,7 +1103,7 @@ independent arenas rather than one.
 | 3 | structural parameter inheritance, two-stage evaluation, best-wins cache; sweep `WARM_ACCEPT_FACTOR`; EV3 | L | 2 | **done** — EV3 passes both halves (§4); §3.3.1 records the polish budget that decided it, and the two readings that nearly got it wrong |
 | 4 | bounded selection pool, scaled tournament, islands with shared cache; EV4 | M | 3 | **done, EV4 open on two clauses and saying so** — `_breeding_pool`: 120/120 against 87/120 (§3.4.1), and its *width* then measured down to zero, so what ships is the Pareto front alone (`BREEDING_EXTRA`, §3.4.3: 65/120 against 7/120 at an unsaturated budget). **Islands were built and removed** (§3.4.4): indistinguishable at two, significantly worse at four, far worse with migration off. The scaled tournament stays unmotivated once the pool is bounded. EV4's clause 1 fails for every arm and **clause 2 now fails for the shipped one**, both recorded rather than reworded; clause 3 passes with EV1 at 5/9, 5/9, 3/9 against an interleaved control's 4/9, 3/9, 2/9 (§4) |
 | 5 | adaptive parsimony in selection only; mutation-weight sweep | M | 4 | **done, and neither default moved** — both built as specified and both measured (§3.5). Adaptive parsimony does nothing: the ladder is inert below scaling 300, unordered above it, and its best rung is 293/480 against 282/480 at p = 0.32 after looking like p = 0.03 at 120 seeds. The mutation sweep's two significant arms are the two that encode **the truth's shape**, which is what forced the round's first second reference (§3.5.2) and then a third to separate the delete weight from the element cap (§3.5.3). `PARSIMONY_SCALING = 0` and `MUTATION_WEIGHTS = (0.35, 0.25, 0.25, 0.15)` now carry the measurement that says so, and EV5 is byte-identical |
-| 6 | docs: this file marked implemented with its corrections, `CLAUDE.md` "Start here" entry 10, `benchmarks/README.md`, `DISCOVERY_V2_PLAN.md` §4 G5 withdrawal note | S | 5 | planned |
+| 6 | docs: this file marked implemented with its corrections, `CLAUDE.md` "Start here" entry 10, `benchmarks/README.md`, `DISCOVERY_V2_PLAN.md` §4 G5 withdrawal note | S | 5 | **done** — and it found three places where a doc had been left saying something the code and the measurements no longer support, which is what a documentation step is for: `DISCOVERY_V2_PLAN.md` §5.1 still gave `REFINE_DEFAULT["evolve"]` as 8 and justified it by the very clause of G5 that §3.2 withdrew; `IMPLEMENTATION_PLAN.md` §6 still described the selection rule as age-regularized evolution over island populations, which is neither what ships nor what was measured (§3.4.3, §3.4.4); and its "current capability of the genetic search" was a two-minute reading from before this round, now superseded by EV1's 600 s baseline. `benchmarks/README.md` gained the evolve-gate results section it had never had — the gate commands were already in its header, so the file could be run from and not read from |
 
 Step 2 is severable and worth landing on its own even if 3–5 are never done: it is the only step
 that fixes something wrong rather than something slow.

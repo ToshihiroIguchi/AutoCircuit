@@ -294,6 +294,17 @@ Acceptance gates (hard, in the benchmark script, not aspirations):
   are. Its replacement is EV5 there, which pins the **exhaustive** results bit-identical
   instead — the direction the guarantee is actually needed in now. The first clause stands.
 
+  **That plan is now implemented (2026-08-29) and the swap can be read off its results.** The
+  genetic search this clause would have frozen was changed in four separate ways and every one of
+  them moved a number: reported provenance (82% of front rows tier-1 → 0), parameter inheritance,
+  a breeding pool bounded to the Pareto front, and two tuning knobs measured into staying put. And
+  the replacement did the job this clause could not have: [measured] EV5's fingerprint is
+  byte-identical after each of steps 3 and 5 (486,846 and 487,364 bytes), and it is what caught a
+  lost tiebreak in the *exhaustive* shortlist that the whole test suite passed with in place
+  (`EVOLVE_SEARCH_PLAN.md` §3.2.1). A regression pin on the half that was meant to change would
+  have been an obstacle; the same pin on the half that was not is the only reason that bug was
+  found.
+
 ## 5. Work order
 
 | step | contents | size | status |
@@ -317,8 +328,15 @@ Steps 1–5 are the core and independent of step 6; DRT lands last and is severa
   is already exact. Without it, on noise-free data the first exact equivalent screened sets a
   threshold of order 1e-30 and every *other* exact equivalent is abandoned unpolished. Those
   equivalents are the report's whole reason for existing.
-- **Per-mode `n_refine` defaults** (`REFINE_DEFAULT`): 30 for exhaustive, 8 for evolve. Sharing
-  one default would have silently changed genetic-search results, which gate G5 forbids.
+- **Per-mode `n_refine` defaults** (`REFINE_DEFAULT`): 30 for exhaustive, and originally 8 for
+  evolve, because sharing one default would have silently changed genetic-search results, which
+  is what G5's second clause forbade. **Both halves of that are now gone**: the clause is
+  withdrawn (above), and `REFINE_DEFAULT["evolve"]` is 30 as well
+  (`docs/EVOLVE_SEARCH_PLAN.md` §3.2). The split turned out to buy nothing in any case — the
+  quota is `max(MIN_REFINE_PER_SIZE, n_refine // sizes)` and a genetic archive spans about seven
+  element counts, so 8, 16 and 30 all reduce to the same quota of 5. Below
+  `MIN_REFINE_PER_SIZE * sizes` this constant has no effect at all, which is arithmetic rather
+  than a measurement; the floor is the knob.
 - **`complete_up_to` is derived, not asserted.** It is computed from how many whole levels the
   screen actually finished, so a run cut short by `--time-limit` or `--max-candidates` reports
   a smaller number rather than an untrue one, and a run started above one element reports

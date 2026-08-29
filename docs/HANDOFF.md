@@ -6,8 +6,9 @@ again after each step of `docs/WEB_UI_PLAN.md` (all seven now), again after the 
 round-trip (§15), again after taking both workflows off Node 20 (§16), and again after the three
 questions the deployed site raised — what the Discover→Fit hand-off carries, moving an element that
 is already on the canvas, and a start-up that made a visitor wait for scipy before it would read a
-CSV (§19), and again while giving the genetic search its first quality gate (§20 — **work in
-progress**), and again after the first of the geometry-free readouts that `CLAUDE.md`'s purpose
+CSV (§19), and again while giving the genetic search its first quality gate (§20, and **finished
+at §31** — all six steps of `docs/EVOLVE_SEARCH_PLAN.md`, two EV4 clauses recorded as failed
+rather than reworded), and again after the first of the geometry-free readouts that `CLAUDE.md`'s purpose
 point 2 asks for (§21 — landed and gated, with its own list of what is not done), and again
 after the reporting-path defect that the search-algorithm screening round turned up (§23) and the
 bounded breeding pool that round recommended (§25).
@@ -2373,7 +2374,7 @@ now has to forward the keywords `_evolve` passes it.
 
 ### What is not done
 
-* Step 6, the documentation pass that marks the plan implemented, is still open.
+* ~~Step 6, the documentation pass that marks the plan implemented, is still open.~~ **Done, §31.**
 * EV4's two failing clauses, and the question §29 left: whether a re-proposal under a best-wins
   cache is a cost at all.
 * The two EV1 references where `mode="evolve"` scores 0/3 still cannot be put on a landscape.
@@ -2381,3 +2382,78 @@ now has to forward the keywords `_evolve` passes it.
   CPE and skin-effect element replaced by their plain counterparts) chosen so that its space can
   be enumerated — it varies the shape of the truth, which is what step 5 needed, and it does not
   relieve §2.1's limitation about the two hard references themselves.
+
+## 31. The documentation pass, which found three docs describing a search that no longer exists
+
+`docs/EVOLVE_SEARCH_PLAN.md` step 6, the last of the six. It moves no code and adds no
+measurement; what it does is make the written record agree with the six steps and the five
+gates that came before it, and the reason it is worth a section is that **three separate
+documents were still describing the genetic search as it was designed rather than as it was
+measured** — each of them in a place a future session would have read as authoritative.
+
+### What the plan now says about itself
+
+`EVOLVE_SEARCH_PLAN.md` is marked **implemented (2026-08-29), all six steps**, and its status
+line leads with the part that is easy to lose: EV1's ratchet, EV2, EV3 and EV5 pass, and **EV4
+ships with two of its three clauses failed**. `CLAUDE.md`'s "Start here" entry 10 now opens with
+the number the fallback is allowed to claim — **5/9 reported, 3/9 recommended** against a 1/9,
+1/9, 0/9 baseline — together with the sentence that keeps it honest: it may never be reported in
+the same breath as the exhaustive stage's 30/30, and one of the three references is still 0/3.
+
+### The three stale places, which are the actual find
+
+* **`DISCOVERY_V2_PLAN.md` §5.1** gave `REFINE_DEFAULT["evolve"]` as **8** and justified the
+  split from exhaustive's 30 by "which gate G5 forbids" — a clause step 2 had *withdrawn* in the
+  same round that set the constant to 30. A reader following that bullet would have restored a
+  value the code no longer holds, on the authority of a gate that no longer exists. Both halves
+  are corrected, with the arithmetic that says the split never bought anything: the quota is
+  `max(MIN_REFINE_PER_SIZE, n_refine // sizes)` and an archive spans about seven element counts,
+  so 8, 16 and 30 all reduce to a quota of 5.
+* **`IMPLEMENTATION_PLAN.md` §6** still specified selection as "regularized evolution (age-based)
+  with island populations". Neither survived: the islands were **built and removed** (§29), and
+  the bound on the breeding set turned out not to be a width at all — the Pareto front alone
+  ships. This is the bullet that would have sent someone to re-implement the very thing 480 seeds
+  demoted.
+* **`IMPLEMENTATION_PLAN.md`'s "[measured] Current capability of the genetic search"** was a
+  two-minute, 113–257-topology reading from before this round, sitting under a **[measured]**
+  tag with nothing to say it had been superseded by a 600 s nine-run gate. It is kept — §6.1 was
+  written against it and deleting it would orphan that argument — but it is now dated and points
+  at the new **§6.3**, which states EV1's ceiling, EV2's fix, EV4's two open clauses and EV5.
+
+### `benchmarks/README.md` could be run from but not read from
+
+The evolve-gate *commands* had been in its header since step 1; the **results had never been
+written down anywhere but the plan**. It now carries `evolve-gate` (EV1 and EV3),
+`ev4_diversity.py` (EV4) and `ev5_fingerprint.py` (EV5) as results sections beside G1, P1 and
+P2 — including the four things EV1's table is *not*, which is the part that matters in a file
+whose other tables are all budgeted in fits or in candidates rather than in wall-clock.
+
+### Two things not to re-derive
+
+* **The 6/9 in §25 and the 5/9 quoted everywhere else are not the same measurement and their
+  difference is not a regression.** §25's arm is the pool at its first width (the front plus
+  about forty), run uncontrolled and stopped at the 30-generation cap; the 5/9 is the shipped
+  front-only arm, interleaved seed by seed against a same-day control of that same earlier width,
+  which read **4/9** beside it. So the pair to compare is 5/9 against 4/9, and §29 already says
+  not to read its table against §25's number. The doc pass did not reconcile the two into one
+  figure: they are measurements of different quality, and averaging them would destroy the only
+  information the pair carries — that a wall-clock budget on this machine moves a recovery count
+  by as much as a change to the search does.
+* **The failed EV4 clauses stay in the present tense.** The temptation a documentation pass
+  creates is to write a completed plan as a success story, and the two clauses are the one place
+  this round has to resist it: the arm that ships re-proposes what it already knows 92–95% of the
+  time and its best candidate's tournament probability falls 1.37× across a run. Both remedies were
+  built and measured away. A future session may close them with a measurement; it may not close
+  them with a sentence.
+
+### State of the suite
+
+Unchanged — no code was touched: `pytest` **946 passed, 19 skipped**, `ruff` and `mypy` clean,
+`npm run check` untouched.
+
+### What is not done
+
+* EV4 clauses 1 and 2, still open and still unremedied.
+* The two EV1 references at 0/3, and `EVOLVE_SEARCH_PLAN.md` §6's live clause: `mode="auto"`
+  above five elements may yet be better served by reporting an under-fitted exhaustive front than
+  by handing off at all. Nothing in this round decided that, and this section does not either.
