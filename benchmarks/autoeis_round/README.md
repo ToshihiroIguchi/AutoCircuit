@@ -26,6 +26,50 @@ miss with no visible symptom, which is why it has its own test file
 (`tests/test_autoeis_translate.py`) with hand-checked cases in both directions and a numerical
 round trip.
 
+## Running the round
+
+Every step below is **restartable**: re-issuing the identical command continues rather than
+starting over, and a machine that dies costs at most the one run that was in flight. That is not
+a convenience, it is the operating condition — the machine can shut down without an operator
+present, so nothing may live only in memory.
+
+```powershell
+$env:PYTHONPATH = "C:\Users\toshi\python\AutoCircuit\src"
+
+# 1. Build arena C. Its identifiability screen is a full fit per draw, so this takes a while;
+#    verdicts are cached in arena_c/screen_cache.jsonl and a restart reuses them.
+python benchmarks/autoeis_round/arena.py --out benchmarks/autoeis_round/arena_c
+
+# 2. The two producers. They may run in either order, but NOT at the same time -- both saturate
+#    the machine, and benchmarks here are not to be run concurrently.
+python benchmarks/autoeis_round/run_autocircuit.py --arena benchmarks/autoeis_round/arena_c --max-seeds 5
+C:\Users\toshi\python\autoeis-env\Scripts\python.exe benchmarks/autoeis_round/run_autoeis.py --arena benchmarks/autoeis_round/arena_c --max-seeds 5
+
+# 3. Score. Refuses to run if any smoke record is present.
+python benchmarks/autoeis_round/score.py --arena benchmarks/autoeis_round/arena_c --out benchmarks/autoeis_round/arena_c/report.json
+```
+
+`--max-seeds` is the stage boundary: 5, then 10, then 20, which are the values `arena.py`
+pre-registers. Raising it and re-running adds the new seeds to what is already there.
+
+**On stopping.** The round stops when the machine time runs out or the seed list is exhausted,
+and never because a result looked significant. See `arena.py`'s module docstring; the reason it
+is written down is so the claim can be checked rather than believed.
+
+**On what an arena can resolve.** `score.py` reports `d`, the smallest all-in-one-direction
+discordant count that could reach p ≤ 0.05. It is **6, whatever the arena size** — five reaches
+only 0.0625 — so more seeds buy the *opportunity* for discordant runs, not a lower bar. If the
+outcome lands inside `d` the finding is "indistinguishable at this seed count", and the response
+is more seeds or nothing.
+
+To launch a long step so that it outlives the shell that started it (measured: the child survives
+its launcher's exit):
+
+```powershell
+Start-Process -FilePath python.exe -ArgumentList "benchmarks/autoeis_round/run_autocircuit.py","--arena","benchmarks/autoeis_round/arena_c" `
+  -WorkingDirectory C:\Users\toshi\python\AutoCircuit -RedirectStandardOutput run.log -RedirectStandardError run.err -WindowStyle Hidden
+```
+
 ## The AutoEIS environment
 
 Not created by anything in this repository, and deliberately outside it:
