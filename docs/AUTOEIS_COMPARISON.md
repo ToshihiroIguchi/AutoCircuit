@@ -198,10 +198,39 @@ run in order, and all three remove points:
 On AutoEIS's own bundled test dataset this removed 7 of 67 points (10%), and it warned about it.
 
 This is a defensible position for a tool aimed at electrochemical cells, where an inductive tail
-is usually instrument artefact rather than sample. It is not a defect. But it means that **for a
-truth containing an `L`, AutoEIS's search never sees the evidence for the `L`**, and a miss there
-is its preprocessing rather than its search — a distinction the failure taxonomy of the plan's §3
-does not yet have a code for, and which is not the same event as `filtered`.
+is usually instrument artefact rather than sample. It is not a defect. Where a spectrum does have
+an inductive tail, the evidence for the `L` is gone before the search starts, and a miss there is
+the preprocessing rather than the search — a distinction the failure taxonomy of the plan's §3 does
+not yet have a code for, and which is not the same event as `filtered`.
+
+**Corrected by measurement.** This section first said that *for a truth containing an `L`,
+AutoEIS's search never sees the evidence for it.* That is too strong, and the arena's own spectra
+say so. Each of the eight truths was put through `preprocess_impedance_data` at its defaults:
+
+| truth | L | circuit | kept | points with `Im Z > 0` |
+|---|---|---|---|---|
+| c3_0 | no | `p(CPE1,CPE2)-R1` | 88.9% | 8 |
+| c3_1 | yes | `p(R1,L1)-R2` | 72.8% | 47 |
+| c4_0 | yes | `p(R1,L1)-R2-L2` | **63.0%** | 58 |
+| c4_1 | yes | `p(L1,CPE1)-R1-CPE2` | **100.0%** | 0 |
+| c5_0 | yes | `p(CPE1-CPE2,CPE3)-R1-L1` | 97.5% | 2 |
+| c5_1 | yes | `p(R1-L1,CPE1)-R2-L2` | 90.1% | 30 |
+| c6_0 | no | `p(p(R1,CPE1)-p(R2,CPE2),R3)-R4` | 98.8% | 0 |
+| c6_1 | yes | `p(p(L1-CPE1,CPE2)-L2,L3)-R1` | **63.0%** | 56 |
+
+[measured] Mean kept: **80.7% across the six `L` truths, 90.3% across the two without** — but the
+mean is the least informative number on the table. What the preprocessing responds to is whether
+the spectrum actually *has* an inductive tail in the window, which is a property of the topology
+and its parameters, not of the presence of an `L`: `c4_1` carries an inductor, has no point with
+`Im Z > 0`, and loses nothing at all, while `c4_0` and `c6_1` lose more than a third. And an
+`L`-free truth loses points too — `c3_0` gives up 11% — which is the Lin-KK residual filter rather
+than either inductive heuristic.
+
+So the split the report needs is **not only** `L` against no-`L`. `L` is the cheap proxy that was
+pre-registered, and it is kept; but the producers record `n_points_in` and `n_points_used` per run,
+so the honest secondary reading is against **how much of the spectrum that run's search actually
+received**. A recovery rate on 63% of a sweep is not comparable to one on all of it, and neither is
+comparable to a claim about the search.
 
 Two consequences for arena C, both of which have to be decided in the open rather than absorbed:
 
@@ -283,10 +312,11 @@ route, and **132 parameter draws rejected as unidentifiable** before any tool ra
 | c6_1 | `p(p(L1-CPE1,CPE2)-L2,L3)-R1` | yes |
 
 **Six of the eight contain an inductor.** Uniform sampling over a pool of `R`, `L`, `CPE` makes
-`L` common — foreseeable, and not foreseen when the sampler was written. It matters because §0.5
-measured that AutoEIS's default preprocessing deletes the inductive tail before its search sees
-it, so on six of these eight truths the headline number would be measuring the other tool's
-preprocessing rather than its search.
+`L` common — foreseeable, and not foreseen when the sampler was written. It matters because
+AutoEIS's default preprocessing deletes the inductive tail before its search sees it. How much it
+actually deletes on *these* spectra is measured in §0.5 and is not uniform: it ranges from nothing
+at all to more than a third, and it tracks whether the spectrum has an inductive tail rather than
+whether the circuit has an inductor.
 
 **The arena was not re-drawn.** Changing a pre-registered sampler after seeing its draw is the
 move this plan exists to forbid, and it would be no less a selection for having been made on the

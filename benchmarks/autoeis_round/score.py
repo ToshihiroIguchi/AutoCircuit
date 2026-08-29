@@ -459,6 +459,24 @@ def _summarise(
         print(f"  {tag:<12} AutoCircuit {_rate(a, 'reported_refitted'):>10}"
               f"    AutoEIS {_rate(b, 'reported_refitted'):>10}")
 
+    # The `L` split is the pre-registered proxy and it is coarse: what AutoEIS's preprocessing
+    # responds to is whether the spectrum has an inductive tail, not whether the circuit has an
+    # inductor, and one L-carrying truth in this arena loses no points at all (section 0.5). So
+    # the same rates are also split by how much of the sweep that run's search actually got.
+    print("\n  ...and by how much of the sweep AutoEIS's search actually received:")
+    buckets = (("kept < 75%", 0.0, 0.75), ("75-95%", 0.75, 0.95), ("kept >= 95%", 0.95, 1.01))
+    for label, low, high in buckets:
+        pairs = [
+            (a, b)
+            for a, b in zip(ours, theirs, strict=True)
+            if b.n_points_in and low <= b.n_points_used / b.n_points_in < high
+        ]
+        if not pairs:
+            continue
+        print(f"  {label:<12} AutoCircuit {_rate([a for a, _ in pairs], 'reported_refitted'):>10}"
+              f"    AutoEIS {_rate([b for _, b in pairs], 'reported_refitted'):>10}"
+              f"   ({len(pairs)} pairs)")
+
     print("\n" + "=" * 88)
     print("Failure taxonomy -- a wrong answer and a refusal are different events")
     print("=" * 88)
