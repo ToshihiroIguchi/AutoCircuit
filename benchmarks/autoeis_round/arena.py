@@ -45,11 +45,15 @@ Why each choice is what it is:
     significant.** A stopping rule that depends on the data is not a stopping rule, and this one
     is written down so that it can be checked rather than promised.
 
-The identifiability screen is the one ``LARGE_REFERENCES`` applied to itself by hand: fit the
-truth to its own noisy data and require that no parameter comes back with a standard error
-exceeding its own value. Asking either search for a circuit the data cannot confirm measures
-neither search. It is applied here **before any tool is run** and identically to every draw,
-rather than by hand to the ones that looked wrong.
+The identifiability screen is the one ``LARGE_REFERENCES`` applied to itself by hand, and it has
+**two halves**: fit the truth to its own noisy data, require that no parameter comes back with a
+standard error exceeding its own value, *and* require the fitted values to be within
+:data:`MAX_DEVIATION` of the generating ones, matched by value. Asking either search for a circuit
+the data cannot confirm measures neither search. It is applied here **before any tool is run** and
+identically to every draw, rather than by hand to the ones that looked wrong.
+
+The second half was missing from the first version of this file and the arena it drew had to be
+discarded. See :func:`is_identifiable` for what got through without it.
 """
 
 from __future__ import annotations
@@ -61,6 +65,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from deviation import worst_deviation
 
 from autocircuit.core import elements
 from autocircuit.core.circuit import Circuit, ElementNode, Node, Parallel, Series
@@ -106,6 +111,15 @@ PARAM_RANGES: dict[str, tuple[float, float]] = {
 
 #: The sampler's own RNG seed, so the arena is reproducible even though AutoEIS is not.
 ARENA_SEED: int = 20260829
+
+#: The worst value-matched relative deviation a truth may show when fitted to its own data.
+#: Paired with the unresolved-parameter check because neither alone is enough: see
+#: :func:`is_identifiable`. The value is set from this repository's own precedent rather than
+#: chosen freely -- ``LARGE_REFERENCES``' hardest case records a worst value-matched deviation
+#: of 24.1% at this noise level and is treated there as recoverable, so the bar is set at twice
+#: that. Tighter would reject truths the repo already calls fine; looser lets through the
+#: seven-orders-of-magnitude case that made this constant necessary.
+MAX_DEVIATION: float = 0.5
 
 #: How many parameter draws to try per topology before giving up on it. A topology whose
 #: parameters cannot be made identifiable in this many attempts is discarded, and the count of
@@ -195,11 +209,19 @@ def _draw_params(circuit: Circuit, rng: np.random.Generator) -> dict[str, float]
 
 
 def is_identifiable(circuit: str, params: dict[str, float]) -> bool:
-    """Fit the truth to its own noisy data and require every parameter to be resolved.
+    """Fit the truth to its own noisy data; require every parameter resolved **and recovered**.
 
-    The same screen ``LARGE_REFERENCES`` applied to itself, applied here before any tool has run
-    and identically to every draw. A truth failing it would ask both searches for a circuit the
-    data does not contain.
+    Both halves are needed, and the second was missing when this file was first written. An
+    unresolved-parameter count measures local identifiability *at the optimum the fit found*, and
+    a fit is free to land on a different parameter set that reproduces the same spectrum -- the
+    standard errors around that point are then perfectly healthy and the screen passes a truth
+    nothing could recover. [measured] On the first draw of this arena that let through
+    ``p(L1,CPE1)-R1-CPE2`` with an inductance fitted at 1.2 H against a true 9.4e-8 H -- seven
+    orders of magnitude out, at 1.3% relative error, with every parameter marked resolved.
+
+    ``LARGE_REFERENCES`` in ``benchmarks/discovery_v2.py`` had it right in its own comments, which
+    record the unresolved count *and* the worst value-matched deviation for every reference; only
+    the copy of that screen made here dropped the second number.
     """
     spectrum = simulate(
         circuit,
@@ -209,8 +231,13 @@ def is_identifiable(circuit: str, params: dict[str, float]) -> bool:
         seed=0,
     )
     result = fit(circuit, spectrum, seed=0)
-    stderr = result.statistics.stderr
-    return not bool(np.any(unresolved_mask(result.values, stderr)))
+    if bool(np.any(unresolved_mask(result.values, result.statistics.stderr))):
+        return False
+    recovered = dict(
+        zip(result.circuit.param_names, (float(v) for v in result.values), strict=True)
+    )
+    deviation = worst_deviation(recovered, params)
+    return bool(deviation <= MAX_DEVIATION)
 
 
 def candidate_stream(

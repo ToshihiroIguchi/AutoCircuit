@@ -15,7 +15,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "benchmarks" / "autoeis_round"))
 
-from score import _worst_deviation, mcnemar_exact, resolvable_discordant  # noqa: E402
+from deviation import worst_deviation as _worst_deviation  # noqa: E402
+from score import mcnemar_exact, resolvable_discordant  # noqa: E402
 
 
 class TestMcNemarExact:

@@ -327,7 +327,55 @@ pairs at the first stage and forty only if the round reaches twenty seeds. A dif
 `L`-free group at five seeds cannot be resolved (`d = 6` against ten pairs is possible but only
 for a near-total split), and saying so now is cheaper than discovering it afterwards.
 
-### 1.4 Stopping rule, fixed now so that it cannot be chosen later
+### 1.4 Is this a fair comparison? Written before the result, because afterwards it would look
+like a rationalisation
+
+**One narrow claim can be compared fairly. The two tools cannot, and no sentence in this document
+may be read as ranking them.**
+
+What was actually done to make the narrow claim fair, each of it measured rather than intended:
+both sides read the same files with the same noise realisations, so the pairing is real; one
+referee — numeric equivalence at `EQUIVALENCE_RTOL` — is applied to both candidate lists through
+the same code, verified on a fixture where the other tool's exact reparameterisation of the truth
+had to score as a hit and did; the two structural filters the sampler reproduces were checked
+against AutoEIS's own functions on 1020 topologies with zero disagreements; out-of-vocabulary
+truths leave that tool's denominator instead of scoring zero; a refusal and a wrong answer are
+separate rows; and `d` and the stopping rule were fixed before any run.
+
+What remains unfair or limited, listed in full because a limitation discovered later reads as an
+excuse:
+
+1. **The arena is defined by the other tool's constraints but built by our machinery** — our
+   enumerator, our parameter ranges, our notion of a plausible topology.
+2. **The identifiability screen is *our* fitter's verdict.** 132 draws were discarded because a
+   fit of ours left a parameter unresolved, so the arena is shaped toward circuits our fitter
+   handles well. This is the largest single hole and it was not accounted for when the sampler was
+   written. §1.5 closes it as far as it can be closed without re-drawing the arena.
+3. **The two searches do not see the same data even from the same file.** AutoEIS preprocesses and
+   we do not: between 63% and 100% of each sweep survives (§0.5).
+4. **We change regime at six elements and they do not.** Above five, this project falls back to a
+   genetic search measured at 5/9 against the exhaustive stage's 30/30. Reporting per size shows
+   it; it does not remove it.
+5. **The plan wanted an arena "authored by neither" and this one is authored by our sampler.**
+   Pre-registration limits the damage; it does not undo the authorship.
+6. **Only one of the two products is being asked about.** AutoEIS's Bayesian posteriors are its
+   distinguishing output and are deliberately unscored, so what is compared is "topology and
+   values from defaults", not which tool is better at what it is for.
+7. **Their side is unseeded** (§0.2), so their runs are independent draws while ours are
+   reproducible. The round is not exactly repeatable on their side.
+
+### 1.5 Asking the other tool whether it agrees the truths are identifiable
+
+Hole 2 above can be partly answered rather than only declared. AutoEIS is put to the *same*
+question about the same eight truths with its own instrument: infer the true circuit's parameters
+with `perform_bayesian_inference` at its defaults, and count a parameter unresolved when its
+posterior coefficient of variation reaches 1 — its own convention, not ours mapped onto it.
+
+**The arena is not re-drawn on the answer.** Changing a pre-registered sampler after seeing its
+draw is what §1.3 refuses, and it would be no less a selection here. Truths the two instruments
+disagree about carry a caveat wherever they appear.
+
+### 1.6 Stopping rule, fixed now so that it cannot be chosen later
 
 The seed list (1–20) and the stage boundaries (5, 10, 20 seeds) are written into `arena.py` before
 the first run. Extending the round runs more of an already-written list; it never chooses seeds

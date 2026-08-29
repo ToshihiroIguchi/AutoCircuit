@@ -6,9 +6,8 @@ No search, no fitting -- this is only about what the other tool's search is give
 import json
 from pathlib import Path
 
-import numpy as np
-
 import autoeis as ae
+import numpy as np
 
 ARENA = Path(r"C:\Users\toshi\python\AutoCircuit\benchmarks\autoeis_round\arena_c")
 arena = json.loads((ARENA / "arena.json").read_text())
