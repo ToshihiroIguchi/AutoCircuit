@@ -404,6 +404,36 @@ tool at its defaults" and is to be **reported, not corrected**: the round would 
 something else entirely if the spectra were trimmed to suit it. `c6_0` is the one real
 disagreement and carries a caveat.
 
+### 1.5b An interim look, recorded because hiding it would be the problem
+
+[2026-08-30] With this project's side complete (40 of 40) and AutoEIS's at 9 of 40, the scorer was
+run on the 9 pairs that existed. **This is not a result and must not be quoted as one.** It is
+recorded here for two reasons: the look happened, and concealing it would make "the round stopped
+on machine time" unverifiable afterwards.
+
+What it showed: AutoCircuit 9/9 reported and 9/9 recommended, AutoEIS 3/9 and 1/9, six discordant
+runs all in one direction, p = 0.0312. That formally reaches `d`, and it is still not the round's
+answer:
+
+- The 9 pairs are **two truths out of eight**, both the smallest size and both `L`-free — the
+  first two in arena order, which is a non-random subset of the arena rather than a sample of it.
+- The truths not yet run include the 5- and 6-element ones, which are where **this project is
+  weakest**: above five elements its exhaustive stage gives way to the genetic search, measured at
+  5/9 against the exhaustive stage's 30/30 (`docs/EVOLVE_SEARCH_PLAN.md`). The gap should be
+  expected to narrow.
+- The round continues to the pre-registered end of the seed list. **Stopping here because the
+  number looked good is exactly what §1.6 forbids**, and the fact that it currently looks good is
+  the reason to say so explicitly rather than quietly.
+
+The look was worth taking for a different reason, and that part *is* a finding. AutoEIS's misses
+on `c3_0` were audited candidate by candidate: all 16 of its post-filter circuits translated and
+fitted without error, and the closest reached a residual of 4.3e-2 against the referee's 1e-6
+threshold, at 2–3.6% relative error on 1% noise data. So they are genuinely unexplained fits
+rather than near-equivalents the referee mishandled — and, more importantly for the round's
+validity, **the translator and the referee work on real data**. The silent failure this round is
+most exposed to, where the other tool's candidates fail to translate and are scored as misses,
+is not happening.
+
 ### 1.6 Stopping rule, fixed now so that it cannot be chosen later
 
 The seed list (1–20) and the stage boundaries (5, 10, 20 seeds) are written into `arena.py` before
