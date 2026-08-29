@@ -340,10 +340,17 @@ def mcnemar_exact(only_a: int, only_b: int) -> float:
     return min(1.0, 2.0 * tail)
 
 
-def resolvable_discordant(n_pairs: int) -> int:
-    """The smallest all-in-one-direction discordant count this many pairs could ever resolve.
+def resolvable_discordant(n_pairs: int = 64) -> int:
+    """The smallest all-in-one-direction discordant count that can reach p <= 0.05.
 
-    Declared before the result is read, per section 4 of the plan: an outcome inside this is
+    **This is a property of the exact test, not of the arena.** Five discordant runs all in one
+    direction reach only p = 0.0625, six reach 0.03125, so the answer is 6 for any arena with at
+    least six pairs, and more seeds buy the *opportunity* for discordant runs rather than a lower
+    bar. Passing a smaller ``n_pairs`` returns ``n_pairs + 1``, which is the honest way to say
+    that an arena this small can resolve nothing at all -- callers must distinguish the two
+    cases rather than printing the number as if it were universal.
+
+    Declared before the result is read, per section 4 of the plan: an outcome inside it is
     reported as "indistinguishable at this seed count", and the response is more seeds or
     nothing -- never a reworded bar.
     """
@@ -468,19 +475,21 @@ def _summarise(
     only_ours = sum(1 for a, b in eligible if a.reported_refitted and not b.reported_refitted)
     only_theirs = sum(1 for a, b in eligible if b.reported_refitted and not a.reported_refitted)
     p_value = mcnemar_exact(only_ours, only_theirs)
-    d = resolvable_discordant(len(eligible))
+    d = resolvable_discordant()  # the test's own bar, independent of this arena
+    reachable = len(eligible) >= d
 
     print("\n" + "=" * 88)
     print("Paired comparison (McNemar exact, on `reported` with the refitted referee)")
     print("=" * 88)
     print(f"  pairs {len(eligible)},  AutoCircuit only {only_ours},  AutoEIS only {only_theirs}")
     print(f"  p = {p_value:.4f}")
-    print(f"  d = {d}: nothing smaller than {d} all-in-one-direction discordant runs could")
-    print("      reach p <= 0.05, however many pairs there are.")
-    if d > len(eligible):
-        print(f"  This round cannot resolve ANY difference: d = {d} exceeds the {len(eligible)}")
-        print("      pairs available, so no outcome here could have been significant.")
-    if max(only_ours, only_theirs) < d:
+    print(f"  d = {d}: fewer than {d} discordant runs all in one direction cannot reach")
+    print("      p <= 0.05. This is a property of the exact test, not of the arena -- more")
+    print("      seeds buy the opportunity for discordant runs, never a lower bar.")
+    if not reachable:
+        print(f"  This arena cannot resolve ANY difference: {len(eligible)} pairs is fewer than")
+        print(f"      the {d} discordant runs the bar needs, so no outcome here could be called.")
+    elif max(only_ours, only_theirs) < d:
         print("  VERDICT: indistinguishable at this seed count. The response is more seeds or")
         print("           nothing -- not a reworded bar.")
 
@@ -490,6 +499,7 @@ def _summarise(
         "only_autoeis": only_theirs,
         "p_value": p_value,
         "resolvable_discordant": d,
+        "bar_reachable_at_this_arena_size": reachable,
         "census_autocircuit": dict(census_ours.status),
         "census_autoeis": dict(census_theirs.status),
         "outcomes": [

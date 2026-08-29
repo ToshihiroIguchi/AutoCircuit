@@ -49,6 +49,12 @@ class TestResolvableDiscordant:
         for n_pairs in (6, 20, 40, 100, 1000):
             assert resolvable_discordant(n_pairs) == 6
 
+    def test_the_default_is_the_tests_own_bar_not_an_arena_size(self) -> None:
+        # The report prints this number as a property of the exact test. Calling it with an
+        # arena's pair count instead returns the "unreachable" fallback below, and printing
+        # *that* as though it were universal is exactly the misreading this default prevents.
+        assert resolvable_discordant() == 6
+
     def test_reports_unreachable_when_there_are_too_few_pairs(self) -> None:
         # With fewer pairs than that, the answer must exceed the pair count rather than
         # pretending some smaller difference would have been significant.
