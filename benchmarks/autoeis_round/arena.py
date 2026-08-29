@@ -45,15 +45,18 @@ Why each choice is what it is:
     significant.** A stopping rule that depends on the data is not a stopping rule, and this one
     is written down so that it can be checked rather than promised.
 
-The identifiability screen is the one ``LARGE_REFERENCES`` applied to itself by hand, and it has
-**two halves**: fit the truth to its own noisy data, require that no parameter comes back with a
-standard error exceeding its own value, *and* require the fitted values to be within
-:data:`MAX_DEVIATION` of the generating ones, matched by value. Asking either search for a circuit
-the data cannot confirm measures neither search. It is applied here **before any tool is run** and
-identically to every draw, rather than by hand to the ones that looked wrong.
+The identifiability screen has **three parts** and :func:`is_identifiable` is the place to read
+before touching any of them: every parameter must move the spectrum by more than :data:`NOISE`,
+the truth fitted to its own data must leave no parameter with a standard error exceeding its own
+value, and the fitted values must come back within :data:`MAX_DEVIATION` of the generating ones.
+Asking either search for a circuit the data does not contain measures neither search. It is
+applied **before any tool is run** and identically to every draw, rather than by hand to the ones
+that looked wrong.
 
-The second half was missing from the first version of this file and the arena it drew had to be
-discarded. See :func:`is_identifiable` for what got through without it.
+Two of the three were added after an arena had already been drawn and had to be discarded, each
+time because the screen passed a truth nothing could recover while looking perfectly healthy.
+That history is in :func:`is_identifiable` with the measurements attached, and it is the reason
+this file is worth reading rather than skimming.
 """
 
 from __future__ import annotations
@@ -120,6 +123,12 @@ ARENA_SEED: int = 20260829
 #: that. Tighter would reject truths the repo already calls fine; looser lets through the
 #: seven-orders-of-magnitude case that made this constant necessary.
 MAX_DEVIATION: float = 0.5
+
+#: Fractional perturbation used by :func:`parameter_leverage`. A local sensitivity measure
+#: needs a step; 10% is small enough to stay local and large enough not to be swamped by
+#: floating-point noise. The *threshold* it is compared against is not a new constant --
+#: it is :data:`NOISE`, which was pre-registered before any of this.
+LEVERAGE_STEP: float = 0.10
 
 #: How many parameter draws to try per topology before giving up on it. A topology whose
 #: parameters cannot be made identifiable in this many attempts is discarded, and the count of
@@ -208,21 +217,69 @@ def _draw_params(circuit: Circuit, rng: np.random.Generator) -> dict[str, float]
     return values
 
 
-def is_identifiable(circuit: str, params: dict[str, float]) -> bool:
-    """Fit the truth to its own noisy data; require every parameter resolved **and recovered**.
+def parameter_leverage(circuit: str, params: dict[str, float]) -> dict[str, float]:
+    """Per-parameter leverage: the largest relative change in Z a small change in it produces.
 
-    Both halves are needed, and the second was missing when this file was first written. An
-    unresolved-parameter count measures local identifiability *at the optimum the fit found*, and
-    a fit is free to land on a different parameter set that reproduces the same spectrum -- the
-    standard errors around that point are then perfectly healthy and the screen passes a truth
-    nothing could recover. [measured] On the first draw of this arena that let through
-    ``p(L1,CPE1)-R1-CPE2`` with an inductance fitted at 1.2 H against a true 9.4e-8 H -- seven
-    orders of magnitude out, at 1.3% relative error, with every parameter marked resolved.
-
-    ``LARGE_REFERENCES`` in ``benchmarks/discovery_v2.py`` had it right in its own comments, which
-    record the unresolved count *and* the worst value-matched deviation for every reference; only
-    the copy of that screen made here dropped the second number.
+    Deterministic, needs no fit, and asks the question directly -- *is this parameter in the
+    data?* -- rather than inferring it from how one fit happened to turn out. A parameter whose
+    leverage is below :data:`NOISE` cannot be determined from this spectrum by anything, so a
+    truth carrying one is not a fair thing to ask either search for.
     """
+    frequencies = log_frequencies(F_MIN, F_MAX, POINTS_PER_DECADE)
+    omega = 2.0 * np.pi * frequencies
+    parsed = Circuit.parse(circuit)
+    base = parsed.impedance(omega, parsed.values_array(params))
+    magnitude = np.abs(base)
+    out: dict[str, float] = {}
+    for name in parsed.param_names:
+        perturbed = dict(params)
+        perturbed[name] *= 1.0 + LEVERAGE_STEP
+        z = parsed.impedance(omega, parsed.values_array(perturbed))
+        out[name] = float(np.max(np.abs(z - base) / magnitude))
+    return out
+
+
+def is_identifiable(circuit: str, params: dict[str, float]) -> bool:
+    """Is this truth a fair thing to ask a search for? Three checks, and all three are needed.
+
+    **One: every parameter must be in the data.** :func:`parameter_leverage` perturbs each one
+    and requires the spectrum to move by more than :data:`NOISE`. This is the check that asks the
+    question directly, and it is first because it is deterministic and costs no fit.
+
+    The other two look at a fit of the truth to its own noisy data: no parameter may come back
+    with a standard error exceeding its own value, and the fitted values must be within
+    :data:`MAX_DEVIATION` of the generating ones, matched by value.
+
+    **Each of the three was added because the ones before it let something through**, and the
+    history is kept because each failure looks like a healthy screen from the outside:
+
+    * With only the standard-error check, ``p(L1,CPE1)-R1-CPE2`` passed with an inductance fitted
+      at 1.2 H against a true 9.4e-8 H -- seven orders of magnitude out, at 1.3% relative error,
+      every parameter marked resolved. A fit may land on a different parameter set that reproduces
+      the same spectrum, and the curvature around *that* point is perfectly healthy.
+    * Adding the deviation check did not fix it, because for a parameter the data does not contain
+      the deviation of a single fit is a lottery. ``p(R1,L1)-R2`` passed with R1 recovered to 44%,
+      just inside the 50% bar, while multiplying that same R1 by **one hundred** moves the
+      spectrum by 0.03% -- a parameter with a leverage of 0.09% against a 1% noise floor.
+
+    An unresolved-parameter count measures local identifiability *at the optimum the fit found*.
+    That is not the same question as whether the data determines the parameter, and this file
+    conflated them twice.
+
+    ``LARGE_REFERENCES`` in ``benchmarks/discovery_v2.py`` had the second check right in its own
+    comments, which record the unresolved count *and* the worst value-matched deviation for every
+    reference; only the copy of that screen made here dropped it.
+
+    **This is not screen-shopping, and the difference matters.** Adjusting a screen until the
+    *result* looks better is the move section 1.3 of ``docs/AUTOEIS_COMPARISON.md`` forbids. Each
+    change here was forced by a demonstrated failure of the instrument to answer its own question,
+    with no tool yet scored and no result in existence, and the last one is a different instrument
+    rather than a threshold moved -- its bar is :data:`NOISE`, which was fixed before any of this.
+    If that distinction ever stops being checkable, stop.
+    """
+    # The leverage test first: it is deterministic, costs no fit, and rejects most bad draws.
+    if min(parameter_leverage(circuit, params).values()) < NOISE:
+        return False
     spectrum = simulate(
         circuit,
         log_frequencies(F_MIN, F_MAX, POINTS_PER_DECADE),
