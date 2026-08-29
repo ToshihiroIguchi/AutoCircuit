@@ -155,7 +155,38 @@ conversion, which removes a whole class of silent scoring bug from `translate.py
 `visualization.py` ranks the result table by `WAIC (sum)` ascending. Using that as AutoEIS's
 single top answer is reading the tool's own rule rather than imposing one.
 
-### 0.5 What step 0 did *not* measure
+### 0.5 The other tool deletes data before its search sees it, and an inductor is what it deletes
+
+Read from `utils.preprocess_impedance_data`, which is the first call of AutoEIS's documented
+pipeline and runs at its defaults (`tol_linKK=5e-2`, `high_freq_threshold=1e3`). Three heuristics
+run in order, and all three remove points:
+
+1. Among frequencies above 1 kHz, find the point of minimum `|Im Z|` and **discard everything
+   above it**. On a spectrum with no inductive tail the minimum sits at the top of the sweep and
+   nothing is lost. On a spectrum with an ESL, the minimum is the self-resonance, and **the whole
+   inductive region above it is deleted.**
+2. Then delete any remaining point above 1 kHz with `Im Z > 0` — the inductive tail again.
+3. Then run Lin-KK and delete every point whose real or imaginary residual reaches 5%.
+
+On AutoEIS's own bundled test dataset this removed 7 of 67 points (10%), and it warned about it.
+
+This is a defensible position for a tool aimed at electrochemical cells, where an inductive tail
+is usually instrument artefact rather than sample. It is not a defect. But it means that **for a
+truth containing an `L`, AutoEIS's search never sees the evidence for the `L`**, and a miss there
+is its preprocessing rather than its search — a distinction the failure taxonomy of the plan's §3
+does not yet have a code for, and which is not the same event as `filtered`.
+
+Two consequences for arena C, both of which have to be decided in the open rather than absorbed:
+
+- Excluding `L` from the sampler would build an arena around the other tool's weakness in one
+  direction; including it without saying so would build one in the other. So `L` is included, and
+  results are reported **split into `L`-containing and `L`-free truths**, with the number of
+  points the preprocessing removed recorded per run.
+- "Both tools read the same file" stays true, and is no longer the same as "both searches saw the
+  same data". The scorer records both counts, because a recovery rate against a spectrum that lost
+  a third of its points is not comparable to one against the whole sweep.
+
+### 0.6 What step 0 did *not* measure
 
 - The NUTS stage has not been run or timed, so the per-spectrum cost above is a **lower bound**.
 - `filter_implausible_circuits` was exercised once and the generation run it was given returned
@@ -163,3 +194,55 @@ single top answer is reading the tool's own rule rather than imposing one.
   filter, and it is recorded here as vacuous. The filter's behaviour above is read from its
   source, not from a run.
 - Nothing has been scored. There is no arena, no truth, and no comparison in this document.
+
+---
+
+## 1. Arena C — how it is built, written before it is run
+
+`benchmarks/autoeis_round/arena.py`. Everything it fixes is in the pre-registered block at the top
+of that file with the reason beside it; the two decisions worth repeating here are that **`L` stays
+in the pool** even though the other tool's preprocessing deletes the evidence for it (§0.5), and
+that **sizes run to 6**, one past the point where this project's exhaustive stage stops being
+complete and its measurably weaker genetic fallback takes over. Stopping at five would hand this
+side its strongest configuration and call the result a comparison. Results are reported per size
+and split by whether the truth contains an `L`, so neither half is averaged away.
+
+### 1.1 The structural filters were reproduced and then checked against the original
+
+Two of AutoEIS's four default post-filters decide whether a truth can be returned by it at all: it
+must have a bare resistor in the top-level series chain (`ohmic_resistance_filter`, via
+`parser.find_ohmic_resistors`) and it must contain a parallel route (`series_filter`). The sampler
+has to apply the same two rules, and a subtly different reading of them would quietly change the
+arena — which is a score with no symptom, the same failure mode `translate.py` is tested against.
+
+So they were not reasoned about; they were **run**. All 1020 topologies of sizes 2–5 in the pool
+`("R", "L", "CPE")` were translated into AutoEIS syntax and put to AutoEIS's own functions in its
+own environment. [measured] **1020 cases, 0 errors, 0 disagreements on either filter.** The check
+is not vacuous: the ohmic predicate is true for 164 of the 1020 and false for 856, the parallel
+predicate true for 1004 and false for 16, so a disagreement had ample opportunity to appear. It
+also put `translate.py`'s outbound direction through 1020 circuits without an error.
+
+### 1.2 Most of the shared space is unreachable by the other tool's defaults
+
+A by-product of the same census, and a number worth having on its own:
+
+| size | topologies in pool | admissible | rejected: no series R | rejected: no parallel route |
+|---|---|---|---|---|
+| 3 | 32 | 4 | 26 | 2 |
+| 4 | 156 | 24 | 130 | 2 |
+| 5 | 824 | 128 | 694 | 2 |
+| 6 | 4664 | 692 | 3970 | 2 |
+
+The requirement of a series ohmic resistance alone removes about **85%** of the shared vocabulary's
+topology space. That is a statement about the other tool's default assumptions rather than about
+its search, and it is why arena C samples inside the admissible set instead of sampling freely and
+reporting a landslide of `filtered` events that would say nothing about either search.
+
+### 1.3 Stopping rule, fixed now so that it cannot be chosen later
+
+The seed list (1–20) and the stage boundaries (5, 10, 20 seeds) are written into `arena.py` before
+the first run. Extending the round runs more of an already-written list; it never chooses seeds
+after seeing a result. **The round stops when the machine time runs out or the seed list is
+exhausted — never because a result looked significant.** A stopping rule that depends on the data
+is not a stopping rule, and the reason it is recorded here is so that the claim can be checked
+rather than believed.
