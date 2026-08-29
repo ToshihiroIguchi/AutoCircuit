@@ -19,12 +19,45 @@ AutoCircuit プロジェクト(`C:\Users\toshi\python\AutoCircuit`)の作業を�
 
 ## 現在地(コミット済み)
 
+**ステップ0とステップ1は完了。配管は全部そろっていて、残るのは本番ランと結果の記述だけ。**
+
 - `f07d6d9` ステップ0(go/no-go)= **go**
 - `f64404e` `translate.py` + 40テスト
-- `77a4234` `arena.py`(アリーナCの事前登録)+ 相手フィルタとの一致検証
+- `77a4234` `arena.py`(アリーナCの事前登録)+ 相手フィルタと1020件一致
+- `d012d88` 引継ぎ
+- `d8adc66` 生産者2本 + NUTS 段の実費 + arviz 障害
+- `e2f6ef9` サンプラーの重複バグ修正
+- `05ff924` `score.py` + テスト
+- `7d6e0a2` 実行手順
+- `541edc8` アリーナCの実体と、その偏りの記録
+- `c117f65` `d` の表示バグ修正(既知解フィクスチャで通し検証済み)
 
-**未完了:** `run_autocircuit.py` / `run_autoeis.py`(生産者2本)、`score.py`(採点者)、アリーナCの
-生成実行、本番ラン。
+**アリーナCは生成済み**(`benchmarks/autoeis_round/arena_c/`、8真値×20シード=160スペクトル。
+`.gitignore` 済みだが `arena_c_manifest.json` が履歴にある。消えたら `arena.py` を同じ
+`ARENA_SEED` で回せば同じものが出る)。
+
+**残っているのはこれだけ:**
+
+```powershell
+$env:PYTHONPATH = "C:\Users\toshi\python\AutoCircuit\src"
+# 1. AutoCircuit 側(済んだ分は自動で飛ばす)。1件 208 s(3素子)〜。
+python benchmarks/autoeis_round/run_autocircuit.py --arena benchmarks/autoeis_round/arena_c --max-seeds 5 --workers 6
+# 2. AutoEIS 側。1件約40分 × 40 ≈ 26 時間。**1と同時に走らせない。**
+C:\Users\toshi\python\autoeis-env\Scripts\python.exe benchmarks/autoeis_round/run_autoeis.py --arena benchmarks/autoeis_round/arena_c --max-seeds 5
+# 3. 採点(smoke レコードがあると実行を拒否する)
+python benchmarks/autoeis_round/score.py --arena benchmarks/autoeis_round/arena_c --out benchmarks/autoeis_round/arena_c/report.json
+```
+
+長時間ジョブは切り離して起動する(親シェルが死んでも生き残ることを実測済み):
+
+```powershell
+Start-Process -FilePath python.exe -ArgumentList "benchmarks/autoeis_round/run_autocircuit.py","--arena","benchmarks/autoeis_round/arena_c","--max-seeds","5","--workers","6" `
+  -WorkingDirectory C:\Users\toshi\python\AutoCircuit -RedirectStandardOutput run_ac.log -RedirectStandardError run_ac.log.err -WindowStyle Hidden
+```
+
+**そのあと:** `docs/AUTOEIS_COMPARISON.md` に §2 として結果を書く → `IMPLEMENTATION_PLAN.md` の
+先行研究段落、`SEARCH_ALGORITHM_SURVEY.md` 85行目、`HANDOFF.md` の新節、**結果が出てから**
+`CLAUDE.md` の Start here 15番。
 
 ## 環境(構築済み。作り直さないこと)
 
@@ -62,18 +95,17 @@ EquivalentCircuits.jl 0.3.1@master は `juliapkg` が取得済み。全版は
 - CPE の定義は両者一致(`Z = 1/(Q(jω)^n)`)。単位換算不要。
 - 構造フィルタ(直列オーミック抵抗・並列経路)の自前実装は、**相手の関数と1020件で完全一致を実測済み**。
 
-## 次にやること
+## 結果を読むときに外してはいけないこと
 
-1. **生産者2本を仕上げる**(`run_autocircuit.py` / `run_autoeis.py`)。上の運転条件が要件。
-2. **`score.py`**。§2.3 の審判(`canonical_form()` + `EQUIVALENCE_RTOL`)を**両側に同じく**当てる。
-   `oov` は N/A であって 0 ではない。`filtered` を `wrong` に混ぜない。前処理で削られた事象は
-   `filtered` とも別に数える。結果は**サイズ別**と **`L` 有無別**に割る。
-3. **NUTS 段の実費を1スペクトルで測る。** これが総額を決める。
-4. アリーナ生成:`python benchmarks/autoeis_round/arena.py --out benchmarks/autoeis_round/arena_c`
-   (適合性判定でフィットを回すので時間がかかる。中断可・再開可)。
-5. 本番ラン → `docs/AUTOEIS_COMPARISON.md` に追記 → `IMPLEMENTATION_PLAN.md` の先行研究段落、
-   `SEARCH_ALGORITHM_SURVEY.md` 85行目、`HANDOFF.md` の新節、**結果が出てから** `CLAUDE.md` の
-   Start here 15番。
+- **`d = 6`。これは検定固有の下限でアリーナの大きさではない。** 片方向に揃った不一致5組は
+  p = 0.0625 にしか届かない。シードを足すと「不一致が出る機会」が増えるだけで、**バーは下がらない**。
+- **アリーナは8真値中6本が `L` を含む。** 相手は前処理で誘導性の尾を削るので、全体の数字は相手の
+  **前処理**を測ってしまう。**`L` 無し群(2真値)が探索の比較、`L` 有り群が前処理効果**として読む。
+  5シードでは `L` 無し群は10ペアしかなく、ほぼ何も解像しない。20シードで40ペア。
+  **アリーナを引き直してはいけない**(`docs/AUTOEIS_COMPARISON.md` §1.3)。
+- **`reported` は2通り出る。** `refitted`(両側とも同じ fitter で再フィット=トポロジーの問い)と
+  `as_returned`(各ツール自身の値)。どちらか一方を見出しにしない。
+- `oov` は分母から外す。0点にしない。`filtered` を `wrong` に混ぜない。
 
 ## この比較で絶対に守ること
 
