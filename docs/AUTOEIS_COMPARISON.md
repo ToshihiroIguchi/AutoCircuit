@@ -460,6 +460,43 @@ not — including at size 6, where a 5-element answer apparently explained the d
 stop. If this side misses the six-element truths, that is where it will come from, and it is a
 statement about the fallback trigger rather than about the fallback.
 
+### 1.5d The analysis set was cut to five elements and up — the user's decision, after an interim
+
+**On 2026-08-30 the user decided that the round scores only truths of five elements or more, and
+asked for the decision to be recorded as theirs.** It is implemented as `MIN_ELEMENTS` in
+`score.py`, the report names the excluded truths on every run, and nothing is deleted — the runs
+for `c3_0`, `c3_1`, `c4_0` and `c4_1` remain in the tables and can be scored at any time with
+`--min-elements 3`.
+
+**Their argument**, which §1.5c had just measured: below five elements AutoCircuit does not search
+for the truth, it enumerates it, so a comparison there is decided by the arena's construction
+rather than by the two searches.
+
+**The objections put to them before they decided**, recorded so a reader can weigh the same things
+rather than take the outcome on trust:
+
+1. The completeness guarantee covers sizes 3, 4 **and 5** — `complete_up_to` is 4 or 5 on every
+   run — so a cut at five still keeps ten runs the argument would exclude, and the cut matching
+   the argument is six.
+2. Changing the analysis set after seeing a result is the mechanism this round refuses everywhere
+   else (§1.3, §1.6). That the change is *unflattering* to this project does not change the
+   mechanism, and a document that allows the exception here cannot claim the rule elsewhere.
+3. The discarded rows carry a real measurement **of AutoEIS** — 3 of 9 at three elements, on
+   spectra where its own preprocessing removed almost nothing — which someone choosing between the
+   tools would want. Cutting them removes information about the other tool, not only about this
+   one.
+
+The alternative offered was to keep every row and delete the *pooled* figure instead, since the
+pooled figure is what misleads and the rows themselves are measurements.
+
+The user considered these and chose five. **This section exists so that the choice is visible
+rather than absorbed**, and any reader who prefers a different cut has both the data and the
+argument to make it.
+
+One consequence to keep in view: at five and above the arena is four truths, so a five-seed stage
+is twenty pairs and `d` is 6. That is reachable but thin, and the response to it is the
+pre-registered seed list — ten seeds, then twenty — not a further change to what is scored.
+
 ### 1.6 Stopping rule, fixed now so that it cannot be chosen later
 
 The seed list (1–20) and the stage boundaries (5, 10, 20 seeds) are written into `arena.py` before
