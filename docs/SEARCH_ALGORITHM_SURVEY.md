@@ -82,7 +82,7 @@ Cited with URLs in `IMPLEMENTATION_PLAN.md` section 11; repeated here only as an
 | Algorithm | Reference | Used in |
 |---|---|---|
 | Gene-expression programming for ECM identification | Van Haeverbeke et al., IEEE T-IM 70 (2021); EquivalentCircuits.jl | Precedent cited at `discover.py:18-21`; this project uses direct tree GP instead |
-| AutoEIS (KK validation + evolutionary ECM generation + physics filters + Bayesian inference) | Zhang et al., J. Electrochem. Soc. 170, 086502 (2023); JOSS (2024) | Source of the post-filtering and down-selection design |
+| AutoEIS (KK validation + evolutionary ECM generation + physics filters + Bayesian inference) | Zhang et al., J. Electrochem. Soc. 170, 086502 (2023); JOSS (2024) | Source of the post-filtering and down-selection design. **Since run head to head** — `docs/AUTOEIS_COMPARISON.md` |
 | Linear Kramers-Kronig test | Boukamp, JES 142, 1885 (1995); model order after Schoenleber, Klotz & Ivers-Tiffee, Electrochim. Acta (2014) | `core/validate.py` |
 | Tikhonov + GCV + NNLS for the DRT | ridge-regression DRT literature (DRTtools lineage) | `core/drt.py` — lambda chosen on the *unconstrained* problem, gamma recomputed non-negative |
 | RL ladder for the skin effect | Kim & Neikirk, IEEE MTT-S (1996) | `core/spice.py`, export only |

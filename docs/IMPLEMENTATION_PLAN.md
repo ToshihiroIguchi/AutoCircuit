@@ -71,7 +71,12 @@ Deliverables in order: core library → CLI → static-site Web UI (WASM).
   programming" (IEEE T-IM 2021), and **AutoEIS** ("Automated Bayesian model selection and
   analysis for EIS", J. Electrochem. Soc. 2023; JOSS 2024), which layers Kramers-Kronig data
   validation, physics-based post-filtering, and Bayesian parameter inference on top of the
-  evolutionary search. An older GA paper (2003, "An evolutionary approach for modeling the
+  evolutionary search. **[measured, 2026-08-30] AutoEIS has now been run rather than only cited**
+  (`docs/AUTOEIS_COMPARISON.md`): on truths of five and six elements, at both tools' defaults,
+  **neither recovered the circuit** — this project 2/7 with a truth-equivalent anywhere in its
+  candidate list and 0/7 as its recommendation, AutoEIS 0/7 on both, p = 0.50 against a bar of 6
+  discordant runs. Read §2.1 before quoting it: the round was stopped at 7 of 20 pre-registered
+  pairs after the result was seen. An older GA paper (2003, "An evolutionary approach for modeling the
   equivalent circuit for EIS") established feasibility two decades ago.
 - PySR itself is not directly reusable: it evolves scalar math expression trees, needs a Julia
   backend (won't run in WASM), and its operator grammar does not map to two-terminal networks.

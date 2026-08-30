@@ -399,6 +399,29 @@ static-site Web UI running the same core via WASM (Pyodide).
    agrees on a *zero* was reporting infinite disagreement, and that one value made the whole
    response undeliverable rather than merely odd.
 
+15. `docs/AUTOEIS_COMPARISON.md` — the first time this project ran a competing tool instead of
+   citing one. **Run and stopped early; the plan beside it is `docs/AUTOEIS_COMPARISON_PLAN.md`.**
+   The headline is that there is no headline: on five- and six-element truths at both tools'
+   defaults, **neither recovered the circuit** — 2/7 with a truth-equivalent anywhere in this
+   project's candidate list and **0/7 as its recommendation**, AutoEIS 0/7 on both, p = 0.50
+   against `d` = 6. Four sections are worth the read and only one is about AutoEIS. §2.2 is the
+   defect the round found *here*: `generations` is 0 on all forty runs, so **the genetic fallback
+   never ran once** — its trigger is a runs test at `z < -3.0` and the measured residuals sit at
+   −0.45 to +0.67, because a five-element answer reproduces these spectra to within what 1% noise
+   hides. `EVOLVE_SEARCH_PLAN.md`'s 5/9 was never the limit; the trigger's sensitivity is. §1.5c
+   is why the arena's small truths could not settle anything — 30 of 40 runs have the truth
+   *inside* `complete_up_to`, so below six elements this project does not search for the truth, it
+   enumerates it. §1.5d records the user's decision to score only five elements and up, with the
+   objections that were put and overruled. And §2.1 records that the round was stopped after its
+   result was seen, as a departure from its own stopping rule rather than as a machine-time stop.
+   §0 stands on its own whatever happens to the comparison: AutoEIS's vocabulary is `R, C, L, P`
+   with **no Warburg**, its default alphabet excludes the ideal capacitor and its filters delete
+   any circuit keeping one, its default path **does not honour its seed** (measured, not read off
+   the FIXME), its preprocessing **deletes 6–37% of a sweep before its search sees it**, and a
+   clean `pip install autoeis` today produces a build whose last stage crashes on `arviz` 1.x.
+   §0.3 carries two withdrawn readings, both the same error: a stall diagnosed from the process
+   table that was not a stall.
+
 Update these when decisions change.
 
 ## Stack and conventions

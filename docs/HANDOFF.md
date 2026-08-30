@@ -2457,3 +2457,63 @@ Unchanged — no code was touched: `pytest` **946 passed, 19 skipped**, `ruff` a
 * The two EV1 references at 0/3, and `EVOLVE_SEARCH_PLAN.md` §6's live clause: `mode="auto"`
   above five elements may yet be better served by reporting an under-fitted exhaustive front than
   by handing off at all. Nothing in this round decided that, and this section does not either.
+
+## 32. Running the tool this project had only ever cited, and the defect that turned up here
+
+`docs/AUTOEIS_COMPARISON_PLAN.md` was the plan; `docs/AUTOEIS_COMPARISON.md` is what happened.
+AutoEIS had been cited in four places since the beginning and **never run**. It has now been run.
+
+**The result has no winner.** On arena C's five- and six-element truths, at both tools' defaults,
+one referee applied to both: this project 2/7 with a truth-equivalent anywhere in its candidate
+list, **0/7 as its recommendation, 0/7 on its own front**; AutoEIS 0/7 on all three. Paired, 2
+discordant runs both this way, p = 0.50 against `d` = 6 — indistinguishable at this seed count.
+All fourteen runs are `ok`: no crash, no `filtered`, no empty result. They are searches that
+finished and returned the wrong circuit.
+
+**The round was stopped at 7 of 20 pre-registered pairs, after the result was seen**, on the
+user's decision. §2.1 of that document records it as a departure from its own stopping rule rather
+than as a machine-time stop, because the direction being null rather than significant does not
+change the mechanism.
+
+### What must not be re-derived
+
+- **`generations` is 0 on all forty runs — the genetic fallback never ran.** Its trigger is
+  `_is_underfitted`, a runs test at `z < RUNS_Z_LIMIT = -3.0`, and the recorded residual z on the
+  six-element truths is −0.45 and +0.67, on the five-element ones 0.00 and +0.22. A five-element
+  answer reproduces these spectra to within what 1% noise hides. **`EVOLVE_SEARCH_PLAN.md`'s
+  measured 5/9 for the fallback was never the limit here — the fallback was never asked.** If the
+  six-element behaviour is to be improved, the trigger's sensitivity is the thing to work on, not
+  the genetic search.
+- **Below six elements this project does not search for the truth, it enumerates it.** 30 of 40
+  runs have the truth inside `complete_up_to`. Any comparison pooled across sizes is quoting the
+  arena's construction; report per size.
+- **The identifiability screen took three versions and the first two passed truths nothing could
+  recover.** Standard errors alone let through an inductance fitted at 1.2 H against a true
+  9.4e-8 H at 1.3% relative error with every parameter "resolved"; adding a value-matched
+  deviation check did not fix it, because for a parameter the data does not contain the deviation
+  of one fit is a lottery. What works is asking directly: perturb each parameter and require the
+  spectrum to move by more than the noise (`arena.py`, `parameter_leverage`).
+- **AutoEIS facts, measured from version 0.0.44 rather than read from its docs**: vocabulary
+  `R, C, L, P` and **no Warburg**; default `terminals="RLP"` excludes the ideal capacitor and
+  `capacitance_filter` deletes any circuit keeping one; `ohmic_resistance_filter` requires a
+  series ohmic R, which alone removes ~85% of the shared topology space; **the default parallel
+  path does not honour its seed** (two runs at seed 1 returned disjoint sets); `seed=0` falls back
+  to the clock; `perform_full_analysis()` raises `NotImplementedError`; its ranking rule is
+  `WAIC (sum)` ascending; its preprocessing deletes 6–37% of a sweep before its search sees it;
+  and **a clean `pip install autoeis` today produces a build whose last stage crashes**, because
+  the package requires `arviz` unbounded and 1.x removed `az.waic` — pin `arviz==0.23.4`.
+- **AutoEIS's parallelism is Julia `Distributed`, one `julia.exe` per physical core.** The parent
+  Python process shows almost no CPU. That is normal and is not a stall — it was diagnosed as one
+  twice (§0.3 of the comparison). **Judge a run when it finishes or fails; the process table can
+  say what is running, never that nothing is progressing.** Related: a `nohup ... &` launch from a
+  Bash tool call does not survive its shell and fails silently, and killing a producer by process
+  *name* misses it when the interpreter is named differently — twice that left two producers
+  writing to one file.
+
+### Environment
+
+The AutoEIS install is **outside this project** at `C:\Users\toshi\python\autoeis-env` (Python
+3.12.10, because `autoeis` declares `requires_python <3.13`). Julia 1.10.12 and
+EquivalentCircuits.jl 0.3.1@master come from `juliapkg`. Nothing of it may reach `pyproject.toml`.
+`benchmarks/autoeis_round/README.md` has the commands; `run_round.ps1` runs the three steps
+unattended and every step resumes by re-issuing the identical command.
