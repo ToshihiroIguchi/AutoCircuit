@@ -1,0 +1,68 @@
+40 AutoCircuit runs, 26 AutoEIS runs, 7 paired
+
+ANALYSIS SET RESTRICTED to truths of 5+ elements. This is the
+user's decision of 2026-08-30, taken after an interim result had been seen; their
+argument and the objections put to them before they decided are on MIN_ELEMENTS in
+this module, and in section 1.5d of docs/AUTOEIS_COMPARISON.md.
+Excluded from every number below: c3_0, c3_1, c4_0, c4_1.
+
+  c5_0 s1   ours=ok/000   theirs=ok/000   pts 81->73
+  c5_0 s2   ours=ok/100   theirs=ok/000   pts 81->73
+  c5_0 s3   ours=ok/000   theirs=ok/000   pts 81->73
+  c5_0 s4   ours=ok/100   theirs=ok/000   pts 81->73
+  c5_1 s1   ours=ok/000   theirs=ok/000   pts 81->60
+  c6_0 s1   ours=ok/000   theirs=ok/000   pts 81->74
+  c6_1 s1   ours=ok/000   theirs=ok/000   pts 81->71
+
+========================================================================================
+Recovery. 'oov' truths are excluded from that tool's denominator, never scored zero.
+========================================================================================
+  reported (refitted referee)    AutoCircuit        2/7    AutoEIS        0/7
+  reported (tool's own values)   AutoCircuit        2/7    AutoEIS        0/7
+  on front / post-filter set     AutoCircuit        0/7    AutoEIS        0/7
+  recommended                    AutoCircuit        0/7    AutoEIS        0/7
+
+  The two 'reported' rows are two readings, not a headline and a footnote; see this
+  module's docstring. 'on front' compares different objects on the two sides: a Pareto
+  front here, the surviving post-filter set there.
+
+========================================================================================
+Split by element count, and by whether the truth contains an inductor
+========================================================================================
+  5 elements   AutoCircuit        2/5    AutoEIS        0/5
+  6 elements   AutoCircuit        0/2    AutoEIS        0/2
+  with L       AutoCircuit        2/7    AutoEIS        0/7
+  without L    AutoCircuit n/a (0 eligible)    AutoEIS n/a (0 eligible)
+
+  ...and by how much of the sweep AutoEIS's search actually received:
+  kept < 75%   AutoCircuit        0/1    AutoEIS        0/1   (1 pairs)
+  75-95%       AutoCircuit        2/6    AutoEIS        0/6   (6 pairs)
+
+========================================================================================
+Failure taxonomy -- a wrong answer and a refusal are different events
+========================================================================================
+  AutoCircuit  {'ok': 7}
+  AutoEIS      {'ok': 7}
+
+  AutoEIS's preprocessing removed points on 7 of 7 runs
+  (its search never saw them; this is not the same event as `filtered`):
+    c5_0: 81 -> 73
+    c5_0: 81 -> 73
+    c5_0: 81 -> 73
+    c5_0: 81 -> 73
+    c5_1: 81 -> 60
+    c6_0: 81 -> 74
+    c6_1: 81 -> 71
+
+========================================================================================
+Paired comparison (McNemar exact, on `reported` with the refitted referee)
+========================================================================================
+  pairs 7,  AutoCircuit only 2,  AutoEIS only 0
+  p = 0.5000
+  d = 6: fewer than 6 discordant runs all in one direction cannot reach
+      p <= 0.05. This is a property of the exact test, not of the arena -- more
+      seeds buy the opportunity for discordant runs, never a lower bar.
+  VERDICT: indistinguishable at this seed count. The response is more seeds or
+           nothing -- not a reworded bar.
+
+wrote benchmarks\autoeis_round\arena_c\report.json

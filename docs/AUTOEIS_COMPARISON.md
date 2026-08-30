@@ -4,8 +4,14 @@ Companion to `docs/AUTOEIS_COMPARISON_PLAN.md`, which was written before any of 
 and which is corrected in place where a measurement contradicted it. **Withdrawn readings are
 left here beside the surviving ones rather than deleted.**
 
-Status: **step 0 complete (go). Steps 1–5 not started.** Nothing below is a comparison of the two
-searches; step 0 only establishes that a comparison can be run at all, and at what price.
+Status: **run and stopped early.** §2 has the result: on truths of five and six elements, at
+defaults, **neither tool recovered the circuit** — AutoCircuit 2/7 on `reported` and 0/7 on
+`recommended`, AutoEIS 0/7 on both, p = 0.50 against a bar of `d` = 6. The round was stopped at 7
+of 20 pre-registered pairs **after the result was seen**, which §2.1 records as a departure from
+its own stopping rule rather than dressing up as a machine-time stop.
+
+§0 is step 0, the go/no-go, and everything it measured about the other tool still stands
+independently of the comparison.
 
 ---
 
@@ -250,6 +256,82 @@ Two consequences for arena C, both of which have to be decided in the open rathe
   filter, and it is recorded here as vacuous. The filter's behaviour above is read from its
   source, not from a run.
 - Nothing has been scored. There is no arena, no truth, and no comparison in this document.
+
+---
+
+## 2. The result, and why it stops at seven pairs
+
+**Neither tool recovered a five- or six-element circuit from its spectrum, at defaults. That is
+the finding, and it is a statement about both.**
+
+[measured, 2026-08-30] Arena C, truths of five elements and up (§1.5d), one referee applied to
+both sides:
+
+| | AutoCircuit | AutoEIS |
+|---|---|---|
+| `reported` — truth or an exact equivalent anywhere in the candidate list | **2/7** | **0/7** |
+| `reported`, judged on each tool's own parameter values | 2/7 | 0/7 |
+| on the Pareto front / in the post-filter surviving set | **0/7** | **0/7** |
+| **`recommended` — the single answer the tool puts forward** | **0/7** | **0/7** |
+
+| by size | AutoCircuit | AutoEIS |
+|---|---|---|
+| 5 elements | 2/5 | 0/5 |
+| 6 elements | 0/2 | 0/2 |
+
+Paired: 2 discordant runs, both this project's way, 0 the other. **p = 0.50 against `d` = 6.**
+The pre-registered verdict applies and is not reworded: **indistinguishable at this seed count.**
+
+Two things are worth separating in that table. AutoEIS returned nothing truth-equivalent on any of
+the seven runs, across all four truths. And **this project recommended the truth zero times out of
+seven** — it put a truth-equivalent circuit *somewhere* in its candidate list twice, and never on
+its own front, and never as its answer. A reader looking for a winner here will not find one.
+
+Every AutoEIS run lost points to its own preprocessing (81 → 60–74), and the failure taxonomy is
+`ok` on all fourteen runs: no crash, no `filtered`, no empty result on either side. These are
+searches that finished and returned the wrong circuit.
+
+### 2.1 The round was stopped early, and not for the reason the rule allows
+
+**Stopped at 7 of the 20 pre-registered pairs, on the user's decision, after seeing the result.**
+§1.6 says the round stops on machine time and never because of what a result looks like. This stop
+was because the result looked null, which is a different direction from the one that rule was
+written against but **the same mechanism**, and calling it a machine-time stop would make every
+other self-imposed limit in this document unverifiable. So it is recorded as what it is.
+
+The reasoning, such as it is: after four runs on one truth showed nothing, three more runs were
+added — one seed each of the three truths that had no AutoEIS data at all — specifically to test
+whether the zero was that truth's property or general. It was general: 0/7 across four truths.
+With `reported` running at 2/7 for this project and 0/7 for AutoEIS, completing all twenty pairs
+projects to roughly 6/20 against 0/20, which sits exactly on `d` = 6 — so nine more hours would
+most likely have bought either "indistinguishable, add seeds" or a result balanced on a single
+run. The pre-registered answer to that is more seeds, and more seeds is another twenty hours.
+
+What this costs the round, stated rather than glossed: **seven pairs cannot resolve a difference
+that twenty might have**, and the 2/7 versus 0/7 gap on `reported` is left unresolved rather than
+shown to be absent. The data, the arena and the scripts are all in place; `run_round.ps1` with
+`-MaxSeeds 5` continues from where it stopped and costs nothing already spent.
+
+### 2.2 What this side did wrong, which the round found and the comparison did not need
+
+The more useful half of the result is about this project, and it is not about the genetic search's
+quality. [measured] **`generations` is 0 on all forty runs — the genetic fallback never ran once.**
+`mode="auto"` falls back only when the best exhaustive fit leaves a systematic residual, tested as
+a runs-test `z < -3.0`. The recorded values on the six-element truths are **−0.45, +0.67, −0.45,
++0.67** and on the five-element ones **0.00, +0.22**: nowhere near it. A five-element answer
+reproduces these spectra to within what 1% noise hides, so the trigger never fires and the search
+stops one completeness level below the truth.
+
+So `docs/EVOLVE_SEARCH_PLAN.md`'s measured 5/9 for the fallback is not what limited this round —
+the fallback was never asked. The limit is the **sensitivity of the trigger**, and that is a
+defect this comparison surfaced which no amount of tuning the genetic search would have touched.
+
+A second observation from the same records, unresolved: on `c6_0` the pool chooser reported a
+**5.7–6.9 decade 45-degree branch** and set `triggered: yes`, then widened nothing because the
+measured low-frequency exponent `[-0.90, -0.17]` admitted none of `W`, `Ws`, `Wo`, `G`. The truth
+`p(L1-CPE1,R1)-p(CPE2,CPE3)-R2` has three CPEs, so the long 45-degree branch is real and is not
+diffusion. Whether that is the detector working correctly or getting the right answer for the
+wrong reason is not established here.
 
 ---
 
