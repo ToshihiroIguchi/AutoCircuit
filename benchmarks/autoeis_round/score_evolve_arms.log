@@ -1,0 +1,32 @@
+  auto            c6_0 s1  reported=0 front=0 rec=0  gen=0 n=2588  err=nan%  p(R1-L1-CPE1,R2-CPE2)
+  evolve-default  c6_0 s1  reported=0 front=0 rec=0  gen=30 n=541  err=nan%  R1-p(R2-CPE1,L1-CPE2)
+  evolve-min6     c6_0 s1  reported=0 front=0 rec=0  gen=30 n=443  err=nan%  p(L1-C1-CPE1,R1-CPE2)
+  auto            c6_0 s2  reported=0 front=0 rec=0  gen=0 n=2588  err=nan%  p(C1-L1-CPE1,R1-CPE2)
+  evolve-default  c6_0 s2  reported=0 front=0 rec=0  gen=30 n=406  err=nan%  p(L1-CPE1-C1,CPE2-R1)
+  evolve-min6     c6_0 s2  reported=0 front=0 rec=0  gen=30 n=480  err=nan%  p(C1-L1-CPE1,R1-CPE2)
+  auto            c6_0 s3  reported=0 front=0 rec=0  gen=0 n=2588  err=nan%  p(R1-CPE1,L1-CPE2)-R2
+  evolve-default  c6_0 s3  reported=1 front=1 rec=0  gen=30 n=470  err=nan%  p(CPE1,CPE2)-p(R1,CPE3-L1)
+  evolve-min6     c6_0 s3  reported=0 front=0 rec=0  gen=30 n=380  err=nan%  p(L1-C1-CPE1,R1-CPE2)
+  auto            c6_1 s1  reported=0 front=0 rec=0  gen=0 n=2887  err=nan%  p(p(R1,C1)-L1,CPE1)-R2
+  evolve-default  c6_1 s1  reported=0 front=0 rec=0  gen=30 n=456  err=nan%  p(L1,CPE1)-p(C1,R1)-R2
+  evolve-min6     c6_1 s1  reported=0 front=0 rec=0  gen=30 n=363  err=nan%  p(p(L1,CPE1)-R1,R2-C1)
+  auto            c6_1 s2  reported=0 front=0 rec=0  gen=0 n=2887  err=nan%  p(p(R1,C1)-L1,CPE1)-R2
+  evolve-default  c6_1 s2  reported=0 front=0 rec=0  gen=30 n=386  err=nan%  p(C1,R1)-p(L1,CPE1)-R2
+  evolve-min6     c6_1 s2  reported=0 front=0 rec=0  gen=30 n=332  err=nan%  p(p(L1,CPE1)-R1,R2-C1)
+  auto            c6_1 s3  reported=0 front=0 rec=0  gen=0 n=2887  err=nan%  p(p(R1,C1)-L1,CPE1)-R2
+  evolve-default  c6_1 s3  reported=0 front=0 rec=0  gen=30 n=424  err=nan%  R1-p(C1,R2)-p(CPE1,L1)
+  evolve-min6     c6_1 s3  reported=0 front=0 rec=0  gen=30 n=482  err=nan%  p(p(L1,CPE1)-R1,R2-C1)
+
+| arm | runs | truth reported | on the front | is the recommendation |
+|---|---:|---:|---:|---:|
+| auto | 6 | 0/6 | 0/6 | 0/6 |
+| evolve-default | 6 | 1/6 | 1/6 | 0/6 |
+| evolve-min6 | 6 | 0/6 | 0/6 | 0/6 |
+
+per arm: wall / cpu seconds, generations, topologies evaluated, best relative error
+Traceback (most recent call last):
+  File "C:\Users\toshi\python\AutoCircuit\benchmarks\autoeis_round\score_evolve_arms.py", line 148, in <module>
+  File "C:\Users\toshi\python\AutoCircuit\benchmarks\autoeis_round\score_evolve_arms.py", line 132, in main
+    f"  {arm:<15} wall {min(walls):.0f}-{max(walls):.0f} s, cpu {cpu_text} s, "
+           ^^^^^^^^^
+ValueError: min() iterable argument is empty

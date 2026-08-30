@@ -333,6 +333,67 @@ measured low-frequency exponent `[-0.90, -0.17]` admitted none of `W`, `Ws`, `Wo
 diffusion. Whether that is the detector working correctly or getting the right answer for the
 wrong reason is not established here.
 
+### 2.3 The fallback, asked
+
+§2.2 leaves a question it cannot answer: the genetic search never ran, so the round's 0/2 at six
+elements says nothing about the search itself. `benchmarks/autoeis_round/run_evolve_arms.py` asks
+it, on the same two six-element spectra, seeds 1–3, scored by importing `score.py`'s own referee
+so that a hit here means what a hit meant above.
+
+Three arms. `auto` is the control and is **not re-run** — its rows are already on disk, and its
+zero is *structural* rather than stochastic, because those runs stopped at `complete_up_to = 5`
+and a six-element truth cannot be in a five-element candidate list. `evolve-default` is
+`discover(mode="evolve")` and nothing else, which is what `autocircuit discover --mode evolve`
+runs. `evolve-min6` adds `min_elements=6` and passes the control run's own five best candidates
+as `seeds`, reproducing `discover.py`'s fallback call argument for argument, so it measures what
+the round would have produced **had the trigger fired**.
+
+[measured, 2026-08-30] 12 runs, 600 s allowed each:
+
+| arm | runs | truth reported | on the front | is the recommendation | wall s | cpu s | gens | topologies | best rel. err |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| `auto` (control) | 6 | **0/6** | 0/6 | 0/6 | 228–316 | not recorded | 0 | 2588–2887 | 1.24–1.47% |
+| `evolve-default` | 6 | **1/6** | **1/6** | **0/6** | 196–818 | 194–798 | 30 | 386–541 | 1.23–1.45% |
+| `evolve-min6` | 6 | **0/6** | 0/6 | 0/6 | 156–762 | 155–752 | 30 | 332–482 | 1.24–1.45% |
+
+**Firing the trigger would not have rescued this round.** `evolve-min6` *is* the fallback call,
+warm-started from the control's own shortlist and pointed at exactly the sizes the exhaustive
+stage could not reach, and it recovers nothing in six runs. So §2.2's defect is real and worth
+fixing, but the sentence it invites — that the trigger is what stood between this round and the
+truth — is **not supported**: the search behind the trigger does not find these two truths either.
+
+**The one recovery locates the failure somewhere else entirely.** `evolve-default` on `c6_0`
+seed 3 found `p(CPE1,CPE2)-R1-p(R2,CPE3-L1)` at generation 13 — the truth's own canonical form —
+ranked it **2 of 59** and put it **on the Pareto front**, and then recommended something else:
+
+| | circuit | elements | params | AIC | rel. err |
+|---|---|--:|--:|--:|--:|
+| the truth's form | `p(CPE1,CPE2)-R1-p(R2,CPE3-L1)` | 6 | 9 | **−1462.898** | 1.4639% |
+| what was recommended | `p(CPE1,CPE2)-p(R1,CPE3-L1)` | 5 | 8 | −1462.041 | 1.4768% |
+
+The truth has the **better** AIC and lost anyway, because the recommendation rule is parsimony
+among candidates with every parameter resolved and both qualify. That is the rule working, not
+failing: ΔAIC is 0.86 and the two relative errors differ by 0.013 points against a 1% noise
+floor, so this spectrum does not distinguish a six-element truth from a five-element
+approximation of it. It is §2.2's runs-test reading — residuals at −0.45 to +0.67 — seen from the
+other side, and it is the same fact twice rather than two problems.
+
+**What did not bind, and is therefore not measured.** All twelve runs stopped at
+`generations = 30`, the library default, having spent 156–818 s of a 600 s allowance: the
+generation cap ended every run, not the clock. So this measures the **default configuration** a
+user gets, which is what the question was, and says nothing about the search at a higher cap.
+A second asymmetry belongs beside it: `_exhaustive` takes `workers` and `_evolve` does not, so
+the evolve arms ran single-threaded on 194–798 core-seconds against the control's six workers,
+and the one recovery was made on roughly a third of the control's core time.
+
+Two things this table may not be read as saying. Six runs per arm can say whether the search ever
+reaches these truths; it cannot measure a rate, and 1/6 against 0/6 is not a difference six runs
+could establish even if a paired test were owed — none is, because the control's zero is
+structural. And `evolve-min6` converging to the same recommendation on all three seeds of `c6_1`
+(`p(p(L1,CPE1)-R1,R2-C1)`) and on two of `c6_0` (`p(L1-C1-CPE1,R1-CPE2)`) looks like the warm
+seeds pulling the population into one basin, but at six runs that is an observation and not a
+finding.
+
 ---
 
 ## 1. Arena C — how it is built, written before it is run
