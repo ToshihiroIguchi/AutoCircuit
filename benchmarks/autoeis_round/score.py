@@ -54,6 +54,25 @@ from autocircuit.core.spectrum import Spectrum
 #: Element codes AutoEIS cannot express. A truth containing one is N/A for that tool, never zero.
 OUT_OF_VOCABULARY = ("W", "Ws", "Wo", "G", "CC", "HN", "SKINF", "SKINW")
 
+#: Smallest truth this round scores. **This is the user's decision, taken on 2026-08-30**, and it
+#: is a change to the analysis set made after an interim result had been seen -- which is why it
+#: is a named constant with this comment attached rather than a quiet filter.
+#:
+#: Their argument: below this size AutoCircuit does not search for the truth, it enumerates it, so
+#: a comparison there is decided by the arena's construction rather than by the two searches.
+#: [measured] 30 of the 40 runs have the truth inside ``complete_up_to``.
+#:
+#: The objections put to them before they decided, recorded so the reader can weigh the same
+#: things: the completeness guarantee covers sizes 3, 4 **and 5**, so a cut at 5 still keeps ten
+#: runs that the argument would exclude and the logically matching cut is 6; changing the analysis
+#: set after seeing a result uses the same mechanism this round forbids everywhere else, and the
+#: direction being unflattering to us does not change the mechanism; and the discarded rows carry
+#: a real measurement *of AutoEIS* (3/9 at three elements), which a reader choosing a tool would
+#: want. The alternative offered was to keep the rows and delete the pooled figure instead.
+#:
+#: The user considered these and chose 5. It is their call and it is implemented as asked.
+MIN_ELEMENTS: int = 5
+
 
 @dataclass
 class Outcome:
@@ -337,6 +356,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--arena", type=Path, required=True)
     parser.add_argument("--out", type=Path, default=None, help="write the report as JSON here")
+    parser.add_argument(
+        "--min-elements",
+        type=int,
+        default=MIN_ELEMENTS,
+        help=(
+            "score only truths with at least this many elements "
+            f"(default {MIN_ELEMENTS}; see the module docstring for whose decision that is)"
+        ),
+    )
     args = parser.parse_args()
 
     arena = json.loads((args.arena / "arena.json").read_text(encoding="utf-8"))
@@ -351,10 +379,23 @@ def main() -> None:
             "test, not a measurement."
         )
 
+    scored_ids = {
+        t["truth_id"] for t in truths.values() if t["n_elements"] >= args.min_elements
+    }
+    excluded = sorted(set(truths) - scored_ids)
+
     by_key_ours = {(r["truth_id"], r["seed"]): r for r in ours}
     by_key_theirs = {(r["truth_id"], r["seed"]): r for r in theirs}
-    paired = sorted(set(by_key_ours) & set(by_key_theirs))
+    paired = sorted(k for k in set(by_key_ours) & set(by_key_theirs) if k[0] in scored_ids)
     print(f"{len(ours)} AutoCircuit runs, {len(theirs)} AutoEIS runs, {len(paired)} paired\n")
+    if excluded:
+        print(
+            f"ANALYSIS SET RESTRICTED to truths of {args.min_elements}+ elements. This is the\n"
+            "user's decision of 2026-08-30, taken after an interim result had been seen; their\n"
+            "argument and the objections put to them before they decided are on MIN_ELEMENTS in\n"
+            "this module, and in section 1.5d of docs/AUTOEIS_COMPARISON.md.\n"
+            f"Excluded from every number below: {', '.join(excluded)}.\n"
+        )
     if not paired:
         raise SystemExit("nothing to score yet")
 

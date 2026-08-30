@@ -20,7 +20,11 @@ param(
     [int]$MaxSeeds = 5,
     [string]$Arena = "benchmarks/autoeis_round/arena_c",
     [int]$Workers = 6,
-    [int]$Retries = 3
+    [int]$Retries = 3,
+    # Truth ids to run, in this order. Defaults to all of them. The round scores only truths of
+    # MIN_ELEMENTS or more (score.py), so running the scored ones first gets the answer sooner
+    # without discarding anything: the rest can be run afterwards with the same command.
+    [string[]]$Only = @()
 )
 
 $ErrorActionPreference = "Continue"
@@ -40,12 +44,18 @@ function Say($message) {
     Add-Content -Path (Join-Path $out "round.log") -Value "$stamp  $message" -Encoding utf8
 }
 
-Say "=== round start: max-seeds $MaxSeeds, arena $Arena ==="
+# Start-Process delivers -Only as a single argument, so "a,b" arrives as one element.
+# Split on commas here rather than trusting how the caller was invoked: passed through
+# unsplit it becomes one bogus --only value and both producers exit 2 on argparse.
+$Only = @($Only | ForEach-Object { $_ -split ',' } | Where-Object { $_ -ne "" })
+
+Say "=== round start: max-seeds $MaxSeeds, arena $Arena, only=[$($Only -join ',')] ==="
 
 # --- 1. this project's search -------------------------------------------------------------
 for ($i = 1; $i -le $Retries; $i++) {
     Say "AutoCircuit producer, attempt $i"
-    & $py benchmarks/autoeis_round/run_autocircuit.py --arena $Arena --max-seeds $MaxSeeds --workers $Workers *>> (Join-Path $out "run_ac.log")
+    $onlyArgs = @(); foreach ($o in $Only) { $onlyArgs += "--only"; $onlyArgs += $o }
+    & $py benchmarks/autoeis_round/run_autocircuit.py --arena $Arena --max-seeds $MaxSeeds --workers $Workers @onlyArgs *>> (Join-Path $out "run_ac.log")
     if ($LASTEXITCODE -eq 0) { Say "AutoCircuit producer finished"; break }
     Say "AutoCircuit producer exited '$LASTEXITCODE'; retrying (it resumes where it stopped)"
     Start-Sleep -Seconds 30
@@ -54,7 +64,8 @@ for ($i = 1; $i -le $Retries; $i++) {
 # --- 2. AutoEIS, in its own environment ---------------------------------------------------
 for ($i = 1; $i -le $Retries; $i++) {
     Say "AutoEIS producer, attempt $i"
-    & $venv benchmarks/autoeis_round/run_autoeis.py --arena $Arena --max-seeds $MaxSeeds *>> (Join-Path $out "run_ae.log")
+    $onlyArgs = @(); foreach ($o in $Only) { $onlyArgs += "--only"; $onlyArgs += $o }
+    & $venv benchmarks/autoeis_round/run_autoeis.py --arena $Arena --max-seeds $MaxSeeds @onlyArgs *>> (Join-Path $out "run_ae.log")
     if ($LASTEXITCODE -eq 0) { Say "AutoEIS producer finished"; break }
     Say "AutoEIS producer exited '$LASTEXITCODE'; retrying (it resumes where it stopped)"
     Start-Sleep -Seconds 30
