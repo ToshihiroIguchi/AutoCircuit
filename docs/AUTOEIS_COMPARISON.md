@@ -434,6 +434,32 @@ validity, **the translator and the referee work on real data**. The silent failu
 most exposed to, where the other tool's candidates fail to translate and are scored as misses,
 is not happening.
 
+### 1.5c Three quarters of the arena sits inside this side's completeness guarantee
+
+[measured] Of the 40 AutoCircuit runs, **30 have the truth inside the exhaustive stage's
+completeness guarantee** — `complete_up_to` comes back as 4 or 5, and the truths at sizes 3, 4 and
+5 are at or below it. On those runs the truth was *enumerated and fitted by construction*: the
+question was only whether the two-tier screen and the ranking kept it, not whether a search found
+it. Only the ten size-6 runs are outside the guarantee.
+
+That is a different kind of achievement from a stochastic search arriving at the same circuit, and
+it means **the aggregate across sizes is close to a foregone conclusion and must never be the
+headline.** `arena.py` says results are reported per size and gives this as the reason; the
+statement was too quiet for how much it matters. The informative rows are the size-6 ones, where
+enumeration cannot reach and both tools are searching.
+
+It is not a pure tautology — a screening budget that keeps the truth but drops it from the
+shortlist is a failure this project has measured on itself (`DISCOVERY_V2_PLAN.md` §3.3) — but it
+is close enough that a reader who quotes the pooled number will be quoting the arena's design
+rather than a comparison.
+
+One further observation from the same records, which will matter when the size-6 rows are read:
+**`generations` is 0 on every run**, so the genetic fallback never ran. `mode="auto"` only falls
+back when the best exhaustive fit still shows systematic residuals, and on these spectra it did
+not — including at size 6, where a 5-element answer apparently explained the data well enough to
+stop. If this side misses the six-element truths, that is where it will come from, and it is a
+statement about the fallback trigger rather than about the fallback.
+
 ### 1.6 Stopping rule, fixed now so that it cannot be chosen later
 
 The seed list (1–20) and the stage boundaries (5, 10, 20 seeds) are written into `arena.py` before
