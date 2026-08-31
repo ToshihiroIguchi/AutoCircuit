@@ -55,6 +55,11 @@ from .elements import DEFAULT_POOL
 from .enumerate import (
     DEFAULT_DEGENERACY_BUDGET,
     EndpointBehaviour,
+    # The one-element growth operator. Private to `enumerate` because the skeleton mode is its
+    # only other caller, and shared rather than reimplemented here because a second copy would
+    # be a second thing that can miss the subset-grouping moves -- which is exactly the hole
+    # `benchmarks/screening_round/arms.py`'s own local `_grow` has.
+    _insertions,
     contains_skeleton,
     count_skeleton_placements,
     enumerate_topologies,
@@ -94,6 +99,24 @@ SCREEN_POPSIZE = 8
 SCREEN_MAXITER = 40
 SCREEN_TOL = 1e-4
 
+#: Independent global searches the tier-1 screen runs per topology, keeping the best.
+#:
+#: **This is a different axis from the budget above and the measurement says so loudly.**
+#: [measured, docs/TOPOLOGY_6PLUS_PLAN.md section 5.7.2] For a topology whose screening landscape
+#: is bimodal, one draw decides its place on the shortlist by luck: ``p(p(R1,C1)-R2,C2)-R3``
+#: screens at 0.0141 or at 33.78 depending only on the seed -- a factor of 2400 -- and raising
+#: ``popsize`` 8 -> 40 and ``maxiter`` 40 -> 400 moves *neither* number. Over 360 sampled
+#: topologies from three spectra, one seed is within 1% of the best of five for 72-80% of them,
+#: more than 2x off for 8-12%, and more than 100x off for up to 1.7%; the mean ratio to the
+#: best-of-five falls from 1.07-41.4 at one seed to 1.04-1.16 at two.
+#:
+#: It stays at 1 rather than 2. The screen is the dominant cost of an exhaustive run, so this
+#: doubles the whole search, and the case for paying that is a *recovery* measurement -- does a
+#: second seed put truths on the shortlist that the first one lost -- which is X4 and is not in
+#: yet. Every number recorded in this repository was taken at 1; raising the default moves all
+#: of them, so it waits for the measurement that would justify moving them.
+SCREEN_RESTARTS = 1
+
 
 class ScreenBudget(NamedTuple):
     """The tier-1 differential-evolution budget, as one injectable object.
@@ -106,6 +129,9 @@ class ScreenBudget(NamedTuple):
 
     popsize: int = SCREEN_POPSIZE
     maxiter: int = SCREEN_MAXITER
+    #: Independent global searches per topology, best of which is kept. See
+    #: :data:`SCREEN_RESTARTS` for why this is a separate axis from ``popsize`` and ``maxiter``.
+    restarts: int = SCREEN_RESTARTS
 
 
 SCREEN_BUDGET = ScreenBudget()
@@ -257,6 +283,48 @@ EQUIVALENCE_RTOL = 1e-6
 #: A candidate fitting within this factor of the best chi-squared seen is counted as fitting
 #: "as well as" the best one, and is then preferred if it is simpler.
 PARSIMONY_CHI2_FACTOR = 2.0
+
+#: How many topologies of each completed level the growth stage extends, when it is asked to run.
+#:
+#: [measured, docs/TOPOLOGY_6PLUS_PLAN.md section 5.5] Width 2 misses the truth's class on the
+#: incumbent arena where width 4 reaches it, so this parameter decides something. It is not
+#: tuned past that: a wider beam costs one extra fan-out per level and cannot lose a candidate a
+#: narrower one keeps, so the risk of raising it is runtime and the risk of lowering it is the
+#: answer.
+GROWTH_WIDTH = 4
+
+#: How many element counts past the last *complete* level the growth stage may reach.
+#:
+#: A reach and not a cap, the same distinction :data:`SKELETON_REACH` draws, and for a reason
+#: rather than for symmetry. Each grown level chooses its ``GROWTH_WIDTH`` survivors from the
+#: level below, so the further growth runs from the completed enumeration the narrower the sample
+#: those survivors were drawn from -- growing four levels from a complete level 3 is a much
+#: weaker claim than growing two from a complete level 5, and the coverage sentence cannot tell
+#: the two apart. Bounding the *distance* keeps the sentence honest at any exhaustive limit.
+#:
+#: It also bounds the cost where it would otherwise run away: with the production limit of 5 and
+#: ``max_elements=7`` this changes nothing, and on a small test space with the limit at 3 it is
+#: the difference between two grown levels and four.
+GROWTH_REACH = 2
+
+#: Whether growth runs when the caller says nothing. **Zero, and that is a decision.**
+#:
+#: The width above is what to use *if* growing; this is whether to grow at all, and the two are
+#: separate because the evidence for them is separate. Growth is measured to reach the six-element
+#: truth's equivalence class three screening fits after the five-element enumeration ends
+#: (docs/TOPOLOGY_6PLUS_PLAN.md section 5.5) -- a strong result about the *search*. What is not
+#: measured is that it changes what the **report** says, and the price is not small: [measured] on
+#: the six-element reference it takes a run from 23 s to 46 s and from 303 topologies to 548, and
+#: switching it on by default made `tests/test_web_job.py` alone run longer than the entire suite
+#: had, because every driven search then grew to seven elements.
+#:
+#: So the lever ships and the default does not move until the end-to-end measurement
+#: (`benchmarks/six_plus/recovery.py`) shows growth putting truths in the report that the
+#: enumeration alone loses. Ask for it with ``discover(growth_width=GROWTH_WIDTH)`` or
+#: ``--growth-width 4``. This is the same rule `SCREEN_RESTARTS` follows and for the same reason:
+#: every number recorded in this repository was taken without it.
+GROWTH_DEFAULT = 0
+
 
 #: Largest element count the exhaustive stage enumerates when the caller names no limit.
 DEFAULT_EXHAUSTIVE_LIMIT = 5
@@ -412,6 +480,23 @@ class DiscoveryResult:
     because the case that says nothing is the one the rule exists for: a report silent about
     the diffusion elements has excluded them exactly as thoroughly as one that names them.
     See :mod:`autocircuit.core.descriptors`.
+    """
+    grown_to: int | None = None
+    """Largest element count the growth stage reached above :attr:`complete_up_to`, or None.
+
+    **This is not a completeness claim and must never be printed as one.** Above the exhaustive
+    limit the search stops enumerating and starts *growing*: it takes the best
+    :data:`GROWTH_WIDTH` topologies of the last completed level and evaluates every one-element
+    extension of each, then repeats. So the sentence it licenses is narrower than
+    :attr:`complete_up_to`'s and is stated separately in :meth:`completeness` -- a topology of
+    this size that is not one insertion away from that shortlist was never considered, and its
+    absence from the report is not evidence against it.
+
+    The distinction matters here more than it looks. This project has measured three separate
+    occasions where a search that had quietly stopped covering its space still produced a report
+    that looked healthy (docs/HANDOFF.md section 3, docs/DISCOVERY_V2_PLAN.md section 3.4,
+    docs/PARTIAL_TOPOLOGY_PLAN.md section 3), and a growth stage is exactly that shape: it
+    returns larger circuits with good numbers and nothing in the numbers says how it found them.
     """
     base_complete_up_to: int | None = None
     """Coverage reached before the pool was widened, when a widening happened.
@@ -644,8 +729,31 @@ class DiscoveryResult:
                 "considered, so this report is not evidence against them."
             )
         return self._with_refit_note(
-            f"Coverage: every plausible topology with up to {self.complete_up_to} elements "
-            f"from this pool was evaluated."
+            self._with_growth_note(
+                f"Coverage: every plausible topology with up to {self.complete_up_to} elements "
+                f"from this pool was evaluated."
+            )
+        )
+
+    def _with_growth_note(self, coverage: str) -> str:
+        """The coverage sentence, plus the weaker one the growth stage above it earns.
+
+        Two claims of different strengths on one line, in the order of their strength, because
+        the risk here is a reader carrying the first sentence's "every" across to the second.
+        Below the exhaustive limit absence from the report *is* evidence; above it, absence
+        means only that no member of a small shortlist was one element away.
+        """
+        if self.grown_to is None or self.complete_up_to is None:
+            return coverage
+        if self.grown_to <= self.complete_up_to:
+            return coverage
+        return (
+            f"{coverage} Above {self.complete_up_to} elements the search grew rather than "
+            f"enumerated: every one-element extension of the best {GROWTH_WIDTH} topologies of "
+            f"each completed size was evaluated, up to {self.grown_to} elements. That is not a "
+            f"completeness claim -- a topology of {self.complete_up_to + 1} elements or more "
+            "that is not one insertion away from those is absent because it was never "
+            "considered, not because it did not fit."
         )
 
     def _with_pool_note(self, coverage: str) -> str:
@@ -849,6 +957,7 @@ class DiscoveryResult:
             "skeleton": self.skeleton,
             "complete_up_to": self.complete_up_to,
             "base_complete_up_to": self.base_complete_up_to,
+            "grown_to": self.grown_to,
             "pool_choice": (None if self.pool_choice is None else self.pool_choice.to_dict()),
             "coverage": self.completeness(),
             "unresolved_everywhere": self.unresolved_everywhere,
@@ -1343,6 +1452,8 @@ def discover(
     population: int = 40,
     max_elements: int = 7,
     min_elements: int = 2,
+    growth_width: int = GROWTH_DEFAULT,
+    screen_restarts: int = SCREEN_RESTARTS,
     seed: int = 0,
     weighting: Weighting = "modulus",
     search_restarts: int = 1,
@@ -1413,8 +1524,17 @@ def discover(
             ``best`` is the DSL string of the best-scoring topology so far.
         generations: Evolutionary generations (genetic search only).
         population: Topologies per generation (genetic search only).
-        max_elements: Cap on elements per topology in the genetic search.
+        max_elements: Cap on elements per topology, for both the genetic search and the growth
+            stage that runs above ``exhaustive_limit``.
         min_elements: Smallest random topology in the initial population.
+        growth_width: How many topologies of each completed level the growth stage extends. See
+            :data:`GROWTH_WIDTH`; zero switches growth off entirely, which is how a caller asks
+            for the pre-growth behaviour rather than by lowering ``max_elements``.
+        screen_restarts: Independent global searches per topology in the tier-1 screen, best of
+            which is kept. See :data:`SCREEN_RESTARTS`: raising it to 2 is the measured remedy
+            for a bimodal screening landscape and it doubles the dominant cost of the search,
+            which is why the default is 1 and why moving it needs a recovery measurement rather
+            than an argument.
         seed: Random seed; the whole search is reproducible from it.
         weighting: Residual weighting passed through to the fitter.
         search_restarts, search_popsize, search_maxiter: Reduced fitting budget used by the
@@ -1510,7 +1630,7 @@ def discover(
             )
         return evolved
 
-    candidates, complete_up_to, n_screened = _exhaustive(
+    candidates, complete_up_to, n_screened, grown_to = _exhaustive(
         spectrum,
         pool=codes,
         skeleton=None if frame is None else frame.root,
@@ -1532,6 +1652,13 @@ def discover(
         started=started,
         extra=seeds,
         criterion=criterion,
+        # Growth is skipped under a skeleton, for the reason the genetic fallback is: the
+        # skeleton run already reaches past the default limit on its own (`SKELETON_REACH`),
+        # and a report that mixed "complete up to N containing the skeleton" with "grown from
+        # the best W of level N" could not state which space it had covered.
+        grow_to=None if frame is not None else max_elements,
+        growth_width=growth_width,
+        screen_restarts=screen_restarts,
     )
     generations_run = 0
     pool_choice: PoolChoice | None = None
@@ -1554,7 +1681,7 @@ def discover(
         if pool_choice.added and (remaining is None or remaining > 0.0):
             base_complete_up_to = complete_up_to
             codes = pool_choice.pool
-            widened, complete_up_to, n_widened = _exhaustive(
+            widened, complete_up_to, n_widened, grown_to = _exhaustive(
                 spectrum,
                 pool=codes,
                 skeleton=None if frame is None else frame.root,
@@ -1573,6 +1700,9 @@ def discover(
                 started=started,
                 extra=seeds,
                 criterion=criterion,
+                grow_to=max_elements,
+                growth_width=growth_width,
+                screen_restarts=screen_restarts,
             )
             # The base-pool candidates are kept rather than discarded: they were fitted against
             # the same data with the same budget, and every one of them is also a member of the
@@ -1631,6 +1761,7 @@ def discover(
         criterion=criterion,
         pool_choice=pool_choice,
         base_complete_up_to=base_complete_up_to,
+        grown_to=grown_to,
     )
 
 
@@ -1840,7 +1971,7 @@ def excluded_equivalents(
                             _screen_worker,
                             [
                                 (task.text, seed, task.abandon_above, budget.popsize,
-                                 budget.maxiter)
+                                 budget.maxiter, budget.restarts)
                                 for task in batch.tasks
                             ],
                         )
@@ -2155,8 +2286,21 @@ def _exhaustive(
     started: float,
     extra: Sequence[str] | None = None,
     criterion: Criterion = DEFAULT_CRITERION,
-) -> tuple[list[Candidate], int | None, int]:
-    """Enumerate, screen and refit. Returns (candidates, complete_up_to, topologies seen)."""
+    grow_to: int | None = None,
+    growth_width: int = GROWTH_DEFAULT,
+    screen_restarts: int = SCREEN_RESTARTS,
+) -> tuple[list[Candidate], int | None, int, int | None]:
+    """Enumerate, screen, optionally grow past the limit, and refit.
+
+    Returns ``(candidates, complete_up_to, topologies seen, grown_to)``, where ``grown_to`` is
+    the largest element count the growth stage actually reached and ``None`` when it did not run.
+
+    The growth stage sits **between** the two tiers rather than after them, and that placement is
+    the point: it needs the tier-1 ranking of a completed level, which is exactly what
+    :func:`_screen_all` has just produced and what the old code discarded on its way to the
+    shortlist. Both stages' screens then feed one shortlist, so a six-element candidate competes
+    with the five-element ones under the same per-size quota rather than in a report of its own.
+    """
     plan = enumerate_candidates(
         spectrum,
         pool=pool,
@@ -2169,6 +2313,7 @@ def _exhaustive(
         extra=extra,
     )
     texts = list(plan.texts)
+    budget = ScreenBudget(SCREEN_POPSIZE, SCREEN_MAXITER, max(screen_restarts, 1))
 
     # One worker pool for the whole run: both tiers use it, so the ~1 s interpreter start-up
     # each process pays on Windows is amortised across everything rather than paid twice.
@@ -2182,11 +2327,49 @@ def _exhaustive(
             on_progress=on_progress,
             time_limit=time_limit,
             started=started,
+            budget=budget,
         )
+        complete_up_to = plan.coverage(len(scored))
+        n_seen = len(scored)
+
+        grown_to: int | None = None
+        if (
+            grow_to is not None
+            and growth_width > 0
+            and complete_up_to is not None
+            and grow_to > complete_up_to
+            and GROWTH_REACH > 0
+            and (time_limit is None or time.perf_counter() - started < time_limit)
+        ):
+            grown = _grow_all(
+                scored,
+                spectrum,
+                pool=pool,
+                start_size=complete_up_to,
+                # A reach past the completed level, never a walk to the absolute cap; see
+                # GROWTH_REACH.
+                max_elements=min(grow_to, complete_up_to + GROWTH_REACH),
+                width=growth_width,
+                weighting=weighting,
+                seed=seed,
+                executor=executor,
+                on_progress=on_progress,
+                time_limit=time_limit,
+                started=started,
+                criterion=criterion,
+                budget=budget,
+            )
+            if grown:
+                scored = list(scored) + grown
+                n_seen += len(grown)
+                grown_to = max(
+                    count_elements(Circuit.parse(text).root) for _cost, text in grown
+                )
+
         candidates = _refit_shortlist(
             scored, spectrum, weighting, final_restarts, seed, n_refine, executor, criterion
         )
-    return candidates, plan.coverage(len(scored)), len(scored)
+    return candidates, complete_up_to, n_seen, grown_to
 
 
 #: What the screen ranks by when the chosen criterion cannot be computed from a cost alone.
@@ -2644,6 +2827,81 @@ def _screen_all(
         return list(done.value)
 
 
+def _grow_all(
+    scored: Sequence[tuple[float, str]],
+    spectrum: Spectrum,
+    *,
+    pool: tuple[str, ...],
+    start_size: int,
+    max_elements: int,
+    width: int,
+    weighting: Weighting,
+    seed: int,
+    executor: multiprocessing.pool.Pool | None,
+    on_progress: Callable[[int, int, str | None], None] | None,
+    time_limit: float | None,
+    started: float,
+    criterion: Criterion,
+    budget: ScreenBudget = SCREEN_BUDGET,
+) -> list[tuple[float, str]]:
+    """Drive :func:`growth_plan`, screening each level's children.
+
+    The counterpart of :func:`_screen_all` for the growth stage, and deliberately the same shape:
+    the generator decides *what* to screen and this decides *how*, so a browser fanning batches
+    across Web Workers can reuse the first half without reimplementing the second.
+    """
+    plan = growth_plan(
+        scored,
+        pool=pool,
+        start_size=start_size,
+        max_elements=max_elements,
+        n_data=2 * spectrum.n,
+        width=width,
+        criterion=criterion,
+    )
+    produced: list[tuple[float, str]] = []
+    try:
+        tasks = next(plan)
+        while True:
+            if executor is not None and len(tasks) > 1:
+                costs = list(
+                    executor.map(
+                        _screen_worker,
+                        [
+                            (
+                                t.text, seed, t.abandon_above,
+                                budget.popsize, budget.maxiter, budget.restarts,
+                            )
+                            for t in tasks
+                        ],
+                        chunksize=max(1, min(WORKER_CHUNK, len(tasks) // 8 or 1)),
+                    )
+                )
+            else:
+                costs = [
+                    _screen_one(task, spectrum, weighting=weighting, seed=seed,
+                                budget=budget)
+                    for task in tasks
+                ]
+            produced.extend(zip(costs, (t.text for t in tasks), strict=True))
+            if on_progress is not None:
+                on_progress(len(produced), len(produced), None)
+            # A growth level is all-or-nothing, and the check is deliberately *after* the batch
+            # rather than inside it: half a level is not "every one-element extension of the
+            # best W", so a truncated level would leave :meth:`DiscoveryResult.completeness`
+            # saying something false about the size it reached. ``growth_plan`` yields exactly
+            # one batch per level, which is what makes that atomic.
+            #
+            # The price is that ``time_limit`` can be overshot by one level, and a level is
+            # hundreds of screens. That is the right way round -- a run that goes over budget is
+            # visible in the elapsed time, and a coverage sentence that over-claims is not.
+            if time_limit is not None and time.perf_counter() - started > time_limit:
+                return produced
+            tasks = plan.send(costs)
+    except StopIteration:
+        return produced
+
+
 def _screen_one(
     task: ScreenTask,
     spectrum: Spectrum,
@@ -2664,6 +2922,7 @@ def _screen_one(
             maxiter=budget.maxiter,
             tol=SCREEN_TOL,
             abandon_above=task.abandon_above,
+            restarts=budget.restarts,
         )
     except (ValueError, CircuitError, np.linalg.LinAlgError):
         return math.inf
@@ -2729,6 +2988,138 @@ def screen_plan(
     return scored
 
 
+# -- Growth above the exhaustive limit -------------------------------------------------------
+
+def growth_plan(
+    scored: Sequence[tuple[float, str]],
+    *,
+    pool: tuple[str, ...],
+    start_size: int,
+    max_elements: int,
+    n_data: int,
+    width: int = GROWTH_WIDTH,
+    criterion: Criterion = DEFAULT_CRITERION,
+) -> Generator[list[ScreenTask], Sequence[float], list[tuple[float, str]]]:
+    """Beam growth past the exhaustive limit, with the *running* of it left to the caller.
+
+    Above :data:`DEFAULT_EXHAUSTIVE_LIMIT` the space stops being enumerable -- 21,057 topologies
+    at six elements for the ``R,C,L,CPE`` pool against 2,976 at five -- and the genetic search
+    that used to cover it is measured at 1/6 where the exhaustive stage is 30/30. This is the
+    third option, and it exists because the exhaustive stage has *already produced the thing a
+    growth search needs*: a complete, screened, ranked level. `_exhaustive` enumerates level 5
+    and then throws that ranking away.
+
+    So: take the best ``width`` topologies of the completed level, generate **every** one-element
+    extension of each (:func:`~autocircuit.core.enumerate._insertions`, which includes the
+    subset-grouping moves a plain attachment cannot reach), screen them, keep the best ``width``,
+    and repeat up to ``max_elements``.
+
+    [measured, docs/TOPOLOGY_6PLUS_PLAN.md section 5.5] The equivalent arm in
+    ``benchmarks/screening_round/arms.py`` (``beams5w4``) reaches the six-element truth's
+    equivalence class **three screening fits after the five-element enumeration ends** on the
+    frozen ``R,C,L`` arena at ``n <= 7`` -- 452 charged fits against the 449 that level costs --
+    where the genetic arms that beat the incumbent need 256-451 fits of their own and only
+    stochastically. That is a measurement of the *strategy* against a frozen table and on one
+    truth; whether this implementation changes what the **report** says, across shapes and
+    sizes, is ``benchmarks/six_plus/recovery.py`` and is why :data:`GROWTH_DEFAULT` is zero.
+
+    **What this may and may not claim.** It is *not* complete at six elements and the report must
+    not imply it is: :attr:`DiscoveryResult.complete_up_to` stays at the exhaustive limit and
+    :attr:`DiscoveryResult.grown_to` carries the narrower, true sentence -- every topology up to
+    the exhaustive limit, and above it every one-element extension of the best ``width`` of them.
+    That is the same obligation ``docs/PARTIAL_TOPOLOGY_PLAN.md`` section 3 places on a skeleton,
+    and it is met the same way: in the coverage line, not in a footnote.
+
+    Yields batches of :class:`ScreenTask` and expects their costs back through ``send``, exactly
+    as :func:`screen_plan` does and for the same reason -- there is one implementation of the
+    decisions, whoever runs the fits, in-process or across a browser's Web Workers.
+
+    Args:
+        scored: The tier-1 ``(cost, circuit)`` pairs the exhaustive stage produced. Used both to
+            seed the beam and to avoid re-screening anything already seen.
+        pool: Element codes the added elements may use.
+        start_size: Element count of the completed level to grow from.
+        max_elements: Largest element count to grow to.
+        n_data: ``2 * spectrum.n``, for the screening score.
+        width: How many topologies of each level are extended.
+        criterion: Model-selection rule the per-level ranking uses.
+
+    Returns:
+        The ``(cost, circuit)`` pairs for every topology this stage screened. The caller merges
+        them with the exhaustive stage's own before shortlisting, so both tiers see one list.
+    """
+    seen: dict[str, float] = {}
+    sizes: dict[str, int] = {}
+    for cost, text in scored:
+        seen[text] = min(cost, seen.get(text, math.inf))
+
+    def size_of(text: str) -> int:
+        if text not in sizes:
+            sizes[text] = count_elements(Circuit.parse(text).root)
+        return sizes[text]
+
+    def rank(items: Iterable[tuple[float, str]]) -> list[tuple[float, str]]:
+        return sorted(
+            items,
+            key=lambda pair: _screening_score(
+                pair[0], len(Circuit.parse(pair[1]).param_names), n_data, criterion
+            ),
+        )
+
+    level = rank(
+        (cost, text)
+        for cost, text in scored
+        if math.isfinite(cost) and size_of(text) == start_size
+    )[:width]
+
+    produced: list[tuple[float, str]] = []
+    best_by_complexity: dict[float, float] = {}
+    for cost, text in scored:
+        complexity = Circuit.parse(text).complexity
+        if cost < best_by_complexity.get(complexity, math.inf):
+            best_by_complexity[complexity] = float(cost)
+
+    for size in range(start_size + 1, max_elements + 1):
+        fresh: list[str] = []
+        for _cost, parent in level:
+            for child in _insertions(Circuit.parse(parent).root, pool):
+                try:
+                    circuit = Circuit(simplify(child))
+                except CircuitError:
+                    continue
+                # `simplify` can collapse an insertion back into its parent (two series
+                # resistors become one), so the level is checked rather than assumed.
+                if count_elements(circuit.root) != size or not is_plausible(circuit):
+                    continue
+                text = circuit.to_string()
+                if text in seen:
+                    continue
+                seen[text] = math.inf
+                sizes[text] = size
+                fresh.append(text)
+        if not fresh:
+            break
+
+        costs = yield [
+            ScreenTask(text, _abandon_at(best_by_complexity, Circuit.parse(text).complexity))
+            for text in fresh
+        ]
+        for cost, text in zip(costs, fresh, strict=True):
+            seen[text] = float(cost)
+            produced.append((float(cost), text))
+            complexity = Circuit.parse(text).complexity
+            if cost < best_by_complexity.get(complexity, math.inf):
+                best_by_complexity[complexity] = float(cost)
+
+        level = rank((c, t) for c, t in produced if size_of(t) == size and math.isfinite(c))[
+            :width
+        ]
+        if not level:
+            break
+
+    return produced
+
+
 def _abandon_at(best_by_complexity: dict[float, float], complexity: float) -> float:
     """Cost above which the local polish is not worth running, for this complexity.
 
@@ -2752,15 +3143,15 @@ def _init_worker(f: Any, z: Any, weighting: Weighting) -> None:
     _WORKER["weighting"] = weighting
 
 
-def _screen_worker(task: tuple[str, int, float, int, int]) -> float:
+def _screen_worker(task: tuple[str, int, float, int, int, int]) -> float:
     """Screen one topology in a worker process; the task carries only strings and numbers."""
-    text, seed, abandon, popsize, maxiter = task
+    text, seed, abandon, popsize, maxiter, restarts = task
     return _screen_one(
         ScreenTask(text, abandon),
         _WORKER["spectrum"],
         weighting=_WORKER["weighting"],
         seed=seed,
-        budget=ScreenBudget(popsize, maxiter),
+        budget=ScreenBudget(popsize, maxiter, restarts),
     )
 
 
@@ -2792,7 +3183,10 @@ def _screen_parallel(
                 executor.map(
                     _screen_worker,
                     [
-                        (task.text, seed, task.abandon_above, budget.popsize, budget.maxiter)
+                        (
+                            task.text, seed, task.abandon_above,
+                            budget.popsize, budget.maxiter, budget.restarts,
+                        )
                         for task in tasks
                     ],
                 )

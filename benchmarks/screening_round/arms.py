@@ -47,6 +47,7 @@ from autocircuit.core.discover import (
     pareto_front,
     random_topology,
 )
+from autocircuit.core.enumerate import _insertions, enumerate_up_to
 
 CRITERION = "aicc"
 
@@ -611,6 +612,70 @@ def arm_beam(table: Table, rng: np.random.Generator, pool: tuple[str, ...],
     return Trace(table.hit_at, table.fits, table.best, sizes=table.sizes)
 
 
+def arm_beam_full(table: Table, rng: np.random.Generator, pool: tuple[str, ...],
+                  max_elements: int, population: int, *, width: int = 4,
+                  seed_level: int = 0) -> Trace:
+    """`arm_beam` with the library's own growth operator instead of a local one.
+
+    [measured, ``enumerate._insertions``] ``arm_beam._grow`` attaches a new element *at a
+    position*, and that is not all the one-element extensions there are: series and parallel
+    nodes are n-ary and flattened, so a proper subset of a node's children is not an addressable
+    position and no attachment can put a capacitor across only the ``C1-L1`` half of
+    ``R1-C1-L1``. Cross-checked over the whole enumerated space, attachment alone reaches 7 of
+    the 16 four-element topologies containing ``R1-C1-L1`` and 58 of 139 at five elements. So
+    the beam number already on record was measured with an operator that cannot reach most of
+    its own level, and this arm is the same search with the hole closed. It costs more fits per
+    level, which is the trade the comparison is for.
+
+    ``seed_level`` is the other half of the question. At 0 the beam grows from single elements,
+    as ``arm_beam`` does. Above 0 it starts from **every** topology up to that size -- the
+    complete enumeration -- ranks them, and grows the best ``width``. That is what the production
+    pipeline actually has in hand: ``_exhaustive`` finishes level 5 and throws the ranking away.
+    Those lookups are charged here like any other, so this arm's fit count includes an
+    enumeration the real pipeline has already paid for; ``main`` reports the sunk constant
+    beside the total so the marginal cost can be read off.
+    """
+    level: list[Ind] = []
+    if seed_level > 0:
+        for node in enumerate_up_to(pool, seed_level):
+            if table.exhausted:
+                break
+            ind = table.evaluate(node)
+            if ind is not None:
+                level.append(ind)
+        start = seed_level + 1
+    else:
+        for code in pool:
+            ind = table.evaluate(ElementNode(code))
+            if ind is not None:
+                level.append(ind)
+        start = 2
+
+    level = _unique_best(level, CRITERION)
+    level.sort(key=lambda c: c.score(CRITERION))
+    level = level[:width]
+
+    for _ in range(start, max_elements + 1):
+        children: list[Ind] = []
+        for parent in level:
+            for child in _insertions(parent.circuit.root, pool):
+                if table.exhausted:
+                    break
+                ind = table.evaluate(child)
+                if ind is not None:
+                    children.append(ind)
+            if table.exhausted:
+                break
+        if not children:
+            break
+        children = _unique_best(children, CRITERION)
+        children.sort(key=lambda c: c.score(CRITERION))
+        level = children[:width]
+        if table.exhausted:
+            break
+    return Trace(table.hit_at, table.fits, table.best, sizes=table.sizes)
+
+
 ARMS: dict[str, Callable[..., Trace]] = {
     "random": arm_random,
     "current": arm_current,
@@ -701,6 +766,18 @@ ARMS: dict[str, Callable[..., Trace]] = {
     "beam4": lambda *a, **k: arm_beam(*a, width=4, **k),
     "beam8": lambda *a, **k: arm_beam(*a, width=8, **k),
     "beam24": lambda *a, **k: arm_beam(*a, width=24, **k),
+    # -- Growth with the library's complete one-element operator (docs/TOPOLOGY_6PLUS_PLAN.md
+    # X4/X5). `beamf*` grows from single elements; `beams5w*` starts from the complete
+    # five-element enumeration, which is what `_exhaustive` already produces and discards.
+    "beamf1": lambda *a, **k: arm_beam_full(*a, width=1, **k),
+    "beamf2": lambda *a, **k: arm_beam_full(*a, width=2, **k),
+    "beamf4": lambda *a, **k: arm_beam_full(*a, width=4, **k),
+    "beamf8": lambda *a, **k: arm_beam_full(*a, width=8, **k),
+    "beamf16": lambda *a, **k: arm_beam_full(*a, width=16, **k),
+    "beams5w2": lambda *a, **k: arm_beam_full(*a, width=2, seed_level=5, **k),
+    "beams5w4": lambda *a, **k: arm_beam_full(*a, width=4, seed_level=5, **k),
+    "beams5w8": lambda *a, **k: arm_beam_full(*a, width=8, seed_level=5, **k),
+    "beams5w16": lambda *a, **k: arm_beam_full(*a, width=16, seed_level=5, **k),
 }
 
 

@@ -422,6 +422,42 @@ static-site Web UI running the same core via WASM (Pyodide).
    §0.3 carries two withdrawn readings, both the same error: a stall diagnosed from the process
    table that was not a stall.
 
+16. `docs/TOPOLOGY_6PLUS_PLAN.md` — six elements and up, which is where the automatic path stops
+   working. **Experiments run and recorded; the growth stage is implemented and shipped
+   opt-in; the end-to-end gate X4 is the open item.** Its §2 is the part to read first, because
+   it is the reframing the rest depends on: "six elements does not work" is **four** independent
+   problems — whether the spectrum distinguishes six elements from five at all (**information**),
+   whether the class is reached (**search**), whether it is fitted well enough to *score*
+   (**parameters**), and whether it is then recommended (**reporting**) — and fixing one alone
+   changes nothing, which is exactly what happened to `EVOLVE_SEARCH_PLAN.md`. The round's five
+   most useful measurements, in the order they change what you would otherwise do:
+   **(a)** the tier-1 screen's verdict is a **basin lottery** for a minority of topologies and
+   *budget does not fix it* — one circuit screens at 0.0141 or 33.78 on the seed alone, and 25x
+   the population-generations product moves neither number, while a second draw takes the mean
+   penalty across 360 sampled topologies from 37.7x to 1.06x; **(b)** on
+   `LARGE_REFERENCES[2]` the **shipped publication budget reaches the truth's own optimum 2 times
+   in 12** with the true topology given and noise-free data, and 20 restarts take it to 12/12 —
+   so gate EV1's arena is measuring the fitter as much as the search; **(c)** all three
+   `LARGE_REFERENCES` carry a parameter whose leverage is *below the noise*, while all three
+   small references are clean, and `recommended` is built to reject exactly such a candidate;
+   **(d)** the **feasibility filter assumes the measurement window reaches the model's
+   asymptote**, and silently deletes a truth whose self-resonance sits at the edge of its own
+   sweep — a gap in gate G3 rather than a contradiction of it; **(e)** the rational-approximation
+   route (`scipy.interpolate.AAA`, a Loewner pencil, a stabilisation diagram) is **exact without
+   noise and useless with it**, 0.04–0.20 exact-recovery at 1% noise, so no production code
+   follows from it. What *was* built is a **growth stage**: above the exhaustive limit the search
+   stops enumerating and grows — every one-element extension of the best `GROWTH_WIDTH`
+   topologies of each completed level — reaching the six-element truth's equivalence class
+   [measured] **three screening fits after the five-element enumeration ends**. It ships
+   **off by default** (`GROWTH_DEFAULT = 0`, `--growth-width 4` to ask for it) because the search
+   evidence is strong and the *report* evidence is not in yet, and because switching it on made
+   the web tests alone run longer than the whole suite had. The rule that governs it is §4.7's:
+   `complete_up_to` describes the enumeration and growth may never raise it, so `grown_to` is a
+   separate field and the coverage line says "That is not a completeness claim" in words. Both
+   front ends grow through one `growth_plan` generator; the browser's first version derived
+   coverage from a list the growth stage appends to and therefore over-claimed completeness,
+   which is the failure the whole §4.7 discipline exists to catch.
+
 Update these when decisions change.
 
 ## Stack and conventions

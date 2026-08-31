@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import json
 import multiprocessing
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -118,6 +119,21 @@ def reference_spectrum(seed: int = 0, reference: Reference | None = None) -> Spe
     )
 
 
+def truth_reference(truth_id: str) -> Reference:
+    """A :class:`Reference` for one of the pre-registered truths of ``six_plus/truths.py``.
+
+    Kept behind its own CLI flag rather than added to :data:`REFERENCES`, because the arenas
+    already committed here must keep rebuilding byte-for-byte from the command lines in the
+    README -- which means neither the choices of ``--reference`` nor the payload's key set may
+    move for them. ``truth_id`` is written into the payload only when this path is used.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "six_plus"))
+    from truths import BY_ID  # noqa: PLC0415  (optional dependency of one CLI flag)
+
+    truth = BY_ID[truth_id]
+    return Reference(truth.circuit, truth.params, truth.f_min, truth.f_max, 0.01)
+
+
 def build(
     pool: tuple[str, ...],
     n_max: int,
@@ -125,6 +141,7 @@ def build(
     out: Path,
     seed: int,
     reference: Reference | None = None,
+    truth_id: str | None = None,
 ) -> None:
     ref = reference or REFERENCES["maxwell"]
     spectrum = reference_spectrum(seed, ref)
@@ -176,6 +193,10 @@ def build(
             for t, m, c in zip(texts, meta, costs, strict=True)
         ],
     }
+    # Added only on the `--truth` path: the arenas committed before this flag existed must
+    # keep rebuilding byte-for-byte, and an unconditional key would change every one of them.
+    if truth_id is not None:
+        payload["truth_id"] = truth_id
     out.write_text(json.dumps(payload), encoding="utf-8")
     finite = np.isfinite(costs).sum()
     print(f"wrote {out} in {elapsed / 60:.1f} min, {finite}/{len(costs)} finite", flush=True)
@@ -188,15 +209,28 @@ def main() -> None:
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--reference", default="maxwell", choices=sorted(REFERENCES))
+    ap.add_argument(
+        "--truth",
+        default=None,
+        help=(
+            "freeze the landscape around a pre-registered truth from six_plus/truths.py "
+            "(par5, ser5, mix5, par6, ser6, mix6, par7, ser7, mix7, par6_incumbent) "
+            "instead of a named --reference"
+        ),
+    )
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
+    reference = (
+        REFERENCES[args.reference] if args.truth is None else truth_reference(args.truth)
+    )
     build(
         tuple(args.pool.split(",")),
         args.n_max,
         args.workers,
         args.out,
         args.seed,
-        REFERENCES[args.reference],
+        reference,
+        args.truth,
     )
 
 

@@ -33,9 +33,11 @@ import time
 from collections.abc import Generator, Sequence
 from typing import Any, cast
 
-from autocircuit.core.circuit import Circuit
+from autocircuit.core.circuit import Circuit, count_elements
 from autocircuit.core.descriptors import PoolChoice, choose_pool
 from autocircuit.core.discover import (
+    GROWTH_DEFAULT,
+    GROWTH_REACH,
     REFINE_DEFAULT,
     WORKER_CHUNK,
     Candidate,
@@ -52,6 +54,7 @@ from autocircuit.core.discover import (
     excluded_plan,
     excluded_target,
     exhaustive_limit_for,
+    growth_plan,
     pareto_front,
     refit_plan,
     screen_plan,
@@ -120,6 +123,8 @@ class DiscoveryJob:
         criterion: Criterion = DEFAULT_CRITERION,
         final_restarts: int = 5,
         n_refine: int | None = None,
+        max_elements: int = 7,
+        growth_width: int = GROWTH_DEFAULT,
         screen_chunk: int = SCREEN_CHUNK,
         refit_chunk: int = REFIT_CHUNK,
     ) -> None:
@@ -145,6 +150,7 @@ class DiscoveryJob:
         self.criterion: Criterion = criterion
         self.final_restarts = final_restarts
         self.n_refine = REFINE_DEFAULT["exhaustive"] if n_refine is None else n_refine
+        self.max_elements = max_elements
         self.frame = None if skeleton is None else Circuit.parse(skeleton)
         self.floor = max(1, exhaustive_min)
         # Kept because a widening re-enumerates, and it must re-enumerate under exactly the
@@ -196,12 +202,40 @@ class DiscoveryJob:
         self._considered_widening = False
         self._base_candidates: list[Candidate] = []
         self._base_screened = 0
+        # The growth stage, which follows the screen and reuses its plumbing because
+        # `growth_plan` yields the same `ScreenTask` batches `screen_plan` does. Kept as a
+        # separate generator rather than chained into `_screen`, so that `screened` and
+        # `complete_up_to` keep describing the *enumeration* -- growth is not a completeness
+        # claim (`DiscoveryResult.grown_to`).
+        self.growth_width = max(0, growth_width)
+        self._growth: ScreenGenerator | None = None
+        self._growth_open = False
+        self._grown: list[tuple[float, str]] = []
+        self.grown_to: int | None = None
+        # How many topologies the *enumeration* screened, kept apart from `_scored` because
+        # growth appends to that list and `complete_up_to` is derived from a count. Letting the
+        # grown rows into that count would raise the completeness claim by exactly the amount
+        # the growth stage is not allowed to claim -- the one-line version of the failure
+        # `DiscoveryResult.grown_to` exists to prevent.
+        self._enumerated: int | None = None
 
     # -- Tier 1 ------------------------------------------------------------------------------
 
     def next_screen(self) -> list[tuple[str, float]] | None:
-        """The next batch of ``(circuit, abandon above)``, or None when the screen is done."""
-        if self.stopped or not self._screen_open:
+        """The next batch of ``(circuit, abandon above)``, or None when the screen is done.
+
+        Once the enumeration is exhausted this hands out the *growth* stage's batches instead,
+        rather than making JavaScript learn a second phase: both stages are the same kind of
+        work -- one cheap fit per topology, an early-abandon threshold, a cost back -- and the
+        driver on the other side of the worker boundary should not have to know which one it is
+        feeding. What differs between them is what may then be claimed, and that is decided
+        here (:attr:`coverage_level`, :attr:`grown_to`), not there.
+        """
+        if self.stopped:
+            return None
+        if self._growth_open:
+            return self.next_growth()
+        if not self._screen_open:
             return None
         try:
             if self._issued is None:
@@ -215,6 +249,72 @@ class DiscoveryJob:
             self._screen_open = False
             self._screen_done = True
             self._scored = list(done.value)
+            self._enumerated = len(self._scored)
+            return self._open_growth()
+        self._issued = [task.text for task in tasks]
+        return [(task.text, task.abandon_above) for task in tasks]
+
+    def _open_growth(self) -> list[tuple[str, float]] | None:
+        """Start the growth stage, or say the screen is over.
+
+        Growth runs *between* the tiers, as it does in
+        :func:`~autocircuit.core.discover._exhaustive`, because it needs the tier-1 ranking of a
+        completed level -- and both stages then feed one shortlist under one per-size quota. It
+        is skipped under a skeleton for the reason the genetic fallback is: a report that mixed
+        "complete up to N containing the skeleton" with "grown from the best W of level N"
+        could not state which space it had covered.
+        """
+        if self._growth is not None or self._growth_open:
+            return None
+        complete_up_to = self.coverage_level
+        if (
+            self.growth_width <= 0
+            or self.frame is not None
+            or complete_up_to is None
+            or self.max_elements <= complete_up_to
+            or GROWTH_REACH <= 0
+        ):
+            return None
+        self._growth = growth_plan(
+            self._scored,
+            pool=self.pool,
+            start_size=complete_up_to,
+            # A reach past the completed level, never a walk to the absolute cap
+            # (`discover.GROWTH_REACH`), so both front ends grow the same distance.
+            max_elements=min(self.max_elements, complete_up_to + GROWTH_REACH),
+            n_data=2 * self.spectrum.n,
+            width=self.growth_width,
+            criterion=self.criterion,
+        )
+        self._growth_open = True
+        self._screen_open = True
+        self._screen_done = False
+        self._issued = None
+        self._costs = None
+        return self.next_growth()
+
+    def next_growth(self) -> list[tuple[str, float]] | None:
+        """The growth stage's next batch, issued through the screen's own plumbing."""
+        if self.stopped or self._growth is None or not self._growth_open:
+            return None
+        try:
+            if self._issued is None:
+                tasks = next(self._growth)
+            elif self._costs is None:
+                raise ValueError("the previous screening batch has not been submitted")
+            else:
+                costs, self._costs = self._costs, None
+                tasks = self._growth.send(costs)
+        except StopIteration as done:
+            self._growth_open = False
+            self._screen_open = False
+            self._screen_done = True
+            self._grown = list(done.value)
+            if self._grown:
+                self._scored = list(self._scored) + self._grown
+                self.grown_to = max(
+                    count_elements(Circuit.parse(text).root) for _cost, text in self._grown
+                )
             return None
         self._issued = [task.text for task in tasks]
         return [(task.text, task.abandon_above) for task in tasks]
@@ -227,14 +327,30 @@ class DiscoveryJob:
             raise ValueError(f"{len(costs)} costs for {len(self._issued)} screening tasks")
         self._costs = [float(cost) for cost in costs]
         for cost, text in zip(self._costs, self._issued, strict=True):
-            self._scored.append((cost, text))
+            # During growth the generator's own return value is what lands in `_scored`, so
+            # appending here as well would double-count. `screened` stays the enumeration's
+            # number for the same reason `complete_up_to` does.
+            if not self._growth_open:
+                self._scored.append((cost, text))
             if self._best is None or cost < self._best[0]:
                 self._best = (cost, text)
 
     @property
     def screened(self) -> int:
-        """Topologies screened so far. Also the number the coverage claim is derived from."""
+        """Topologies screened so far, both stages included -- a progress number, not a claim."""
         return len(self._scored)
+
+    @property
+    def coverage_level(self) -> int | None:
+        """Largest element count the *enumeration* completed. Growth may not raise it.
+
+        Derived from :attr:`_enumerated` rather than from ``len(self._scored)``, because the
+        growth stage appends to that list: using the running total would raise the completeness
+        claim by exactly the amount growth is not entitled to claim.
+        """
+        return self.enumeration.coverage(
+            len(self._scored) if self._enumerated is None else self._enumerated
+        )
 
     @property
     def best_screened(self) -> str | None:
@@ -378,7 +494,7 @@ class DiscoveryJob:
         if not self.pool_choice.added:
             return
 
-        self.base_complete_up_to = self.enumeration.coverage(len(self._scored))
+        self.base_complete_up_to = self.coverage_level
         self._base_candidates = list(self._candidates)
         self._base_screened = len(self._scored)
         self.pool = self.pool_choice.pool
@@ -398,6 +514,14 @@ class DiscoveryJob:
         self._issued = None
         self._costs = None
         self._scored = []
+        # The widened pass re-enumerates, so its growth stage has to start again from the level
+        # *that* pass completes; carrying the first pass's growth over would grow from a
+        # ranking of a different space.
+        self._growth = None
+        self._growth_open = False
+        self._grown = []
+        self.grown_to = None
+        self._enumerated = None
         self._best = None
         self._refit = None
         self._refit_open = False
@@ -474,7 +598,8 @@ class DiscoveryJob:
             elapsed_s=time.perf_counter() - self.started,
             pool=self.pool,
             mode="exhaustive",
-            complete_up_to=self.enumeration.coverage(len(self._scored)),
+            complete_up_to=self.coverage_level,
+            grown_to=self.grown_to,
             base_complete_up_to=self.base_complete_up_to,
             pool_choice=self.pool_choice,
             skeleton=None if self.frame is None else self.frame.to_string(),
@@ -787,6 +912,11 @@ def report_payload(job: DiscoveryJob) -> dict[str, Any]:
         ),
         "n_evaluated": result.n_evaluated,
         "complete_up_to": result.complete_up_to,
+        # Sent beside `complete_up_to` and never merged into it: this is the largest size the
+        # *growth* stage reached, and it licenses a much weaker sentence than completeness does.
+        # `completeness` above already says which is which in prose; this is the structured form
+        # so a caller can tell the two apart without parsing English.
+        "grown_to": result.grown_to,
         # The pool the spectrum chose, or null when the caller named one. ``completeness``
         # above already carries its sentence -- this is the structured form, the same one the
         # CLI's --json file has, so the browser can show the widening as a fact rather than

@@ -21,6 +21,7 @@ from autocircuit import __version__
 from autocircuit.core.circuit import Circuit
 from autocircuit.core.descriptors import WIDENING_CANDIDATES
 from autocircuit.core.discover import (
+    GROWTH_DEFAULT,
     discover,
     excluded_equivalents,
     exhaustive_limit_for,
@@ -319,6 +320,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
         generations=args.generations,
         population=args.population,
         max_elements=args.max_elements,
+        growth_width=args.growth_width,
         seed=args.seed,
         weighting=args.weighting,
         time_limit=args.time_limit,
@@ -688,6 +690,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_disc.add_argument("--generations", type=int, default=30)
     p_disc.add_argument("--population", type=int, default=40)
     p_disc.add_argument("--max-elements", type=int, default=7)
+    p_disc.add_argument(
+        "--growth-width", type=int, default=GROWTH_DEFAULT,
+        help="above --exhaustive-limit, evaluate every one-element extension of the best N "
+        "topologies of each completed size instead of stopping. Off by default (0): the search "
+        "reaches a six-element truth three screening fits after the five-element enumeration "
+        "ends, but that it changes the reported answer is not measured yet, and it roughly "
+        "doubles the run. Try 4. The coverage line states what was grown separately from what "
+        "was enumerated, because growth is not a completeness claim",
+    )
     p_disc.add_argument("--top", type=int, default=10, help="how many candidates to report")
     p_disc.add_argument(
         "--csv", metavar="PATH",

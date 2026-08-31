@@ -1,0 +1,8236 @@
+{
+  "reference_orders": {
+    "1relax": {
+      "aaa": 1,
+      "loewner_threshold": 2,
+      "loewner_gap": 1,
+      "stabilisation": 1
+    },
+    "2relax": {
+      "aaa": 2,
+      "loewner_threshold": 2,
+      "loewner_gap": 2,
+      "stabilisation": 3
+    },
+    "3relax": {
+      "aaa": 3,
+      "loewner_threshold": 3,
+      "loewner_gap": 3,
+      "stabilisation": 5
+    },
+    "4relax": {
+      "aaa": 4,
+      "loewner_threshold": 4,
+      "loewner_gap": 4,
+      "stabilisation": 4
+    },
+    "rcl_relax": {
+      "aaa": 1,
+      "loewner_threshold": 1,
+      "loewner_gap": 1,
+      "stabilisation": 1
+    },
+    "cpe": {
+      "aaa": 27,
+      "loewner_threshold": 40,
+      "loewner_gap": 1,
+      "stabilisation": 0
+    },
+    "randles_warburg": {
+      "aaa": 22,
+      "loewner_threshold": 23,
+      "loewner_gap": 2,
+      "stabilisation": 1
+    }
+  },
+  "grid": {
+    "noise_levels": [
+      0.0,
+      0.001,
+      0.003,
+      0.01,
+      0.03
+    ],
+    "ppd_levels": [
+      5,
+      10,
+      20
+    ],
+    "seeds": 5,
+    "cells": [
+      {
+        "truth": "1relax",
+        "estimator": "aaa",
+        "noise": 0.0,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          1
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.0,
+        "ppd": 5,
+        "reference": 2,
+        "estimates": [
+          1
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 1,
+          "further": 0
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "loewner_gap",
+        "noise": 0.0,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          1
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "stabilisation",
+        "noise": 0.0,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          1
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "aaa",
+        "noise": 0.001,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          16,
+          8,
+          10,
+          18,
+          12
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.001,
+        "ppd": 5,
+        "reference": 2,
+        "estimates": [
+          17,
+          15,
+          15,
+          12,
+          17
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "loewner_gap",
+        "noise": 0.001,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          42,
+          48,
+          50,
+          54,
+          54
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "stabilisation",
+        "noise": 0.001,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          1,
+          3,
+          1,
+          2,
+          3
+        ],
+        "buckets": {
+          "exact": 2,
+          "plus_one": 1,
+          "minus_one": 0,
+          "further": 2
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "aaa",
+        "noise": 0.003,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          12,
+          4,
+          7,
+          15,
+          15
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.003,
+        "ppd": 5,
+        "reference": 2,
+        "estimates": [
+          14,
+          13,
+          13,
+          12,
+          14
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "loewner_gap",
+        "noise": 0.003,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          42,
+          48,
+          50,
+          54,
+          54
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "stabilisation",
+        "noise": 0.003,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          2,
+          3,
+          1,
+          1,
+          1
+        ],
+        "buckets": {
+          "exact": 3,
+          "plus_one": 1,
+          "minus_one": 0,
+          "further": 1
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "aaa",
+        "noise": 0.01,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          9,
+          4,
+          8,
+          14,
+          13
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.01,
+        "ppd": 5,
+        "reference": 2,
+        "estimates": [
+          13,
+          11,
+          9,
+          10,
+          10
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "loewner_gap",
+        "noise": 0.01,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          42,
+          48,
+          50,
+          54,
+          54
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "stabilisation",
+        "noise": 0.01,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          2,
+          3,
+          3,
+          2,
+          2
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 3,
+          "minus_one": 0,
+          "further": 2
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "aaa",
+        "noise": 0.03,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          10,
+          6,
+          14,
+          13,
+          12
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.03,
+        "ppd": 5,
+        "reference": 2,
+        "estimates": [
+          9,
+          8,
+          6,
+          7,
+          8
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "loewner_gap",
+        "noise": 0.03,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          42,
+          48,
+          50,
+          54,
+          54
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "stabilisation",
+        "noise": 0.03,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          1,
+          3,
+          4,
+          0,
+          1
+        ],
+        "buckets": {
+          "exact": 2,
+          "plus_one": 0,
+          "minus_one": 1,
+          "further": 2
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "aaa",
+        "noise": 0.0,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          1
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.0,
+        "ppd": 10,
+        "reference": 2,
+        "estimates": [
+          1
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 1,
+          "further": 0
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "loewner_gap",
+        "noise": 0.0,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          1
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "stabilisation",
+        "noise": 0.0,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          1
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "aaa",
+        "noise": 0.001,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          34,
+          32,
+          26,
+          22,
+          23
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.001,
+        "ppd": 10,
+        "reference": 2,
+        "estimates": [
+          30,
+          32,
+          28,
+          25,
+          32
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "loewner_gap",
+        "noise": 0.001,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          101,
+          92,
+          94,
+          90,
+          95
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "stabilisation",
+        "noise": 0.001,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          3,
+          1,
+          1,
+          1,
+          2
+        ],
+        "buckets": {
+          "exact": 3,
+          "plus_one": 1,
+          "minus_one": 0,
+          "further": 1
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "aaa",
+        "noise": 0.003,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          22,
+          33,
+          29,
+          22,
+          21
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.003,
+        "ppd": 10,
+        "reference": 2,
+        "estimates": [
+          26,
+          27,
+          27,
+          20,
+          28
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "loewner_gap",
+        "noise": 0.003,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          101,
+          92,
+          94,
+          90,
+          95
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "stabilisation",
+        "noise": 0.003,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          3,
+          3,
+          2,
+          2,
+          2
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 3,
+          "minus_one": 0,
+          "further": 2
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "aaa",
+        "noise": 0.01,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          23,
+          24,
+          28,
+          24,
+          35
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.01,
+        "ppd": 10,
+        "reference": 2,
+        "estimates": [
+          23,
+          20,
+          17,
+          13,
+          20
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "loewner_gap",
+        "noise": 0.01,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          101,
+          92,
+          94,
+          90,
+          95
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "stabilisation",
+        "noise": 0.01,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          1,
+          3,
+          2,
+          1,
+          2
+        ],
+        "buckets": {
+          "exact": 2,
+          "plus_one": 2,
+          "minus_one": 0,
+          "further": 1
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "aaa",
+        "noise": 0.03,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          29,
+          35,
+          31,
+          33,
+          39
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.03,
+        "ppd": 10,
+        "reference": 2,
+        "estimates": [
+          16,
+          16,
+          12,
+          10,
+          18
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "loewner_gap",
+        "noise": 0.03,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          101,
+          92,
+          94,
+          90,
+          95
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "stabilisation",
+        "noise": 0.03,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          3,
+          3,
+          2,
+          0,
+          0
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 1,
+          "minus_one": 2,
+          "further": 2
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "aaa",
+        "noise": 0.0,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          1
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.0,
+        "ppd": 20,
+        "reference": 2,
+        "estimates": [
+          1
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 1,
+          "further": 0
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "loewner_gap",
+        "noise": 0.0,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          1
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "stabilisation",
+        "noise": 0.0,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          2
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 1,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "aaa",
+        "noise": 0.001,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          53,
+          2,
+          38,
+          52,
+          49
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 1,
+          "minus_one": 0,
+          "further": 4
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.001,
+        "ppd": 20,
+        "reference": 2,
+        "estimates": [
+          60,
+          58,
+          55,
+          52,
+          57
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "loewner_gap",
+        "noise": 0.001,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          218,
+          212,
+          190,
+          184,
+          184
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "stabilisation",
+        "noise": 0.001,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          1,
+          2,
+          1,
+          2,
+          3
+        ],
+        "buckets": {
+          "exact": 2,
+          "plus_one": 2,
+          "minus_one": 0,
+          "further": 1
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "aaa",
+        "noise": 0.003,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          43,
+          42,
+          53,
+          49,
+          35
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.003,
+        "ppd": 20,
+        "reference": 2,
+        "estimates": [
+          50,
+          51,
+          45,
+          41,
+          46
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "loewner_gap",
+        "noise": 0.003,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          218,
+          212,
+          190,
+          184,
+          184
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "stabilisation",
+        "noise": 0.003,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          3,
+          1,
+          1,
+          2,
+          2
+        ],
+        "buckets": {
+          "exact": 2,
+          "plus_one": 2,
+          "minus_one": 0,
+          "further": 1
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "aaa",
+        "noise": 0.01,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          46,
+          44,
+          45,
+          57,
+          51
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.01,
+        "ppd": 20,
+        "reference": 2,
+        "estimates": [
+          42,
+          40,
+          32,
+          32,
+          39
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "loewner_gap",
+        "noise": 0.01,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          218,
+          212,
+          190,
+          184,
+          184
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "stabilisation",
+        "noise": 0.01,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          2,
+          3,
+          1,
+          0,
+          3
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 1,
+          "minus_one": 1,
+          "further": 2
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "aaa",
+        "noise": 0.03,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          38,
+          47,
+          51,
+          46,
+          49
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.03,
+        "ppd": 20,
+        "reference": 2,
+        "estimates": [
+          32,
+          30,
+          24,
+          22,
+          30
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "loewner_gap",
+        "noise": 0.03,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          218,
+          212,
+          190,
+          184,
+          184
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "1relax",
+        "estimator": "stabilisation",
+        "noise": 0.03,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          1,
+          1,
+          2,
+          3,
+          2
+        ],
+        "buckets": {
+          "exact": 2,
+          "plus_one": 2,
+          "minus_one": 0,
+          "further": 1
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "aaa",
+        "noise": 0.0,
+        "ppd": 5,
+        "reference": 2,
+        "estimates": [
+          2
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.0,
+        "ppd": 5,
+        "reference": 2,
+        "estimates": [
+          2
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "loewner_gap",
+        "noise": 0.0,
+        "ppd": 5,
+        "reference": 2,
+        "estimates": [
+          2
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "stabilisation",
+        "noise": 0.0,
+        "ppd": 5,
+        "reference": 3,
+        "estimates": [
+          2
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 1,
+          "further": 0
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "aaa",
+        "noise": 0.001,
+        "ppd": 5,
+        "reference": 2,
+        "estimates": [
+          10,
+          9,
+          8,
+          8,
+          15
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.001,
+        "ppd": 5,
+        "reference": 2,
+        "estimates": [
+          17,
+          16,
+          15,
+          13,
+          17
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "loewner_gap",
+        "noise": 0.001,
+        "ppd": 5,
+        "reference": 2,
+        "estimates": [
+          42,
+          35,
+          50,
+          54,
+          54
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "stabilisation",
+        "noise": 0.001,
+        "ppd": 5,
+        "reference": 3,
+        "estimates": [
+          2,
+          3,
+          3,
+          3,
+          2
+        ],
+        "buckets": {
+          "exact": 3,
+          "plus_one": 0,
+          "minus_one": 2,
+          "further": 0
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "aaa",
+        "noise": 0.003,
+        "ppd": 5,
+        "reference": 2,
+        "estimates": [
+          18,
+          9,
+          6,
+          17,
+          18
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.003,
+        "ppd": 5,
+        "reference": 2,
+        "estimates": [
+          14,
+          13,
+          13,
+          12,
+          14
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "loewner_gap",
+        "noise": 0.003,
+        "ppd": 5,
+        "reference": 2,
+        "estimates": [
+          42,
+          35,
+          50,
+          54,
+          54
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "stabilisation",
+        "noise": 0.003,
+        "ppd": 5,
+        "reference": 3,
+        "estimates": [
+          2,
+          2,
+          2,
+          3,
+          2
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 4,
+          "further": 0
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "aaa",
+        "noise": 0.01,
+        "ppd": 5,
+        "reference": 2,
+        "estimates": [
+          15,
+          11,
+          12,
+          18,
+          17
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.01,
+        "ppd": 5,
+        "reference": 2,
+        "estimates": [
+          13,
+          11,
+          9,
+          10,
+          10
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "loewner_gap",
+        "noise": 0.01,
+        "ppd": 5,
+        "reference": 2,
+        "estimates": [
+          42,
+          35,
+          50,
+          54,
+          54
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "stabilisation",
+        "noise": 0.01,
+        "ppd": 5,
+        "reference": 3,
+        "estimates": [
+          2,
+          3,
+          2,
+          2,
+          3
+        ],
+        "buckets": {
+          "exact": 2,
+          "plus_one": 0,
+          "minus_one": 3,
+          "further": 0
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "aaa",
+        "noise": 0.03,
+        "ppd": 5,
+        "reference": 2,
+        "estimates": [
+          15,
+          10,
+          12,
+          14,
+          14
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.03,
+        "ppd": 5,
+        "reference": 2,
+        "estimates": [
+          9,
+          8,
+          6,
+          7,
+          8
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "loewner_gap",
+        "noise": 0.03,
+        "ppd": 5,
+        "reference": 2,
+        "estimates": [
+          42,
+          46,
+          50,
+          54,
+          54
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "stabilisation",
+        "noise": 0.03,
+        "ppd": 5,
+        "reference": 3,
+        "estimates": [
+          3,
+          3,
+          2,
+          0,
+          0
+        ],
+        "buckets": {
+          "exact": 2,
+          "plus_one": 0,
+          "minus_one": 1,
+          "further": 2
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "aaa",
+        "noise": 0.0,
+        "ppd": 10,
+        "reference": 2,
+        "estimates": [
+          2
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.0,
+        "ppd": 10,
+        "reference": 2,
+        "estimates": [
+          2
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "loewner_gap",
+        "noise": 0.0,
+        "ppd": 10,
+        "reference": 2,
+        "estimates": [
+          2
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "stabilisation",
+        "noise": 0.0,
+        "ppd": 10,
+        "reference": 3,
+        "estimates": [
+          2
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 1,
+          "further": 0
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "aaa",
+        "noise": 0.001,
+        "ppd": 10,
+        "reference": 2,
+        "estimates": [
+          6,
+          12,
+          17,
+          24,
+          31
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.001,
+        "ppd": 10,
+        "reference": 2,
+        "estimates": [
+          31,
+          33,
+          29,
+          25,
+          33
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "loewner_gap",
+        "noise": 0.001,
+        "ppd": 10,
+        "reference": 2,
+        "estimates": [
+          101,
+          85,
+          94,
+          90,
+          95
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "stabilisation",
+        "noise": 0.001,
+        "ppd": 10,
+        "reference": 3,
+        "estimates": [
+          2,
+          3,
+          3,
+          2,
+          3
+        ],
+        "buckets": {
+          "exact": 3,
+          "plus_one": 0,
+          "minus_one": 2,
+          "further": 0
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "aaa",
+        "noise": 0.003,
+        "ppd": 10,
+        "reference": 2,
+        "estimates": [
+          27,
+          11,
+          31,
+          17,
+          28
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.003,
+        "ppd": 10,
+        "reference": 2,
+        "estimates": [
+          26,
+          26,
+          27,
+          20,
+          28
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "loewner_gap",
+        "noise": 0.003,
+        "ppd": 10,
+        "reference": 2,
+        "estimates": [
+          101,
+          85,
+          94,
+          90,
+          95
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "stabilisation",
+        "noise": 0.003,
+        "ppd": 10,
+        "reference": 3,
+        "estimates": [
+          2,
+          2,
+          2,
+          2,
+          2
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 5,
+          "further": 0
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "aaa",
+        "noise": 0.01,
+        "ppd": 10,
+        "reference": 2,
+        "estimates": [
+          19,
+          27,
+          33,
+          25,
+          20
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.01,
+        "ppd": 10,
+        "reference": 2,
+        "estimates": [
+          23,
+          20,
+          17,
+          13,
+          20
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "loewner_gap",
+        "noise": 0.01,
+        "ppd": 10,
+        "reference": 2,
+        "estimates": [
+          101,
+          85,
+          94,
+          90,
+          95
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "stabilisation",
+        "noise": 0.01,
+        "ppd": 10,
+        "reference": 3,
+        "estimates": [
+          4,
+          4,
+          3,
+          0,
+          2
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 2,
+          "minus_one": 1,
+          "further": 1
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "aaa",
+        "noise": 0.03,
+        "ppd": 10,
+        "reference": 2,
+        "estimates": [
+          20,
+          17,
+          28,
+          30,
+          40
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.03,
+        "ppd": 10,
+        "reference": 2,
+        "estimates": [
+          16,
+          16,
+          12,
+          10,
+          18
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "loewner_gap",
+        "noise": 0.03,
+        "ppd": 10,
+        "reference": 2,
+        "estimates": [
+          101,
+          85,
+          94,
+          90,
+          95
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "stabilisation",
+        "noise": 0.03,
+        "ppd": 10,
+        "reference": 3,
+        "estimates": [
+          1,
+          2,
+          3,
+          0,
+          1
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 1,
+          "further": 3
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "aaa",
+        "noise": 0.0,
+        "ppd": 20,
+        "reference": 2,
+        "estimates": [
+          2
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.0,
+        "ppd": 20,
+        "reference": 2,
+        "estimates": [
+          2
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "loewner_gap",
+        "noise": 0.0,
+        "ppd": 20,
+        "reference": 2,
+        "estimates": [
+          2
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "stabilisation",
+        "noise": 0.0,
+        "ppd": 20,
+        "reference": 3,
+        "estimates": [
+          3
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "aaa",
+        "noise": 0.001,
+        "ppd": 20,
+        "reference": 2,
+        "estimates": [
+          55,
+          46,
+          41,
+          59,
+          53
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.001,
+        "ppd": 20,
+        "reference": 2,
+        "estimates": [
+          61,
+          59,
+          55,
+          52,
+          57
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "loewner_gap",
+        "noise": 0.001,
+        "ppd": 20,
+        "reference": 2,
+        "estimates": [
+          218,
+          212,
+          190,
+          218,
+          184
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "stabilisation",
+        "noise": 0.001,
+        "ppd": 20,
+        "reference": 3,
+        "estimates": [
+          3,
+          3,
+          3,
+          2,
+          2
+        ],
+        "buckets": {
+          "exact": 3,
+          "plus_one": 0,
+          "minus_one": 2,
+          "further": 0
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "aaa",
+        "noise": 0.003,
+        "ppd": 20,
+        "reference": 2,
+        "estimates": [
+          60,
+          21,
+          46,
+          53,
+          61
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.003,
+        "ppd": 20,
+        "reference": 2,
+        "estimates": [
+          50,
+          51,
+          45,
+          41,
+          46
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "loewner_gap",
+        "noise": 0.003,
+        "ppd": 20,
+        "reference": 2,
+        "estimates": [
+          218,
+          212,
+          190,
+          218,
+          184
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "stabilisation",
+        "noise": 0.003,
+        "ppd": 20,
+        "reference": 3,
+        "estimates": [
+          2,
+          4,
+          3,
+          0,
+          3
+        ],
+        "buckets": {
+          "exact": 2,
+          "plus_one": 1,
+          "minus_one": 1,
+          "further": 1
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "aaa",
+        "noise": 0.01,
+        "ppd": 20,
+        "reference": 2,
+        "estimates": [
+          47,
+          48,
+          54,
+          52,
+          59
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.01,
+        "ppd": 20,
+        "reference": 2,
+        "estimates": [
+          42,
+          40,
+          32,
+          32,
+          39
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "loewner_gap",
+        "noise": 0.01,
+        "ppd": 20,
+        "reference": 2,
+        "estimates": [
+          218,
+          131,
+          190,
+          218,
+          184
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "stabilisation",
+        "noise": 0.01,
+        "ppd": 20,
+        "reference": 3,
+        "estimates": [
+          2,
+          1,
+          2,
+          1,
+          3
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 2,
+          "further": 2
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "aaa",
+        "noise": 0.03,
+        "ppd": 20,
+        "reference": 2,
+        "estimates": [
+          53,
+          39,
+          50,
+          58,
+          54
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.03,
+        "ppd": 20,
+        "reference": 2,
+        "estimates": [
+          32,
+          30,
+          24,
+          22,
+          30
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "loewner_gap",
+        "noise": 0.03,
+        "ppd": 20,
+        "reference": 2,
+        "estimates": [
+          218,
+          212,
+          190,
+          218,
+          184
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "2relax",
+        "estimator": "stabilisation",
+        "noise": 0.03,
+        "ppd": 20,
+        "reference": 3,
+        "estimates": [
+          1,
+          3,
+          2,
+          0,
+          3
+        ],
+        "buckets": {
+          "exact": 2,
+          "plus_one": 0,
+          "minus_one": 1,
+          "further": 2
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "aaa",
+        "noise": 0.0,
+        "ppd": 5,
+        "reference": 3,
+        "estimates": [
+          3
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.0,
+        "ppd": 5,
+        "reference": 3,
+        "estimates": [
+          3
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "loewner_gap",
+        "noise": 0.0,
+        "ppd": 5,
+        "reference": 3,
+        "estimates": [
+          3
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "stabilisation",
+        "noise": 0.0,
+        "ppd": 5,
+        "reference": 5,
+        "estimates": [
+          4
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 1,
+          "further": 0
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "aaa",
+        "noise": 0.001,
+        "ppd": 5,
+        "reference": 3,
+        "estimates": [
+          8,
+          4,
+          9,
+          9,
+          11
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 1,
+          "minus_one": 0,
+          "further": 4
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.001,
+        "ppd": 5,
+        "reference": 3,
+        "estimates": [
+          16,
+          16,
+          15,
+          13,
+          17
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "loewner_gap",
+        "noise": 0.001,
+        "ppd": 5,
+        "reference": 3,
+        "estimates": [
+          42,
+          35,
+          50,
+          54,
+          54
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "stabilisation",
+        "noise": 0.001,
+        "ppd": 5,
+        "reference": 5,
+        "estimates": [
+          3,
+          3,
+          2,
+          3,
+          2
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "aaa",
+        "noise": 0.003,
+        "ppd": 5,
+        "reference": 3,
+        "estimates": [
+          13,
+          4,
+          9,
+          9,
+          12
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 1,
+          "minus_one": 0,
+          "further": 4
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.003,
+        "ppd": 5,
+        "reference": 3,
+        "estimates": [
+          15,
+          13,
+          13,
+          12,
+          15
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "loewner_gap",
+        "noise": 0.003,
+        "ppd": 5,
+        "reference": 3,
+        "estimates": [
+          26,
+          35,
+          50,
+          54,
+          54
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "stabilisation",
+        "noise": 0.003,
+        "ppd": 5,
+        "reference": 5,
+        "estimates": [
+          3,
+          3,
+          3,
+          3,
+          3
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "aaa",
+        "noise": 0.01,
+        "ppd": 5,
+        "reference": 3,
+        "estimates": [
+          13,
+          12,
+          16,
+          17,
+          7
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.01,
+        "ppd": 5,
+        "reference": 3,
+        "estimates": [
+          14,
+          12,
+          9,
+          10,
+          10
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "loewner_gap",
+        "noise": 0.01,
+        "ppd": 5,
+        "reference": 3,
+        "estimates": [
+          26,
+          35,
+          50,
+          54,
+          54
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "stabilisation",
+        "noise": 0.01,
+        "ppd": 5,
+        "reference": 5,
+        "estimates": [
+          2,
+          0,
+          0,
+          0,
+          1
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "aaa",
+        "noise": 0.03,
+        "ppd": 5,
+        "reference": 3,
+        "estimates": [
+          13,
+          8,
+          11,
+          9,
+          12
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.03,
+        "ppd": 5,
+        "reference": 3,
+        "estimates": [
+          9,
+          8,
+          6,
+          7,
+          8
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "loewner_gap",
+        "noise": 0.03,
+        "ppd": 5,
+        "reference": 3,
+        "estimates": [
+          42,
+          46,
+          50,
+          54,
+          54
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "stabilisation",
+        "noise": 0.03,
+        "ppd": 5,
+        "reference": 5,
+        "estimates": [
+          1,
+          2,
+          2,
+          4,
+          3
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 1,
+          "further": 4
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "aaa",
+        "noise": 0.0,
+        "ppd": 10,
+        "reference": 3,
+        "estimates": [
+          3
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.0,
+        "ppd": 10,
+        "reference": 3,
+        "estimates": [
+          3
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "loewner_gap",
+        "noise": 0.0,
+        "ppd": 10,
+        "reference": 3,
+        "estimates": [
+          3
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "stabilisation",
+        "noise": 0.0,
+        "ppd": 10,
+        "reference": 5,
+        "estimates": [
+          3
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 1
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "aaa",
+        "noise": 0.001,
+        "ppd": 10,
+        "reference": 3,
+        "estimates": [
+          19,
+          21,
+          15,
+          22,
+          18
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.001,
+        "ppd": 10,
+        "reference": 3,
+        "estimates": [
+          31,
+          33,
+          29,
+          26,
+          33
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "loewner_gap",
+        "noise": 0.001,
+        "ppd": 10,
+        "reference": 3,
+        "estimates": [
+          101,
+          85,
+          94,
+          90,
+          95
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "stabilisation",
+        "noise": 0.001,
+        "ppd": 10,
+        "reference": 5,
+        "estimates": [
+          2,
+          2,
+          2,
+          4,
+          3
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 1,
+          "further": 4
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "aaa",
+        "noise": 0.003,
+        "ppd": 10,
+        "reference": 3,
+        "estimates": [
+          17,
+          12,
+          27,
+          27,
+          23
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.003,
+        "ppd": 10,
+        "reference": 3,
+        "estimates": [
+          27,
+          27,
+          27,
+          20,
+          29
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "loewner_gap",
+        "noise": 0.003,
+        "ppd": 10,
+        "reference": 3,
+        "estimates": [
+          101,
+          85,
+          94,
+          90,
+          95
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "stabilisation",
+        "noise": 0.003,
+        "ppd": 10,
+        "reference": 5,
+        "estimates": [
+          3,
+          3,
+          3,
+          3,
+          3
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "aaa",
+        "noise": 0.01,
+        "ppd": 10,
+        "reference": 3,
+        "estimates": [
+          16,
+          19,
+          22,
+          21,
+          24
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.01,
+        "ppd": 10,
+        "reference": 3,
+        "estimates": [
+          24,
+          21,
+          18,
+          13,
+          20
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "loewner_gap",
+        "noise": 0.01,
+        "ppd": 10,
+        "reference": 3,
+        "estimates": [
+          101,
+          85,
+          68,
+          90,
+          95
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "stabilisation",
+        "noise": 0.01,
+        "ppd": 10,
+        "reference": 5,
+        "estimates": [
+          1,
+          3,
+          2,
+          1,
+          0
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "aaa",
+        "noise": 0.03,
+        "ppd": 10,
+        "reference": 3,
+        "estimates": [
+          14,
+          20,
+          22,
+          25,
+          21
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.03,
+        "ppd": 10,
+        "reference": 3,
+        "estimates": [
+          16,
+          16,
+          12,
+          10,
+          18
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "loewner_gap",
+        "noise": 0.03,
+        "ppd": 10,
+        "reference": 3,
+        "estimates": [
+          101,
+          85,
+          94,
+          90,
+          95
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "stabilisation",
+        "noise": 0.03,
+        "ppd": 10,
+        "reference": 5,
+        "estimates": [
+          0,
+          4,
+          1,
+          0,
+          1
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 1,
+          "further": 4
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "aaa",
+        "noise": 0.0,
+        "ppd": 20,
+        "reference": 3,
+        "estimates": [
+          3
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.0,
+        "ppd": 20,
+        "reference": 3,
+        "estimates": [
+          3
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "loewner_gap",
+        "noise": 0.0,
+        "ppd": 20,
+        "reference": 3,
+        "estimates": [
+          3
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "stabilisation",
+        "noise": 0.0,
+        "ppd": 20,
+        "reference": 5,
+        "estimates": [
+          3
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 1
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "aaa",
+        "noise": 0.001,
+        "ppd": 20,
+        "reference": 3,
+        "estimates": [
+          43,
+          36,
+          27,
+          49,
+          57
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.001,
+        "ppd": 20,
+        "reference": 3,
+        "estimates": [
+          61,
+          59,
+          55,
+          52,
+          57
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "loewner_gap",
+        "noise": 0.001,
+        "ppd": 20,
+        "reference": 3,
+        "estimates": [
+          218,
+          212,
+          190,
+          169,
+          184
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "stabilisation",
+        "noise": 0.001,
+        "ppd": 20,
+        "reference": 5,
+        "estimates": [
+          3,
+          3,
+          3,
+          3,
+          2
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "aaa",
+        "noise": 0.003,
+        "ppd": 20,
+        "reference": 3,
+        "estimates": [
+          35,
+          40,
+          37,
+          36,
+          48
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.003,
+        "ppd": 20,
+        "reference": 3,
+        "estimates": [
+          51,
+          52,
+          46,
+          41,
+          47
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "loewner_gap",
+        "noise": 0.003,
+        "ppd": 20,
+        "reference": 3,
+        "estimates": [
+          218,
+          212,
+          190,
+          169,
+          184
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "stabilisation",
+        "noise": 0.003,
+        "ppd": 20,
+        "reference": 5,
+        "estimates": [
+          2,
+          2,
+          4,
+          0,
+          1
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 1,
+          "further": 4
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "aaa",
+        "noise": 0.01,
+        "ppd": 20,
+        "reference": 3,
+        "estimates": [
+          33,
+          37,
+          44,
+          44,
+          56
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.01,
+        "ppd": 20,
+        "reference": 3,
+        "estimates": [
+          42,
+          40,
+          32,
+          32,
+          39
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "loewner_gap",
+        "noise": 0.01,
+        "ppd": 20,
+        "reference": 3,
+        "estimates": [
+          218,
+          212,
+          190,
+          169,
+          184
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "stabilisation",
+        "noise": 0.01,
+        "ppd": 20,
+        "reference": 5,
+        "estimates": [
+          3,
+          2,
+          2,
+          0,
+          1
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "aaa",
+        "noise": 0.03,
+        "ppd": 20,
+        "reference": 3,
+        "estimates": [
+          52,
+          34,
+          32,
+          40,
+          53
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.03,
+        "ppd": 20,
+        "reference": 3,
+        "estimates": [
+          32,
+          30,
+          24,
+          22,
+          30
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "loewner_gap",
+        "noise": 0.03,
+        "ppd": 20,
+        "reference": 3,
+        "estimates": [
+          218,
+          212,
+          190,
+          218,
+          184
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "3relax",
+        "estimator": "stabilisation",
+        "noise": 0.03,
+        "ppd": 20,
+        "reference": 5,
+        "estimates": [
+          2,
+          0,
+          0,
+          2,
+          0
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "aaa",
+        "noise": 0.0,
+        "ppd": 5,
+        "reference": 4,
+        "estimates": [
+          4
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.0,
+        "ppd": 5,
+        "reference": 4,
+        "estimates": [
+          4
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "loewner_gap",
+        "noise": 0.0,
+        "ppd": 5,
+        "reference": 4,
+        "estimates": [
+          4
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "stabilisation",
+        "noise": 0.0,
+        "ppd": 5,
+        "reference": 4,
+        "estimates": [
+          4
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "aaa",
+        "noise": 0.001,
+        "ppd": 5,
+        "reference": 4,
+        "estimates": [
+          12,
+          4,
+          5,
+          8,
+          13
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 1,
+          "minus_one": 0,
+          "further": 3
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.001,
+        "ppd": 5,
+        "reference": 4,
+        "estimates": [
+          11,
+          10,
+          10,
+          11,
+          12
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "loewner_gap",
+        "noise": 0.001,
+        "ppd": 5,
+        "reference": 4,
+        "estimates": [
+          1,
+          1,
+          1,
+          54,
+          54
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "stabilisation",
+        "noise": 0.001,
+        "ppd": 5,
+        "reference": 4,
+        "estimates": [
+          3,
+          3,
+          3,
+          3,
+          3
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 5,
+          "further": 0
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "aaa",
+        "noise": 0.003,
+        "ppd": 5,
+        "reference": 4,
+        "estimates": [
+          12,
+          10,
+          12,
+          10,
+          9
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.003,
+        "ppd": 5,
+        "reference": 4,
+        "estimates": [
+          10,
+          9,
+          9,
+          10,
+          11
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "loewner_gap",
+        "noise": 0.003,
+        "ppd": 5,
+        "reference": 4,
+        "estimates": [
+          1,
+          35,
+          50,
+          54,
+          54
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "stabilisation",
+        "noise": 0.003,
+        "ppd": 5,
+        "reference": 4,
+        "estimates": [
+          1,
+          3,
+          3,
+          2,
+          0
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 2,
+          "further": 3
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "aaa",
+        "noise": 0.01,
+        "ppd": 5,
+        "reference": 4,
+        "estimates": [
+          8,
+          6,
+          4,
+          9,
+          12
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 4
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.01,
+        "ppd": 5,
+        "reference": 4,
+        "estimates": [
+          10,
+          9,
+          9,
+          10,
+          10
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "loewner_gap",
+        "noise": 0.01,
+        "ppd": 5,
+        "reference": 4,
+        "estimates": [
+          26,
+          35,
+          50,
+          54,
+          54
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "stabilisation",
+        "noise": 0.01,
+        "ppd": 5,
+        "reference": 4,
+        "estimates": [
+          2,
+          2,
+          2,
+          2,
+          0
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "aaa",
+        "noise": 0.03,
+        "ppd": 5,
+        "reference": 4,
+        "estimates": [
+          8,
+          7,
+          7,
+          10,
+          12
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.03,
+        "ppd": 5,
+        "reference": 4,
+        "estimates": [
+          9,
+          8,
+          7,
+          8,
+          8
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "loewner_gap",
+        "noise": 0.03,
+        "ppd": 5,
+        "reference": 4,
+        "estimates": [
+          42,
+          46,
+          50,
+          54,
+          54
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "stabilisation",
+        "noise": 0.03,
+        "ppd": 5,
+        "reference": 4,
+        "estimates": [
+          0,
+          2,
+          1,
+          0,
+          0
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "aaa",
+        "noise": 0.0,
+        "ppd": 10,
+        "reference": 4,
+        "estimates": [
+          4
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.0,
+        "ppd": 10,
+        "reference": 4,
+        "estimates": [
+          4
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "loewner_gap",
+        "noise": 0.0,
+        "ppd": 10,
+        "reference": 4,
+        "estimates": [
+          4
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "stabilisation",
+        "noise": 0.0,
+        "ppd": 10,
+        "reference": 4,
+        "estimates": [
+          4
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "aaa",
+        "noise": 0.001,
+        "ppd": 10,
+        "reference": 4,
+        "estimates": [
+          5,
+          17,
+          13,
+          17,
+          15
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 1,
+          "minus_one": 0,
+          "further": 4
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.001,
+        "ppd": 10,
+        "reference": 4,
+        "estimates": [
+          19,
+          19,
+          21,
+          20,
+          20
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "loewner_gap",
+        "noise": 0.001,
+        "ppd": 10,
+        "reference": 4,
+        "estimates": [
+          1,
+          1,
+          1,
+          90,
+          1
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "stabilisation",
+        "noise": 0.001,
+        "ppd": 10,
+        "reference": 4,
+        "estimates": [
+          3,
+          3,
+          3,
+          3,
+          3
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 5,
+          "further": 0
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "aaa",
+        "noise": 0.003,
+        "ppd": 10,
+        "reference": 4,
+        "estimates": [
+          14,
+          15,
+          14,
+          15,
+          13
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.003,
+        "ppd": 10,
+        "reference": 4,
+        "estimates": [
+          18,
+          19,
+          20,
+          19,
+          19
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "loewner_gap",
+        "noise": 0.003,
+        "ppd": 10,
+        "reference": 4,
+        "estimates": [
+          1,
+          1,
+          94,
+          90,
+          1
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "stabilisation",
+        "noise": 0.003,
+        "ppd": 10,
+        "reference": 4,
+        "estimates": [
+          1,
+          1,
+          2,
+          1,
+          0
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "aaa",
+        "noise": 0.01,
+        "ppd": 10,
+        "reference": 4,
+        "estimates": [
+          5,
+          16,
+          17,
+          13,
+          13
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 1,
+          "minus_one": 0,
+          "further": 4
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.01,
+        "ppd": 10,
+        "reference": 4,
+        "estimates": [
+          18,
+          18,
+          18,
+          13,
+          19
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "loewner_gap",
+        "noise": 0.01,
+        "ppd": 10,
+        "reference": 4,
+        "estimates": [
+          101,
+          85,
+          94,
+          90,
+          95
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "stabilisation",
+        "noise": 0.01,
+        "ppd": 10,
+        "reference": 4,
+        "estimates": [
+          3,
+          1,
+          3,
+          2,
+          3
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 3,
+          "further": 2
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "aaa",
+        "noise": 0.03,
+        "ppd": 10,
+        "reference": 4,
+        "estimates": [
+          9,
+          15,
+          18,
+          15,
+          16
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.03,
+        "ppd": 10,
+        "reference": 4,
+        "estimates": [
+          17,
+          17,
+          13,
+          11,
+          18
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "loewner_gap",
+        "noise": 0.03,
+        "ppd": 10,
+        "reference": 4,
+        "estimates": [
+          101,
+          85,
+          94,
+          90,
+          95
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "stabilisation",
+        "noise": 0.03,
+        "ppd": 10,
+        "reference": 4,
+        "estimates": [
+          0,
+          3,
+          0,
+          1,
+          1
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 1,
+          "further": 4
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "aaa",
+        "noise": 0.0,
+        "ppd": 20,
+        "reference": 4,
+        "estimates": [
+          4
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.0,
+        "ppd": 20,
+        "reference": 4,
+        "estimates": [
+          4
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "loewner_gap",
+        "noise": 0.0,
+        "ppd": 20,
+        "reference": 4,
+        "estimates": [
+          4
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "stabilisation",
+        "noise": 0.0,
+        "ppd": 20,
+        "reference": 4,
+        "estimates": [
+          4
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "aaa",
+        "noise": 0.001,
+        "ppd": 20,
+        "reference": 4,
+        "estimates": [
+          22,
+          7,
+          30,
+          39,
+          37
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.001,
+        "ppd": 20,
+        "reference": 4,
+        "estimates": [
+          41,
+          40,
+          40,
+          41,
+          39
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "loewner_gap",
+        "noise": 0.001,
+        "ppd": 20,
+        "reference": 4,
+        "estimates": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "stabilisation",
+        "noise": 0.001,
+        "ppd": 20,
+        "reference": 4,
+        "estimates": [
+          3,
+          3,
+          2,
+          2,
+          3
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 3,
+          "further": 2
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "aaa",
+        "noise": 0.003,
+        "ppd": 20,
+        "reference": 4,
+        "estimates": [
+          28,
+          31,
+          29,
+          26,
+          28
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.003,
+        "ppd": 20,
+        "reference": 4,
+        "estimates": [
+          41,
+          39,
+          39,
+          40,
+          39
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "loewner_gap",
+        "noise": 0.003,
+        "ppd": 20,
+        "reference": 4,
+        "estimates": [
+          1,
+          1,
+          190,
+          169,
+          184
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "stabilisation",
+        "noise": 0.003,
+        "ppd": 20,
+        "reference": 4,
+        "estimates": [
+          2,
+          2,
+          1,
+          2,
+          3
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 1,
+          "further": 4
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "aaa",
+        "noise": 0.01,
+        "ppd": 20,
+        "reference": 4,
+        "estimates": [
+          27,
+          12,
+          31,
+          18,
+          25
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.01,
+        "ppd": 20,
+        "reference": 4,
+        "estimates": [
+          40,
+          38,
+          31,
+          33,
+          37
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "loewner_gap",
+        "noise": 0.01,
+        "ppd": 20,
+        "reference": 4,
+        "estimates": [
+          218,
+          212,
+          190,
+          169,
+          184
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "stabilisation",
+        "noise": 0.01,
+        "ppd": 20,
+        "reference": 4,
+        "estimates": [
+          1,
+          2,
+          2,
+          1,
+          0
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "aaa",
+        "noise": 0.03,
+        "ppd": 20,
+        "reference": 4,
+        "estimates": [
+          33,
+          33,
+          34,
+          41,
+          39
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.03,
+        "ppd": 20,
+        "reference": 4,
+        "estimates": [
+          31,
+          30,
+          25,
+          22,
+          30
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "loewner_gap",
+        "noise": 0.03,
+        "ppd": 20,
+        "reference": 4,
+        "estimates": [
+          218,
+          212,
+          190,
+          218,
+          184
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "4relax",
+        "estimator": "stabilisation",
+        "noise": 0.03,
+        "ppd": 20,
+        "reference": 4,
+        "estimates": [
+          0,
+          1,
+          0,
+          2,
+          1
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "aaa",
+        "noise": 0.0,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          2
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 1,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.0,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          1
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "loewner_gap",
+        "noise": 0.0,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          1
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "stabilisation",
+        "noise": 0.0,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          1
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "aaa",
+        "noise": 0.001,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          1,
+          0,
+          1,
+          1,
+          0
+        ],
+        "buckets": {
+          "exact": 3,
+          "plus_one": 0,
+          "minus_one": 2,
+          "further": 0
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.001,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          1,
+          2,
+          2,
+          3,
+          2
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 3,
+          "minus_one": 0,
+          "further": 1
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "loewner_gap",
+        "noise": 0.001,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "buckets": {
+          "exact": 5,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "stabilisation",
+        "noise": 0.001,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          0,
+          0,
+          1,
+          2,
+          0
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 1,
+          "minus_one": 3,
+          "further": 0
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "aaa",
+        "noise": 0.003,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          1,
+          0,
+          1,
+          1,
+          0
+        ],
+        "buckets": {
+          "exact": 3,
+          "plus_one": 0,
+          "minus_one": 2,
+          "further": 0
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.003,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          1,
+          2,
+          2,
+          3,
+          2
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 3,
+          "minus_one": 0,
+          "further": 1
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "loewner_gap",
+        "noise": 0.003,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "buckets": {
+          "exact": 5,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "stabilisation",
+        "noise": 0.003,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          0,
+          0,
+          1,
+          2,
+          0
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 1,
+          "minus_one": 3,
+          "further": 0
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "aaa",
+        "noise": 0.01,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          1,
+          0,
+          1,
+          1,
+          0
+        ],
+        "buckets": {
+          "exact": 3,
+          "plus_one": 0,
+          "minus_one": 2,
+          "further": 0
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.01,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          1,
+          2,
+          2,
+          3,
+          2
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 3,
+          "minus_one": 0,
+          "further": 1
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "loewner_gap",
+        "noise": 0.01,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "buckets": {
+          "exact": 5,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "stabilisation",
+        "noise": 0.01,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          0,
+          0,
+          1,
+          2,
+          0
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 1,
+          "minus_one": 3,
+          "further": 0
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "aaa",
+        "noise": 0.03,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          1,
+          0,
+          1,
+          1,
+          0
+        ],
+        "buckets": {
+          "exact": 3,
+          "plus_one": 0,
+          "minus_one": 2,
+          "further": 0
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.03,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          1,
+          2,
+          2,
+          3,
+          2
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 3,
+          "minus_one": 0,
+          "further": 1
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "loewner_gap",
+        "noise": 0.03,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          1,
+          1,
+          1,
+          3,
+          1
+        ],
+        "buckets": {
+          "exact": 4,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 1
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "stabilisation",
+        "noise": 0.03,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          0,
+          0,
+          1,
+          2,
+          0
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 1,
+          "minus_one": 3,
+          "further": 0
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "aaa",
+        "noise": 0.0,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          2
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 1,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.0,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          1
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "loewner_gap",
+        "noise": 0.0,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          1
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "stabilisation",
+        "noise": 0.0,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          1
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "aaa",
+        "noise": 0.001,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          1,
+          0,
+          1,
+          1,
+          0
+        ],
+        "buckets": {
+          "exact": 3,
+          "plus_one": 0,
+          "minus_one": 2,
+          "further": 0
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.001,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          1,
+          3,
+          5,
+          3,
+          4
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 4
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "loewner_gap",
+        "noise": 0.001,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "buckets": {
+          "exact": 5,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "stabilisation",
+        "noise": 0.001,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          0,
+          0,
+          5,
+          1,
+          1
+        ],
+        "buckets": {
+          "exact": 2,
+          "plus_one": 0,
+          "minus_one": 2,
+          "further": 1
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "aaa",
+        "noise": 0.003,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          1,
+          0,
+          1,
+          1,
+          0
+        ],
+        "buckets": {
+          "exact": 3,
+          "plus_one": 0,
+          "minus_one": 2,
+          "further": 0
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.003,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          1,
+          3,
+          5,
+          3,
+          4
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 4
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "loewner_gap",
+        "noise": 0.003,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "buckets": {
+          "exact": 5,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "stabilisation",
+        "noise": 0.003,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          0,
+          0,
+          5,
+          2,
+          1
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 1,
+          "minus_one": 2,
+          "further": 1
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "aaa",
+        "noise": 0.01,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          1,
+          0,
+          1,
+          1,
+          0
+        ],
+        "buckets": {
+          "exact": 3,
+          "plus_one": 0,
+          "minus_one": 2,
+          "further": 0
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.01,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          1,
+          3,
+          5,
+          3,
+          4
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 4
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "loewner_gap",
+        "noise": 0.01,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "buckets": {
+          "exact": 5,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "stabilisation",
+        "noise": 0.01,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          0,
+          0,
+          5,
+          1,
+          0
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 3,
+          "further": 1
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "aaa",
+        "noise": 0.03,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          1,
+          0,
+          1,
+          1,
+          0
+        ],
+        "buckets": {
+          "exact": 3,
+          "plus_one": 0,
+          "minus_one": 2,
+          "further": 0
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.03,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          1,
+          3,
+          5,
+          3,
+          4
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 4
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "loewner_gap",
+        "noise": 0.03,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          1,
+          1,
+          1,
+          3,
+          1
+        ],
+        "buckets": {
+          "exact": 4,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 1
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "stabilisation",
+        "noise": 0.03,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          0,
+          0,
+          4,
+          1,
+          0
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 3,
+          "further": 1
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "aaa",
+        "noise": 0.0,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          2
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 1,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.0,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          1
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "loewner_gap",
+        "noise": 0.0,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          1
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "stabilisation",
+        "noise": 0.0,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          2
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 1,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "aaa",
+        "noise": 0.001,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          1,
+          1,
+          1,
+          3,
+          0
+        ],
+        "buckets": {
+          "exact": 3,
+          "plus_one": 0,
+          "minus_one": 1,
+          "further": 1
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.001,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          5,
+          7,
+          7,
+          9,
+          6
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "loewner_gap",
+        "noise": 0.001,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "buckets": {
+          "exact": 5,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "stabilisation",
+        "noise": 0.001,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          3,
+          1,
+          2,
+          3,
+          2
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 2,
+          "minus_one": 0,
+          "further": 2
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "aaa",
+        "noise": 0.003,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          1,
+          1,
+          1,
+          3,
+          0
+        ],
+        "buckets": {
+          "exact": 3,
+          "plus_one": 0,
+          "minus_one": 1,
+          "further": 1
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.003,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          5,
+          7,
+          7,
+          9,
+          6
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "loewner_gap",
+        "noise": 0.003,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "buckets": {
+          "exact": 5,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "stabilisation",
+        "noise": 0.003,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          3,
+          1,
+          2,
+          3,
+          2
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 2,
+          "minus_one": 0,
+          "further": 2
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "aaa",
+        "noise": 0.01,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          1,
+          1,
+          1,
+          3,
+          0
+        ],
+        "buckets": {
+          "exact": 3,
+          "plus_one": 0,
+          "minus_one": 1,
+          "further": 1
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.01,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          5,
+          7,
+          7,
+          9,
+          6
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "loewner_gap",
+        "noise": 0.01,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "buckets": {
+          "exact": 5,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "stabilisation",
+        "noise": 0.01,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          3,
+          1,
+          2,
+          3,
+          2
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 2,
+          "minus_one": 0,
+          "further": 2
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "aaa",
+        "noise": 0.03,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          1,
+          1,
+          1,
+          3,
+          0
+        ],
+        "buckets": {
+          "exact": 3,
+          "plus_one": 0,
+          "minus_one": 1,
+          "further": 1
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "loewner_threshold",
+        "noise": 0.03,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          5,
+          7,
+          7,
+          9,
+          6
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "loewner_gap",
+        "noise": 0.03,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          1,
+          1,
+          1,
+          9,
+          1
+        ],
+        "buckets": {
+          "exact": 4,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 1
+        }
+      },
+      {
+        "truth": "rcl_relax",
+        "estimator": "stabilisation",
+        "noise": 0.03,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          3,
+          0,
+          2,
+          3,
+          2
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 2,
+          "minus_one": 1,
+          "further": 2
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "aaa",
+        "noise": 0.0,
+        "ppd": 5,
+        "reference": 27,
+        "estimates": [
+          27
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "loewner_threshold",
+        "noise": 0.0,
+        "ppd": 5,
+        "reference": 40,
+        "estimates": [
+          38
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 1
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "loewner_gap",
+        "noise": 0.0,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          55
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 1
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "stabilisation",
+        "noise": 0.0,
+        "ppd": 5,
+        "reference": 0,
+        "estimates": [
+          0
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "aaa",
+        "noise": 0.001,
+        "ppd": 5,
+        "reference": 27,
+        "estimates": [
+          13,
+          13,
+          18,
+          16,
+          18
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "loewner_threshold",
+        "noise": 0.001,
+        "ppd": 5,
+        "reference": 40,
+        "estimates": [
+          17,
+          17,
+          16,
+          14,
+          17
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "loewner_gap",
+        "noise": 0.001,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          42,
+          55,
+          55,
+          2,
+          55
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 1,
+          "minus_one": 0,
+          "further": 4
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "stabilisation",
+        "noise": 0.001,
+        "ppd": 5,
+        "reference": 0,
+        "estimates": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "buckets": {
+          "exact": 5,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "aaa",
+        "noise": 0.003,
+        "ppd": 5,
+        "reference": 27,
+        "estimates": [
+          11,
+          13,
+          9,
+          11,
+          19
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "loewner_threshold",
+        "noise": 0.003,
+        "ppd": 5,
+        "reference": 40,
+        "estimates": [
+          14,
+          13,
+          13,
+          12,
+          14
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "loewner_gap",
+        "noise": 0.003,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          42,
+          55,
+          4,
+          54,
+          55
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "stabilisation",
+        "noise": 0.003,
+        "ppd": 5,
+        "reference": 0,
+        "estimates": [
+          4,
+          0,
+          3,
+          0,
+          2
+        ],
+        "buckets": {
+          "exact": 2,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 3
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "aaa",
+        "noise": 0.01,
+        "ppd": 5,
+        "reference": 27,
+        "estimates": [
+          12,
+          16,
+          10,
+          15,
+          7
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "loewner_threshold",
+        "noise": 0.01,
+        "ppd": 5,
+        "reference": 40,
+        "estimates": [
+          13,
+          11,
+          9,
+          10,
+          10
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "loewner_gap",
+        "noise": 0.01,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          55,
+          55,
+          4,
+          2,
+          42
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 1,
+          "minus_one": 0,
+          "further": 4
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "stabilisation",
+        "noise": 0.01,
+        "ppd": 5,
+        "reference": 0,
+        "estimates": [
+          3,
+          0,
+          2,
+          0,
+          4
+        ],
+        "buckets": {
+          "exact": 2,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 3
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "aaa",
+        "noise": 0.03,
+        "ppd": 5,
+        "reference": 27,
+        "estimates": [
+          12,
+          14,
+          7,
+          16,
+          12
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "loewner_threshold",
+        "noise": 0.03,
+        "ppd": 5,
+        "reference": 40,
+        "estimates": [
+          9,
+          8,
+          6,
+          7,
+          8
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "loewner_gap",
+        "noise": 0.03,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          55,
+          55,
+          4,
+          54,
+          34
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "stabilisation",
+        "noise": 0.03,
+        "ppd": 5,
+        "reference": 0,
+        "estimates": [
+          2,
+          1,
+          0,
+          0,
+          1
+        ],
+        "buckets": {
+          "exact": 2,
+          "plus_one": 2,
+          "minus_one": 0,
+          "further": 1
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "aaa",
+        "noise": 0.0,
+        "ppd": 10,
+        "reference": 27,
+        "estimates": [
+          27
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "loewner_threshold",
+        "noise": 0.0,
+        "ppd": 10,
+        "reference": 40,
+        "estimates": [
+          40
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "loewner_gap",
+        "noise": 0.0,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          1
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "stabilisation",
+        "noise": 0.0,
+        "ppd": 10,
+        "reference": 0,
+        "estimates": [
+          0
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "aaa",
+        "noise": 0.001,
+        "ppd": 10,
+        "reference": 27,
+        "estimates": [
+          16,
+          23,
+          35,
+          24,
+          32
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "loewner_threshold",
+        "noise": 0.001,
+        "ppd": 10,
+        "reference": 40,
+        "estimates": [
+          31,
+          33,
+          29,
+          26,
+          33
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "loewner_gap",
+        "noise": 0.001,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          76,
+          108,
+          44,
+          80,
+          75
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "stabilisation",
+        "noise": 0.001,
+        "ppd": 10,
+        "reference": 0,
+        "estimates": [
+          0,
+          3,
+          0,
+          0,
+          0
+        ],
+        "buckets": {
+          "exact": 4,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 1
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "aaa",
+        "noise": 0.003,
+        "ppd": 10,
+        "reference": 27,
+        "estimates": [
+          24,
+          31,
+          32,
+          34,
+          36
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "loewner_threshold",
+        "noise": 0.003,
+        "ppd": 10,
+        "reference": 40,
+        "estimates": [
+          27,
+          27,
+          27,
+          20,
+          28
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "loewner_gap",
+        "noise": 0.003,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          58,
+          108,
+          72,
+          2,
+          18
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 1,
+          "minus_one": 0,
+          "further": 4
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "stabilisation",
+        "noise": 0.003,
+        "ppd": 10,
+        "reference": 0,
+        "estimates": [
+          3,
+          3,
+          4,
+          0,
+          3
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 4
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "aaa",
+        "noise": 0.01,
+        "ppd": 10,
+        "reference": 27,
+        "estimates": [
+          27,
+          24,
+          30,
+          32,
+          22
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 4
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "loewner_threshold",
+        "noise": 0.01,
+        "ppd": 10,
+        "reference": 40,
+        "estimates": [
+          23,
+          20,
+          17,
+          13,
+          20
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "loewner_gap",
+        "noise": 0.01,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          109,
+          58,
+          69,
+          2,
+          18
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 1,
+          "minus_one": 0,
+          "further": 4
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "stabilisation",
+        "noise": 0.01,
+        "ppd": 10,
+        "reference": 0,
+        "estimates": [
+          0,
+          0,
+          0,
+          3,
+          3
+        ],
+        "buckets": {
+          "exact": 3,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 2
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "aaa",
+        "noise": 0.03,
+        "ppd": 10,
+        "reference": 27,
+        "estimates": [
+          26,
+          13,
+          16,
+          26,
+          14
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 2,
+          "further": 3
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "loewner_threshold",
+        "noise": 0.03,
+        "ppd": 10,
+        "reference": 40,
+        "estimates": [
+          16,
+          16,
+          12,
+          10,
+          18
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "loewner_gap",
+        "noise": 0.03,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          109,
+          108,
+          68,
+          2,
+          18
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 1,
+          "minus_one": 0,
+          "further": 4
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "stabilisation",
+        "noise": 0.03,
+        "ppd": 10,
+        "reference": 0,
+        "estimates": [
+          3,
+          2,
+          1,
+          0,
+          1
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 2,
+          "minus_one": 0,
+          "further": 2
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "aaa",
+        "noise": 0.0,
+        "ppd": 20,
+        "reference": 27,
+        "estimates": [
+          27
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "loewner_threshold",
+        "noise": 0.0,
+        "ppd": 20,
+        "reference": 40,
+        "estimates": [
+          40
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "loewner_gap",
+        "noise": 0.0,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          1
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "stabilisation",
+        "noise": 0.0,
+        "ppd": 20,
+        "reference": 0,
+        "estimates": [
+          0
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "aaa",
+        "noise": 0.001,
+        "ppd": 20,
+        "reference": 27,
+        "estimates": [
+          50,
+          55,
+          46,
+          59,
+          61
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "loewner_threshold",
+        "noise": 0.001,
+        "ppd": 20,
+        "reference": 40,
+        "estimates": [
+          61,
+          59,
+          55,
+          52,
+          57
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "loewner_gap",
+        "noise": 0.001,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          218,
+          132,
+          153,
+          218,
+          214
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "stabilisation",
+        "noise": 0.001,
+        "ppd": 20,
+        "reference": 0,
+        "estimates": [
+          3,
+          1,
+          0,
+          0,
+          0
+        ],
+        "buckets": {
+          "exact": 3,
+          "plus_one": 1,
+          "minus_one": 0,
+          "further": 1
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "aaa",
+        "noise": 0.003,
+        "ppd": 20,
+        "reference": 27,
+        "estimates": [
+          48,
+          55,
+          54,
+          58,
+          51
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "loewner_threshold",
+        "noise": 0.003,
+        "ppd": 20,
+        "reference": 40,
+        "estimates": [
+          50,
+          51,
+          45,
+          41,
+          46
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 1,
+          "minus_one": 0,
+          "further": 4
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "loewner_gap",
+        "noise": 0.003,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          218,
+          132,
+          153,
+          219,
+          170
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "stabilisation",
+        "noise": 0.003,
+        "ppd": 20,
+        "reference": 0,
+        "estimates": [
+          2,
+          2,
+          0,
+          0,
+          3
+        ],
+        "buckets": {
+          "exact": 2,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 3
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "aaa",
+        "noise": 0.01,
+        "ppd": 20,
+        "reference": 27,
+        "estimates": [
+          46,
+          48,
+          47,
+          55,
+          52
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "loewner_threshold",
+        "noise": 0.01,
+        "ppd": 20,
+        "reference": 40,
+        "estimates": [
+          42,
+          40,
+          32,
+          32,
+          39
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 1,
+          "further": 3
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "loewner_gap",
+        "noise": 0.01,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          218,
+          131,
+          2,
+          219,
+          219
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 1,
+          "minus_one": 0,
+          "further": 4
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "stabilisation",
+        "noise": 0.01,
+        "ppd": 20,
+        "reference": 0,
+        "estimates": [
+          1,
+          0,
+          2,
+          0,
+          1
+        ],
+        "buckets": {
+          "exact": 2,
+          "plus_one": 2,
+          "minus_one": 0,
+          "further": 1
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "aaa",
+        "noise": 0.03,
+        "ppd": 20,
+        "reference": 27,
+        "estimates": [
+          53,
+          54,
+          43,
+          57,
+          59
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "loewner_threshold",
+        "noise": 0.03,
+        "ppd": 20,
+        "reference": 40,
+        "estimates": [
+          32,
+          30,
+          24,
+          22,
+          30
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "loewner_gap",
+        "noise": 0.03,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          218,
+          131,
+          2,
+          219,
+          146
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 1,
+          "minus_one": 0,
+          "further": 4
+        }
+      },
+      {
+        "truth": "cpe",
+        "estimator": "stabilisation",
+        "noise": 0.03,
+        "ppd": 20,
+        "reference": 0,
+        "estimates": [
+          0,
+          0,
+          0,
+          0,
+          2
+        ],
+        "buckets": {
+          "exact": 4,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 1
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "aaa",
+        "noise": 0.0,
+        "ppd": 5,
+        "reference": 22,
+        "estimates": [
+          22
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "loewner_threshold",
+        "noise": 0.0,
+        "ppd": 5,
+        "reference": 23,
+        "estimates": [
+          20
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 1
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "loewner_gap",
+        "noise": 0.0,
+        "ppd": 5,
+        "reference": 2,
+        "estimates": [
+          55
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 1
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "stabilisation",
+        "noise": 0.0,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          1
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "aaa",
+        "noise": 0.001,
+        "ppd": 5,
+        "reference": 22,
+        "estimates": [
+          9,
+          9,
+          9,
+          9,
+          9
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "loewner_threshold",
+        "noise": 0.001,
+        "ppd": 5,
+        "reference": 23,
+        "estimates": [
+          5,
+          5,
+          5,
+          5,
+          5
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "loewner_gap",
+        "noise": 0.001,
+        "ppd": 5,
+        "reference": 2,
+        "estimates": [
+          2,
+          55,
+          2,
+          2,
+          2
+        ],
+        "buckets": {
+          "exact": 4,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 1
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "stabilisation",
+        "noise": 0.001,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          1,
+          1,
+          3,
+          1,
+          1
+        ],
+        "buckets": {
+          "exact": 4,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 1
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "aaa",
+        "noise": 0.003,
+        "ppd": 5,
+        "reference": 22,
+        "estimates": [
+          8,
+          8,
+          7,
+          7,
+          8
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "loewner_threshold",
+        "noise": 0.003,
+        "ppd": 5,
+        "reference": 23,
+        "estimates": [
+          4,
+          4,
+          4,
+          5,
+          4
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "loewner_gap",
+        "noise": 0.003,
+        "ppd": 5,
+        "reference": 2,
+        "estimates": [
+          2,
+          55,
+          2,
+          2,
+          2
+        ],
+        "buckets": {
+          "exact": 4,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 1
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "stabilisation",
+        "noise": 0.003,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          0,
+          1,
+          3,
+          1,
+          1
+        ],
+        "buckets": {
+          "exact": 3,
+          "plus_one": 0,
+          "minus_one": 1,
+          "further": 1
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "aaa",
+        "noise": 0.01,
+        "ppd": 5,
+        "reference": 22,
+        "estimates": [
+          7,
+          8,
+          7,
+          7,
+          6
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "loewner_threshold",
+        "noise": 0.01,
+        "ppd": 5,
+        "reference": 23,
+        "estimates": [
+          4,
+          3,
+          4,
+          4,
+          4
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "loewner_gap",
+        "noise": 0.01,
+        "ppd": 5,
+        "reference": 2,
+        "estimates": [
+          2,
+          55,
+          2,
+          1,
+          2
+        ],
+        "buckets": {
+          "exact": 3,
+          "plus_one": 0,
+          "minus_one": 1,
+          "further": 1
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "stabilisation",
+        "noise": 0.01,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          0,
+          0,
+          0,
+          1,
+          0
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 4,
+          "further": 0
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "aaa",
+        "noise": 0.03,
+        "ppd": 5,
+        "reference": 22,
+        "estimates": [
+          8,
+          7,
+          6,
+          5,
+          7
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "loewner_threshold",
+        "noise": 0.03,
+        "ppd": 5,
+        "reference": 23,
+        "estimates": [
+          3,
+          2,
+          4,
+          4,
+          3
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "loewner_gap",
+        "noise": 0.03,
+        "ppd": 5,
+        "reference": 2,
+        "estimates": [
+          55,
+          55,
+          5,
+          54,
+          1
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 1,
+          "further": 4
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "stabilisation",
+        "noise": 0.03,
+        "ppd": 5,
+        "reference": 1,
+        "estimates": [
+          1,
+          1,
+          0,
+          1,
+          1
+        ],
+        "buckets": {
+          "exact": 4,
+          "plus_one": 0,
+          "minus_one": 1,
+          "further": 0
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "aaa",
+        "noise": 0.0,
+        "ppd": 10,
+        "reference": 22,
+        "estimates": [
+          24
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 1
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "loewner_threshold",
+        "noise": 0.0,
+        "ppd": 10,
+        "reference": 23,
+        "estimates": [
+          22
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 1,
+          "further": 0
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "loewner_gap",
+        "noise": 0.0,
+        "ppd": 10,
+        "reference": 2,
+        "estimates": [
+          2
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "stabilisation",
+        "noise": 0.0,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          1
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "aaa",
+        "noise": 0.001,
+        "ppd": 10,
+        "reference": 22,
+        "estimates": [
+          9,
+          9,
+          8,
+          8,
+          9
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "loewner_threshold",
+        "noise": 0.001,
+        "ppd": 10,
+        "reference": 23,
+        "estimates": [
+          7,
+          7,
+          7,
+          8,
+          8
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "loewner_gap",
+        "noise": 0.001,
+        "ppd": 10,
+        "reference": 2,
+        "estimates": [
+          2,
+          2,
+          2,
+          2,
+          2
+        ],
+        "buckets": {
+          "exact": 5,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "stabilisation",
+        "noise": 0.001,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          1,
+          3,
+          1,
+          2,
+          1
+        ],
+        "buckets": {
+          "exact": 3,
+          "plus_one": 1,
+          "minus_one": 0,
+          "further": 1
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "aaa",
+        "noise": 0.003,
+        "ppd": 10,
+        "reference": 22,
+        "estimates": [
+          8,
+          8,
+          8,
+          7,
+          8
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "loewner_threshold",
+        "noise": 0.003,
+        "ppd": 10,
+        "reference": 23,
+        "estimates": [
+          7,
+          6,
+          7,
+          8,
+          7
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "loewner_gap",
+        "noise": 0.003,
+        "ppd": 10,
+        "reference": 2,
+        "estimates": [
+          2,
+          2,
+          2,
+          2,
+          2
+        ],
+        "buckets": {
+          "exact": 5,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "stabilisation",
+        "noise": 0.003,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          1,
+          2,
+          0,
+          0,
+          0
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 1,
+          "minus_one": 3,
+          "further": 0
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "aaa",
+        "noise": 0.01,
+        "ppd": 10,
+        "reference": 22,
+        "estimates": [
+          8,
+          9,
+          6,
+          8,
+          7
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "loewner_threshold",
+        "noise": 0.01,
+        "ppd": 10,
+        "reference": 23,
+        "estimates": [
+          6,
+          6,
+          7,
+          7,
+          6
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "loewner_gap",
+        "noise": 0.01,
+        "ppd": 10,
+        "reference": 2,
+        "estimates": [
+          2,
+          2,
+          1,
+          1,
+          2
+        ],
+        "buckets": {
+          "exact": 3,
+          "plus_one": 0,
+          "minus_one": 2,
+          "further": 0
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "stabilisation",
+        "noise": 0.01,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          0,
+          0,
+          0,
+          1,
+          0
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 4,
+          "further": 0
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "aaa",
+        "noise": 0.03,
+        "ppd": 10,
+        "reference": 22,
+        "estimates": [
+          8,
+          16,
+          8,
+          10,
+          8
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "loewner_threshold",
+        "noise": 0.03,
+        "ppd": 10,
+        "reference": 23,
+        "estimates": [
+          6,
+          5,
+          7,
+          6,
+          6
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "loewner_gap",
+        "noise": 0.03,
+        "ppd": 10,
+        "reference": 2,
+        "estimates": [
+          1,
+          1,
+          1,
+          10,
+          1
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 4,
+          "further": 1
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "stabilisation",
+        "noise": 0.03,
+        "ppd": 10,
+        "reference": 1,
+        "estimates": [
+          2,
+          0,
+          0,
+          0,
+          1
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 1,
+          "minus_one": 3,
+          "further": 0
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "aaa",
+        "noise": 0.0,
+        "ppd": 20,
+        "reference": 22,
+        "estimates": [
+          22
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "loewner_threshold",
+        "noise": 0.0,
+        "ppd": 20,
+        "reference": 23,
+        "estimates": [
+          23
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "loewner_gap",
+        "noise": 0.0,
+        "ppd": 20,
+        "reference": 2,
+        "estimates": [
+          2
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "stabilisation",
+        "noise": 0.0,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          1
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "aaa",
+        "noise": 0.001,
+        "ppd": 20,
+        "reference": 22,
+        "estimates": [
+          10,
+          9,
+          10,
+          14,
+          11
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "loewner_threshold",
+        "noise": 0.001,
+        "ppd": 20,
+        "reference": 23,
+        "estimates": [
+          12,
+          12,
+          12,
+          12,
+          15
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "loewner_gap",
+        "noise": 0.001,
+        "ppd": 20,
+        "reference": 2,
+        "estimates": [
+          2,
+          2,
+          2,
+          2,
+          2
+        ],
+        "buckets": {
+          "exact": 5,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 0
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "stabilisation",
+        "noise": 0.001,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          3,
+          3,
+          0,
+          0,
+          2
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 1,
+          "minus_one": 2,
+          "further": 2
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "aaa",
+        "noise": 0.003,
+        "ppd": 20,
+        "reference": 22,
+        "estimates": [
+          7,
+          9,
+          9,
+          14,
+          12
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "loewner_threshold",
+        "noise": 0.003,
+        "ppd": 20,
+        "reference": 23,
+        "estimates": [
+          12,
+          11,
+          12,
+          12,
+          14
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "loewner_gap",
+        "noise": 0.003,
+        "ppd": 20,
+        "reference": 2,
+        "estimates": [
+          2,
+          2,
+          2,
+          1,
+          2
+        ],
+        "buckets": {
+          "exact": 4,
+          "plus_one": 0,
+          "minus_one": 1,
+          "further": 0
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "stabilisation",
+        "noise": 0.003,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          1,
+          0,
+          0,
+          0,
+          0
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 4,
+          "further": 0
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "aaa",
+        "noise": 0.01,
+        "ppd": 20,
+        "reference": 22,
+        "estimates": [
+          11,
+          9,
+          15,
+          11,
+          17
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "loewner_threshold",
+        "noise": 0.01,
+        "ppd": 20,
+        "reference": 23,
+        "estimates": [
+          12,
+          11,
+          11,
+          11,
+          15
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "loewner_gap",
+        "noise": 0.01,
+        "ppd": 20,
+        "reference": 2,
+        "estimates": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 5,
+          "further": 0
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "stabilisation",
+        "noise": 0.01,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          1,
+          0,
+          1,
+          1,
+          0
+        ],
+        "buckets": {
+          "exact": 3,
+          "plus_one": 0,
+          "minus_one": 2,
+          "further": 0
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "aaa",
+        "noise": 0.03,
+        "ppd": 20,
+        "reference": 22,
+        "estimates": [
+          19,
+          13,
+          19,
+          23,
+          18
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 1,
+          "minus_one": 0,
+          "further": 4
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "loewner_threshold",
+        "noise": 0.03,
+        "ppd": 20,
+        "reference": 23,
+        "estimates": [
+          11,
+          10,
+          10,
+          10,
+          14
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 0,
+          "further": 5
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "loewner_gap",
+        "noise": 0.03,
+        "ppd": 20,
+        "reference": 2,
+        "estimates": [
+          1,
+          1,
+          1,
+          10,
+          1
+        ],
+        "buckets": {
+          "exact": 0,
+          "plus_one": 0,
+          "minus_one": 4,
+          "further": 1
+        }
+      },
+      {
+        "truth": "randles_warburg",
+        "estimator": "stabilisation",
+        "noise": 0.03,
+        "ppd": 20,
+        "reference": 1,
+        "estimates": [
+          0,
+          0,
+          1,
+          4,
+          0
+        ],
+        "buckets": {
+          "exact": 1,
+          "plus_one": 0,
+          "minus_one": 3,
+          "further": 1
+        }
+      }
+    ]
+  },
+  "headline_1pct_10ppd": {
+    "aaa": 0.12,
+    "loewner_threshold": 0.04,
+    "loewner_gap": 0.2,
+    "stabilisation": 0.16
+  },
+  "fractional_growth": {
+    "cpe": {
+      "rtol_growth": [
+        {
+          "x": 0.01,
+          "order": 6
+        },
+        {
+          "x": 0.003,
+          "order": 8
+        },
+        {
+          "x": 0.001,
+          "order": 9
+        },
+        {
+          "x": 0.0003,
+          "order": 12
+        },
+        {
+          "x": 0.0001,
+          "order": 15
+        },
+        {
+          "x": 1e-06,
+          "order": 27
+        }
+      ],
+      "bandwidth_growth": [
+        {
+          "x": 100000000000.0,
+          "order": 15
+        },
+        {
+          "x": 10000000000000.0,
+          "order": 15
+        },
+        {
+          "x": 1000000000000000.0,
+          "order": 16
+        },
+        {
+          "x": 9.999999999999998e+16,
+          "order": 16
+        },
+        {
+          "x": 1e+19,
+          "order": 15
+        }
+      ]
+    },
+    "randles_warburg": {
+      "rtol_growth": [
+        {
+          "x": 0.01,
+          "order": 8
+        },
+        {
+          "x": 0.003,
+          "order": 9
+        },
+        {
+          "x": 0.001,
+          "order": 9
+        },
+        {
+          "x": 0.0003,
+          "order": 12
+        },
+        {
+          "x": 0.0001,
+          "order": 14
+        },
+        {
+          "x": 1e-06,
+          "order": 22
+        }
+      ],
+      "bandwidth_growth": [
+        {
+          "x": 100000000000.0,
+          "order": 14
+        },
+        {
+          "x": 10000000000000.0,
+          "order": 15
+        },
+        {
+          "x": 1000000000000000.0,
+          "order": 15
+        },
+        {
+          "x": 9.999999999999998e+16,
+          "order": 15
+        },
+        {
+          "x": 1e+19,
+          "order": 15
+        }
+      ]
+    }
+  },
+  "elapsed_seconds": 280.7420892715454
+}

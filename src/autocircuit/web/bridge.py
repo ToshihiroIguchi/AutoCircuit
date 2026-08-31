@@ -308,6 +308,8 @@ def _op_discover_start(payload: dict[str, Any]) -> dict[str, Any]:
         n_refine=(
             None if payload.get("n_refine") is None else int(payload["n_refine"])
         ),
+        max_elements=int(payload.get("max_elements", 7)),
+        growth_width=int(payload.get("growth_width", job.GROWTH_DEFAULT)),
         screen_chunk=int(payload.get("screen_chunk", job.SCREEN_CHUNK)),
         refit_chunk=int(payload.get("refit_chunk", job.REFIT_CHUNK)),
     )

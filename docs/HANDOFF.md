@@ -2517,3 +2517,124 @@ The AutoEIS install is **outside this project** at `C:\Users\toshi\python\autoei
 EquivalentCircuits.jl 0.3.1@master come from `juliapkg`. Nothing of it may reach `pyproject.toml`.
 `benchmarks/autoeis_round/README.md` has the commands; `run_round.ps1` runs the three steps
 unattended and every step resumes by re-issuing the identical command.
+
+## 33. Six elements and up — the growth stage, and two defects it uncovered on the way
+
+`docs/TOPOLOGY_6PLUS_PLAN.md` is the plan and the results; this is the part a reader needs before
+touching the code. The round asked one question — can this project recover a topology of six
+elements or more from the spectrum alone — and the honest first answer was that "six elements does
+not work" is **four** independent problems, not one:
+
+* **(I) information** — does the spectrum distinguish six elements from five at all;
+* **(S) search** — where it does, is the class reached;
+* **(P) parameters** — is it fitted well enough to *score*;
+* **(R) reporting** — is it then recommended.
+
+Fixing any one alone changes nothing, which is what happened to `EVOLVE_SEARCH_PLAN.md`: it fixed
+(S) and the user-visible number did not move.
+
+### What was built
+
+* **A growth stage above the exhaustive limit.** `discover(growth_width=...)`, `--growth-width`,
+  and `growth_plan()` in `core/discover.py`. Above `DEFAULT_EXHAUSTIVE_LIMIT` the search stops
+  enumerating and grows: every one-element extension of the best `GROWTH_WIDTH` topologies of the
+  last completed level, screened, best `GROWTH_WIDTH` kept, repeat. It runs **between** the two
+  tiers because it needs the tier-1 ranking of a completed level — which `_exhaustive` used to
+  compute and throw away — and both stages then feed one shortlist under one per-size quota.
+* **`growth_plan` is a generator, for the reason `screen_plan` is.** It yields `ScreenTask`
+  batches and receives costs, so `_grow_all` (in-process and pooled) and `DiscoveryJob`
+  (the browser, across Web Workers) are two *drivers* of one set of decisions rather than two
+  searches. `DiscoveryJob.next_screen` hands out growth batches once the enumeration is
+  exhausted, so JavaScript never learns there are two phases.
+* **A restart lever on the tier-1 screen.** `fit.screen(..., restarts=)`, `ScreenBudget.restarts`,
+  `discover(screen_restarts=)`. **The default is unchanged at 1**, deliberately — see below.
+* **`benchmarks/six_plus/`**: `truths.py` (nine pre-registered truths), `oracle.py` (X8),
+  `order.py` (X9), `recovery.py` (X4, end to end), `build_arenas.py`.
+* **`tests/test_discover_growth.py`**, whose subject is mostly what the report may *claim*.
+
+### What must not be re-derived
+
+- **`complete_up_to` describes the enumeration and growth may never raise it.**
+  `DiscoveryResult.grown_to` is the separate, weaker number, and `completeness()` prints the two
+  as two sentences with "That is not a completeness claim" between them. This is not decoration:
+  the browser's `DiscoveryJob` derives coverage from the length of its screened list, growth
+  appends to that list, and the first version of that code therefore reported a **higher**
+  completeness than it had earned. `DiscoveryJob._enumerated` exists only to stop that, and
+  `tests/test_discover_growth.py` pins it from both front ends.
+- **The tier-1 screen's verdict is a basin lottery for a minority of topologies, and budget does
+  not fix it.** [measured] `p(p(R1,C1)-R2,C2)-R3` screens at 0.0141 or at 33.78 depending only on
+  the seed — a factor of 2400, with the good value being the right one — and raising `popsize`
+  8 to 40 and `maxiter` 40 to 400 moves *neither* number. Across 360 sampled topologies from three
+  spectra: one seed is within 1% of the best of five for 72–80% of them, more than 2x off for
+  8–12%, more than 100x off for up to 1.7%. Mean ratio to best-of-five: **37.7 and 41.4 at one
+  seed, 1.06 and 1.16 at two.** The median is 1.0000 throughout — the damage is entirely in the
+  tail. So the remedy is another *draw*, not a longer one, and `SCREEN_RESTARTS` stays at 1 until
+  a recovery measurement says the doubled tier-1 cost buys truths: every number in this repository
+  was taken at 1, and raising it moves all of them.
+- **The feasibility filter assumes the measurement window reaches the model's asymptote.**
+  [measured] A five-element truth `C1-R1-L1-p(R2,C2)` whose inductive asymptote lies above the top
+  of its own sweep is **deleted before any fitting**: its reachable high-frequency band is (0, +1)
+  and the measured edge slope is −1.15, because the shunt capacitance is still falling faster than
+  the series inductance is rising at 1 GHz. It survives at `feasibility_budget=2`. Gate G3 of
+  `DISCOVERY_V2_PLAN.md` was measured on references whose windows *do* reach their asymptotes, so
+  this is a gap in the gate rather than a contradiction of it. Nothing was changed in the filter;
+  what changed is that `benchmarks/six_plus/truths.py` now refuses to admit a truth the filter
+  deletes, because such a truth measures the filter and not the search.
+- **The publication fitter converges on seven of eight cases and fails badly on the eighth, and
+  the eighth is a reference this project gates on.** [measured, 12 fitter seeds per cell, true
+  topology given, noise-free data, so the optimum is exactly zero] `restarts=5, popsize=20,
+  maxiter=400` is **12/12** from 4 elements / 4 parameters up to 8 elements / 8 parameters --
+  and **2/12** on `R1-L1-p(CPE1,R2-Wo1)-p(R3,C1)`, which is `LARGE_REFERENCES[2]`. Twenty
+  restarts take that to 12/12; four times the population-generations product takes it nowhere.
+  So the axis is **draws, not budget**, and gate EV1's arena has a second defect on top of the
+  under-determined parameter in each reference. The tier-1 screen is worse on the same case in
+  the same direction (1/12). None of it is indexed on element count or parameter count: 8
+  elements passes where 7 fails, and the two nine-parameter cases differ only in vocabulary.
+  Reading the first seven rows as an all-clear is a mistake this round made and corrected;
+  `TOPOLOGY_6PLUS_PLAN.md` section 5.6 keeps both readings.
+- **Rational-approximation order estimation does not survive noise, and the implementations are
+  not to blame.** [measured, `benchmarks/six_plus/order.py`] `scipy.interpolate.AAA`, a
+  hand-rolled Loewner pencil and a stabilisation diagram all return the exact relaxation count on
+  dense noise-free data (1, 2, 3, 4 on the RC ladders). At **0.1%** noise — ten times finer than
+  these spectra are measured at — AAA returns 22–34 poles for a one-relaxation truth and the
+  Loewner gap rule returns 90–101 of a 91-point sweep. Exact-recovery at 1% noise and 10
+  points/decade: AAA 0.12, Loewner-threshold 0.04, Loewner-gap 0.20, stabilisation 0.16. The
+  stabilisation diagram is the only one that does not explode, and it under-counts. **No
+  production code follows from this**; what does survive is that a fractional element announces
+  itself on clean data (22–27 poles for a CPE or Warburg against 1–4 for any RC ladder), which is
+  not yet measured under noise.
+- **Every truth in `LARGE_REFERENCES` carries a parameter the data does not contain.** [measured]
+  Weakest leverage at each reference's own window against 1% noise: three-block Maxwell-Wagner
+  `C3.C` 0.700%, capacitor+block `R1.R` 0.634%, Randles+ESL+block `C1.C` 0.758% — one parameter
+  below the noise in each. All three *small* references are clean (worst 1.551%). This matters
+  because `DiscoveryResult.recommended` prefers candidates with no unresolved parameter, so on
+  those references the parsimony rule disprefers the truth by design. Gate EV1's 5/9 is a number
+  about that arena and must be quoted with it.
+- **The tuner that picks the new truths' values maximises the weakest parameter's leverage, and
+  that is not sufficient on its own.** [measured] `ser6`'s first tuned set scored 9.903% and then
+  failed the fit outright — the tuner had driven `R2` to 296 kOhm, opening the parallel branch, so
+  the circuit collapses to a plain series R-C-L whose two capacitances are determined only by
+  their series combination. Every parameter still moves the spectrum alone; nothing can separate
+  them. `truths.py::tune_until_screened` therefore tunes *and checks*, and raises rather than
+  returning the least bad.
+- **X4 is complete (54/54), and growth is a shape-dependent effect, not a uniform win — which is
+  exactly why `GROWTH_DEFAULT` stays 0.** [measured, `benchmarks/six_plus/x4_recovery.json`] On
+  `par6`, `mix6`, `par7`, `mix7` growth is total: `base` is 0/12 reported at 28–34% residual
+  against a 1% noise floor, `grow` is 12/12 reported *and* recommended at 1.2–1.5%. On `ser6` and
+  `ser7` growth changes nothing that matters: `base`'s five-element residual is already 1.4–1.7%
+  — inside the noise floor, on a topology with one fewer element than the truth — so `grow`'s
+  numerically better six/seven-element fits (1.2–1.5%) never clear parsimony's bar, landing 0/6
+  recommended and `ser7` 0/3 even reported. This is not a search failure; it is the sixth element
+  being genuinely unresolved by that spectrum, and it is the reason a global default would be
+  dishonest for series-shaped parts. Full table in `TOPOLOGY_6PLUS_PLAN.md` §5.9.
+
+### Environment
+
+**`python` on PATH is now 3.12 and has no numpy.** The project interpreter is `py -3.13`
+(3.13.14, numpy 2.5.1, scipy 1.17.1). The 3.12 install is the one `autoeis` needs (section 32).
+Every command in this section is `py -3.13 ...` for that reason, and a
+`ModuleNotFoundError: numpy` from a script that worked yesterday means the wrong interpreter, not
+a broken environment.
+
+`scipy.interpolate.AAA` exists here (scipy >= 1.15) and is dependency-free, so the rational route
+was admissible under the numpy/scipy-only rule; it was measured and rejected, not skipped.

@@ -666,6 +666,7 @@ def screen(
     tol: float = 1e-4,
     margin_decades: float = 3.0,
     abandon_above: float = math.inf,
+    restarts: int = 1,
 ) -> float:
     """Rank-only fit: return the weighted sum of squared residuals and nothing else.
 
@@ -673,6 +674,17 @@ def screen(
     few are ever refitted properly and reported. Building a full :class:`FitResult` for the
     rest -- covariance, statistics, restart spread -- is wasted work, so this does the global
     stage once, polishes, and hands back a single number.
+
+    ``restarts`` is the number of independent global searches, the best of which is returned.
+    It defaults to one, which is what every measured number in this repository was taken at, and
+    it exists because [measured, docs/TOPOLOGY_6PLUS_PLAN.md section 5.7.2] **one draw is a
+    lottery for a minority of topologies and no amount of extra population fixes it.** Across
+    360 sampled topologies from three spectra, the shipped single seed lands within 1% of the
+    best of five seeds for 72-80% of them and *2400x* off for a few: the mean ratio to the
+    best-of-five is 1.07 to 41.4 at one seed and 1.04 to 1.16 at two, while raising
+    ``popsize`` from 8 to 40 and ``maxiter`` from 40 to 400 -- twenty-five times the work --
+    moved neither the good basin nor the bad one at all. The distribution is bimodal, so the
+    remedy is another draw and not a longer one.
 
     ``abandon_above`` is the early-abandon switch: when the global stage alone already lands
     above that cost, the local polish is skipped and the raw global cost returned. A candidate
@@ -686,31 +698,35 @@ def screen(
     if isinstance(circuit, str):
         circuit = Circuit.parse(circuit)
     problem = _Problem(circuit, spectrum, weighting, sigma, {}, None, margin_decades)
-    x = _global_stage(
-        problem,
-        seed=seed,
-        popsize=popsize,
-        maxiter=maxiter,
-        tol=tol,
-        workers=1,
-        time_limit=None,
-        x0=None,
-    )
-    cost = problem.cost(x)
-    if not math.isfinite(cost) or cost > abandon_above:
-        return cost
-    local = least_squares(
-        problem.residuals,
-        problem.canonicalize(x),
-        bounds=(problem.lower_x, problem.upper_x),
-        method="trf",
-        xtol=SCREEN_LOCAL.xtol,
-        ftol=SCREEN_LOCAL.ftol,
-        gtol=SCREEN_LOCAL.gtol,
-        max_nfev=SCREEN_LOCAL.max_nfev,
-    )
-    polished = float(np.dot(local.fun, local.fun))
-    return polished if math.isfinite(polished) else cost
+    best = math.inf
+    for offset in range(max(restarts, 1)):
+        x = _global_stage(
+            problem,
+            seed=seed + offset,
+            popsize=popsize,
+            maxiter=maxiter,
+            tol=tol,
+            workers=1,
+            time_limit=None,
+            x0=None,
+        )
+        cost = problem.cost(x)
+        if not math.isfinite(cost) or cost > abandon_above:
+            best = min(best, cost)
+            continue
+        local = least_squares(
+            problem.residuals,
+            problem.canonicalize(x),
+            bounds=(problem.lower_x, problem.upper_x),
+            method="trf",
+            xtol=SCREEN_LOCAL.xtol,
+            ftol=SCREEN_LOCAL.ftol,
+            gtol=SCREEN_LOCAL.gtol,
+            max_nfev=SCREEN_LOCAL.max_nfev,
+        )
+        polished = float(np.dot(local.fun, local.fun))
+        best = min(best, polished if math.isfinite(polished) else cost)
+    return best
 
 
 def _global_stage(
