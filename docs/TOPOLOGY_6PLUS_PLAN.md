@@ -895,13 +895,22 @@ uses as its default**, which is the quantitative form of section 5.9's qualitati
 differs materially from `10` for either truth (51868.8 vs 59312.0, 1.239 vs 1.258) — the third
 rung of the density axis is doing little work, worth remembering if this grid's cost is revisited.
 
-**Not yet run: `mix6`, `par7`, `ser7`, `mix7`.** The seven-element truths cost roughly 5x per cell
-(11033 R,C,L topologies against 2174), so the full grid is the two shown here plus ~3.5–5 hours of
-additional machine time; that run was started (`benchmarks/six_plus/x2_ladder.json`, resumable)
-and this section will be updated with the six-truth table once it finishes. What is safe to say
-already: the two truths measured are not a curve yet, they are the two ends of one — a truth built
-to be identifiable that never fails, and a truth already known to sit at the edge that fails at
-*low* sampling density regardless of noise and fails at *ordinary* noise regardless of density.
+**Update, 5 of 6 truths [measured, interim]: `mix6` and `par7` land on the identifiable side,
+`ser7` lands harder on the crossed side than `ser6` did.** `mix6` never leaves the thousands
+(worst cell 58.8x, at 3% noise / 20 ppd — matching `par6`'s worst cell, 58.8x, almost exactly).
+`par7` stays identifiable throughout too, worst cell 24.2x (3% noise / 20 ppd) — lower than the
+six-element parallel/mixed truths but nowhere near the boundary. `ser7` never gets there even at
+its easiest cell: 1.87x at 0.1% noise / 5 ppd, falling to 1.01–1.07x everywhere at 0.3% noise and
+above, at *every* points-per-decade tried — where `ser6` still reached 25–29x at 0.1% noise with
+10–20 points/decade, `ser7` cannot clear roughly 2x even there. The run was interrupted (by
+request, before a shutdown) with `mix7` — the last of the six truths — not yet started; the row
+above stands as the read on five of six and `benchmarks/six_plus/x2_ladder.json` resumes from
+where it stopped (`python identifiability.py --out benchmarks/six_plus/x2_ladder.json --workers
+8`, same command, already-computed cells are skipped). Reading so far: **shape predicts the
+crossing far more than element count does** — both series-shaped truths cross into "not
+distinguishable" at or near the standard 1%-noise/10-ppd configuration and both non-series shapes
+stay one to three orders of magnitude clear of it at every cell tried, and adding a seventh
+element made the series shape's crossing *more* severe rather than less.
 
 - **X3 (a trigger that fires when the sixth element is real)** — the reason growth ships
   **off** rather than automatic. §5.9's 30% → 1.3% on `par6`/`mix6`/`par7`/`mix7` is the design
