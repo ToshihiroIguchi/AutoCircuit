@@ -424,7 +424,7 @@ static-site Web UI running the same core via WASM (Pyodide).
 
 16. `docs/TOPOLOGY_6PLUS_PLAN.md` — six elements and up, which is where the automatic path stops
    working. **Experiments run and recorded; the growth stage is implemented and shipped
-   opt-in; the end-to-end gate X4 is the open item.** Its §2 is the part to read first, because
+   opt-in; X4, X6 and X7 are complete (§5.9, §5.11, §5.10); X2 and X3 remain open (§5.12).** Its §2 is the part to read first, because
    it is the reframing the rest depends on: "six elements does not work" is **four** independent
    problems — whether the spectrum distinguishes six elements from five at all (**information**),
    whether the class is reached (**search**), whether it is fitted well enough to *score*
@@ -456,7 +456,37 @@ static-site Web UI running the same core via WASM (Pyodide).
    separate field and the coverage line says "That is not a completeness claim" in words. Both
    front ends grow through one `growth_plan` generator; the browser's first version derived
    coverage from a list the growth stage appends to and therefore over-claimed completeness,
-   which is the failure the whole §4.7 discipline exists to catch.
+   which is the failure the whole §4.7 discipline exists to catch. **X4, run end to end on six
+   shapes [measured, §5.9]: growth is not a uniform win.** It recovers `par6`, `mix6`, `par7` and
+   `mix7` completely — 12/12 recommended — and it recovers neither `ser6` nor `ser7` (0/6), for a
+   topology-shape reason (a near-degenerate extra reactive element, residual already inside the
+   noise floor at five elements) rather than a budget one. That is why `GROWTH_DEFAULT` stays `0`
+   rather than flipping on: doing so would silently promise a recovery that does not happen for
+   series-shaped parts. **X7 [measured, §5.10]** used the same 54 runs to ask what parsimony costs
+   when it declines a truth-equivalent that reached the front: only the two `ser6`/`grow` seeds
+   qualify, and in both the declined candidate's AICc is 29–34 points better and every one of its
+   parameters is resolved (`n_unresolved = 0`) — not the unresolved-extra-parameter case the
+   `recommended` docstring describes, and not the "front's top two are indistinguishable" case
+   axis R anticipated either. The actual reason is `PARSIMONY_CHI2_FACTOR = 2.0`: both candidates
+   sit within that band of the best chi², so `recommended`'s `(complexity, aicc)` tie-break picks
+   the simpler one regardless of the AICc gap, and the report's own printed sentence — "better
+   numerically, but the extra elements are not supported by the data" next to "0 of them
+   unresolved" in the same line — says the wrong reason out loud. Fixing that sentence is future
+   work; the rate and size of the cost are what X7 asked for and both are now answered.
+   **X6 [measured, §5.11]** gave `_evolve` the `workers` parameter `_exhaustive` already had —
+   `--workers` under `--mode evolve` silently did nothing before this. With `generations` set
+   high enough that `time_limit` binds instead of the iteration cap, eight cores bought 39-48%
+   more generations than one at *lower* wall clock on both `par6` and `ser6`, which is a real win
+   and nowhere near an 8x one (roughly 5-6% scaling efficiency per core, likely because each
+   generation dispatches two sequential batches — polish, then search — each well under
+   `population = 40` once the cache-hit majority `EVOLVE_SEARCH_PLAN.md` §1.3 already measured is
+   subtracted out). **It changed no recovery outcome**: `par6` was already reported, on the front
+   and recommended at `workers=1` given enough generations, and `ser6` stayed off the front and
+   unrecommended at `workers=8` despite 48% more generations and 413 distinct topologies fitted —
+   the same reading §5.9 and §5.10 already gave that shape, that its obstacle is the residual
+   already sitting inside the noise floor rather than search reach. So the asymmetry X6 measured
+   (single-threaded evolve against six-way exhaustive) was real and worth fixing, and it was never
+   the reason any six-element truth went unrecovered.
 
 Update these when decisions change.
 

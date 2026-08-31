@@ -1,0 +1,50 @@
+[
+  {
+    "truth": "par6",
+    "workers": 1,
+    "seconds": 357.7,
+    "generations": 198,
+    "n_evaluated": 295,
+    "reported": true,
+    "on_front": true,
+    "recommended": true,
+    "recommended_circuit": "p(p(R1,C1)-p(C2,R2-C3),R3)",
+    "best_relative_error": 0.012448094845232351
+  },
+  {
+    "truth": "par6",
+    "workers": 8,
+    "seconds": 336.2,
+    "generations": 275,
+    "n_evaluated": 380,
+    "reported": true,
+    "on_front": true,
+    "recommended": true,
+    "recommended_circuit": "p(p(R1,C1)-p(C2,R2-C3),R3)",
+    "best_relative_error": 0.012448094845232351
+  },
+  {
+    "truth": "ser6",
+    "workers": 1,
+    "seconds": 464.3,
+    "generations": 103,
+    "n_evaluated": 365,
+    "reported": true,
+    "on_front": false,
+    "recommended": false,
+    "recommended_circuit": "p(p(C1,R1)-L1,R2)-C2",
+    "best_relative_error": 0.012219263849324728
+  },
+  {
+    "truth": "ser6",
+    "workers": 8,
+    "seconds": 440.5,
+    "generations": 152,
+    "n_evaluated": 413,
+    "reported": true,
+    "on_front": false,
+    "recommended": false,
+    "recommended_circuit": "p(p(C1,R1)-L1,R2)-C2",
+    "best_relative_error": 0.012219263849324728
+  }
+]

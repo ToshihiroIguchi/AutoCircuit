@@ -1,7 +1,8 @@
 # Six elements and up — the plan for the part of discovery that does not work
 
-**Status: experiments run, X4 complete (§5.9); the growth stage of §6 is implemented and ships
-opt-in; X2, X3, X6 and X7 are not done and are named as such in §5.10.** Claims marked
+**Status: experiments run, X4 (§5.9), X7 (§5.10) and X6 (§5.11) complete; the growth stage of §6
+is implemented and ships opt-in; X2 and X3 are not done and are named as such in §5.12.** Claims
+marked
 **[measured]** carry a number from a script under `benchmarks/`; everything else is a hypothesis
 and is labelled as one. Read `docs/EVOLVE_SEARCH_PLAN.md` and
 `docs/SEARCH_ALGORITHM_SCREENING.md` first; this document takes their measurements as given and
@@ -744,7 +745,118 @@ report's own `_with_growth_note()` sentence ("not a completeness claim") is what
 who does turn it on and lands on a `ser6`-shaped part: they see a `grown_to` of 7 and a residual
 that did not move, not a false claim of completeness.
 
-### 5.10 X2, X3, X6, X7 — not done
+### 5.10 X7 — what parsimony costs at six elements [measured]
+
+X4's own data already contains every instance the question needs: across all 54 runs, a
+truth-equivalent sits on the front but is *not* the recommendation in exactly two of them —
+`ser6`/`grow`, seeds 2 and 3 (§5.9's table: 2/3 on the front, 0/3 recommended). No new run was
+required; the two cases were re-run only to read out `aicc` and `n_unresolved`, which
+`x4_recovery.json` does not store.
+
+**The cost is not small, and it is not what the report's own sentence says it is.** In both
+cases the truth-equivalent's AICc is far better than the recommendation's — Δaicc = −33.9 (seed
+2) and −29.0 (seed 3), against a rule of thumb (already used elsewhere in this file, `discover.py`
+line ~260) that front rows differing by *tens* of AICc are not close calls. And in both cases the
+six-element candidate's parameters are all resolved (`n_unresolved = 0`, std. errors 0.2–7% of
+value) — this is not the unresolved-extra-parameter case `recommended`'s docstring describes.
+`_well_fitting()` is why: `PARSIMONY_CHI2_FACTOR = 2.0` admits any front candidate within 2x the
+best chi², and both recommendations sit at only 1.24–1.28x — comfortably inside a threshold wide
+enough that a chi² improvement large enough to move AICc by 30 still does not exclude the simpler
+model. Once both are "well fitting," `recommended` breaks the tie on `(complexity, aicc)`, so
+complexity wins outright and the 30-point AICc gap never gets a vote.
+
+**This makes the report's canned explanation wrong on the two cases where it fires.** `summary()`
+prints, verbatim: `"Lowest AIC: <circuit> (6 parameters, 0 of them unresolved) -- better
+numerically, but the extra elements are not supported by the data."` The sentence and the
+parenthetical it is attached to contradict each other — "0 of them unresolved" *is* the data
+supporting them. The real reason `recommended` differs from `by_criterion` here is not
+axis-R's anticipated one ("front's top two are not distinguishable," §4.5) either: a Δaicc of 30
+is the opposite of indistinguishable. The reason is specifically the chi²-threshold width in
+`_well_fitting()`, and the report does not currently say that. Fixing the sentence is future
+work, not done here; what X7 asked for — the rate and the size of the cost — is answered: **rate
+2/54 overall (2/18 of `grow` runs at 6–7 elements, 2/14 of the runs where a truth-equivalent
+reached the front at all), and the cost when it happens is a two-to-three-dozen-point AICc gap
+conceded to a model whose extra elements the data does resolve.** Both events are `ser6`, the
+same shape §5.9 already flagged as the one growth does not recover — consistent with, not
+independent evidence for, that section's reading that this shape sits closer to a genuine
+five-versus-six-element ambiguity than the other five.
+
+### 5.11 X6 — the fallback's missing parallelism, wired and measured [measured]
+
+Section 4.4's note (commit `1db16a2`) is a finding made in passing while measuring something
+else, and it is not the whole of X6: `_evolve` took no `workers` where `_exhaustive` does, so
+every evolve run in this repo before this section ran single-threaded, and all twelve of those
+runs stopped at `generations = 30` — the library default — having spent 156–818 s of a 600 s
+allowance. **The generation cap ended every one of those runs, not the clock.** That fact alone
+does not settle X6's decision ("a correction to every wall-clock comparison here, whichever way
+it goes"), because it is a statement about the default configuration, not about the search: a
+run that is not time-limited gains nothing from finishing its iterations faster, but a run that
+*is* time-limited might gain everything from it. Which one a user's run is depends only on
+whether `generations` is set high enough to let `time_limit` bind first, and the shipped default
+was not.
+
+**What was built.** `_evolve` now takes `workers`, plumbed through `discover()` exactly as
+`_exhaustive` already receives it — the CLI's `--workers` flag silently did nothing under
+`--mode evolve` before this and now does. Two tiers are parallelised, each the same way its
+`_exhaustive` counterpart already is: the per-generation population evaluation
+(`_Evaluator.evaluate_all`, new) fans the warm polish and the reduced-budget global search across
+a process pool a generation at a time, and the shortlist's tier-2 refit (`_refine`) fans its
+independent full-budget fits the same way `_refit_shortlist` does. `workers=1` (the default)
+creates no pool at all and calls the original per-item `evaluate()` in the original order, so it
+is byte-identical to the loop it replaces — confirmed by the existing `test_discover*` suite (82
+tests) passing unchanged, and by `mypy --strict`. `workers>1` accepts one documented staleness:
+a lookup inside `evaluate_all` sees the cache and `best_cost` as of the *start* of the
+generation rather than updated as each tree is resolved, which is the same trade
+`_screen_parallel` already makes within a chunk and cannot change which fit is reported, because
+tier 2 always refits the shortlist at full budget regardless of which tier-1 path a topology
+took.
+
+**The measurement.** `benchmarks/six_plus/x6_workers.py` calls `mode="evolve"` directly (as gate
+EV1 does) on `par6` and `ser6` — one shape growth recovers completely, one it recovers not at
+all (§5.9) — with `generations` set to 100,000, far above what either arm can reach, so
+`time_limit` (300 s) is the only thing that stops a run rather than the cap. `workers=1` against
+`workers=8`, one noise seed each:
+
+| truth | workers | wall seconds | generations | topologies evaluated | reported | on front | recommended |
+|---|---:|---:|---:|---:|---|---|---|
+| `par6` | 1 | 358 | 198 | 295 | yes | yes | yes |
+| `par6` | 8 | 336 | 275 | 380 | yes | yes | yes |
+| `ser6` | 1 | 464 | 103 | 365 | no front | no | no |
+| `ser6` | 8 | 440 | 152 | 413 | no front | no | no |
+
+Two readings, and they point in different directions on the two things X6 could have said.
+**Parallelism is a real, measured win once `generations` is not the binding constraint**: eight
+cores bought 39% more generations on `par6` and 48% more on `ser6`, at *lower* wall clock in both
+cases (300 s nominal budget, and the per-generation overshoot the loop already documents landed
+lower with more workers rather than higher). **It is nowhere near an 8x win** — roughly 5–6%
+scaling efficiency per core, well short of the six-way exhaustive control the X6 note in §4.4
+compared against. The likely reason is structural rather than a defect to fix here: each
+generation dispatches two *sequential* batches (polish, then search), and
+`EVOLVE_SEARCH_PLAN.md` §1.3 already measured that over half of a late generation's proposals are
+cache hits needing no fit at all, so the batch actually reaching the pool most generations is
+well under `population = 40` split two ways — small enough that per-task dispatch and IPC
+overhead eat into an 8-way split before it can show up as wall clock. That is a hypothesis, not
+re-measured further here.
+
+**And it changes no recovery outcome.** `par6` was already reported, on the front and
+recommended at `workers=1` given enough generations — the direct `mode="evolve"` call recovers
+this shape without either growth (§5.8) or parallelism, consistent with gate EV1's own 5/9. `ser6`
+stayed off the front and unrecommended at `workers=8` despite 48% more generations and 413
+distinct topologies fitted, which is the same shape and the same reading §5.9 and §5.10 already
+gave it: this truth's obstacle is not search reach, it is the residual already sitting inside the
+noise floor at five elements. More parallelism cannot buy an answer the data does not contain.
+
+So the correction X6 asked for is this: **every prior wall-clock or core-second comparison
+between the evolve arm and the exhaustive control in this repository (§4.4, `1db16a2`,
+`EVOLVE_SEARCH_PLAN.md`) was comparing a single core against six, and that was a real asymmetry
+worth fixing** — `_evolve` had no principled reason to run single-threaded when the search it
+falls back from does not — **but the asymmetry was never the reason any six-element truth went
+unrecovered.** `par6` did not need it and `ser6` is not helped by it. `workers` ships wired for
+the fallback because a search this document calls a fallback should not carry an arbitrary
+handicap the exhaustive stage does not, not because it was found to close any of the four gaps
+§2 names.
+
+### 5.12 X2, X3 — not done
 
 - **X2 (the identifiability ladder)** — the noise × points-per-decade × truth grid. §3.4 records
   that no such curve exists in the literature, so this is the round's most likely publishable
@@ -756,14 +868,15 @@ that did not move, not a false claim of completeness.
   right: their residual sits at 1.4–1.7%, already inside the noise floor, and a trigger built only
   from the first four truths would fire there too and grow toward an element the data does not
   support.
-- **X6 (the fallback's missing parallelism)** and **X7 (what parsimony costs at six elements)** —
-  both untouched. X7 is partly answered in passing by §5.9: on `par6`, `mix6`, `par7` and `mix7`,
-  parsimony recommended the larger truth as soon as the search put it on the front, so the
-  reporting axis was not the obstacle there; on `ser6`/`ser7` parsimony correctly declined a
-  larger model that did not reduce the residual below noise, which is the rule working as
-  designed rather than a cost it imposed.
+
+X7 is answered, in §5.10: on `par6`, `mix6`, `par7` and `mix7`, parsimony recommended the larger
+truth as soon as the search put it on the front, so the reporting axis was not the obstacle
+there. On `ser6` it is a mixed picture rather than the clean "correctly declined" reading a
+first pass might expect — §5.10 measures two of `ser6`'s three seeds landing the truth on the
+front with a Δaicc in the tens and every parameter resolved, and the parsimony rule still
+declining it, purely on chi²-threshold width rather than on any unresolved-parameter finding.
 
 ## 6. Implementation plan
 
 *Written from §5, and the growth stage of it is built. See §5.8 for what shipped, `GROWTH_DEFAULT`
-for why it is off, and §5.10 for what the default is waiting on.*
+for why it is off, and §5.10 and §5.12 for what the default is waiting on.*

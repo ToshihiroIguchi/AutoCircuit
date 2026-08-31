@@ -623,9 +623,7 @@ class DiscoveryResult:
         """
         if self.skeleton is None:
             return ()
-        placements = skeleton_placements(
-            candidate.circuit.root, Circuit.parse(self.skeleton).root
-        )
+        placements = skeleton_placements(candidate.circuit.root, Circuit.parse(self.skeleton).root)
         unresolved = candidate.unresolved
         leaves = candidate.circuit.leaves
         spans = candidate.circuit.slices()
@@ -651,9 +649,7 @@ class DiscoveryResult:
         """
         if self.skeleton is None:
             return 0
-        return count_skeleton_placements(
-            candidate.circuit.root, Circuit.parse(self.skeleton).root
-        )
+        return count_skeleton_placements(candidate.circuit.root, Circuit.parse(self.skeleton).root)
 
     def equivalence_classes(self) -> list[list[Candidate]]:
         """Group candidates whose fitted responses are numerically indistinguishable.
@@ -863,9 +859,7 @@ class DiscoveryResult:
                 aliases.append(f"  {candidate.circuit.to_string()} == {names}")
             placements = self.placements_of(candidate)
             if placements > 1:
-                ambiguous.append(
-                    f"  {candidate.circuit.to_string()}: {placements} ways"
-                )
+                ambiguous.append(f"  {candidate.circuit.to_string()}: {placements} ways")
 
         if aliases:
             lines += [
@@ -986,13 +980,9 @@ class DiscoveryResult:
             "n_evaluated": self.n_evaluated,
             "generations": self.generations,
             "elapsed_s": self.elapsed_s,
-            "refit_progress": (
-                None if self.refit_progress is None else list(self.refit_progress)
-            ),
+            "refit_progress": (None if self.refit_progress is None else list(self.refit_progress)),
             "recommended": (
-                self.recommended.to_dict(self.criterion)
-                if self.recommended is not None
-                else None
+                self.recommended.to_dict(self.criterion) if self.recommended is not None else None
             ),
             "pareto": [c.to_dict(self.criterion) for c in self.pareto],
             "candidates": [
@@ -1026,10 +1016,23 @@ class DiscoveryResult:
         writer = csv.writer(buffer, lineterminator="\n")
         writer.writerow(
             [
-                "circuit", "canonical", "n_elements", "n_params", "complexity",
-                "aic", "aicc", "bic", "caic", "hqc", "waic",
-                "chi2_reduced", "relative_error",
-                "n_unresolved", "unresolved", "on_pareto", "recommended",
+                "circuit",
+                "canonical",
+                "n_elements",
+                "n_params",
+                "complexity",
+                "aic",
+                "aicc",
+                "bic",
+                "caic",
+                "hqc",
+                "waic",
+                "chi2_reduced",
+                "relative_error",
+                "n_unresolved",
+                "unresolved",
+                "on_pareto",
+                "recommended",
                 "equivalents",
             ]
         )
@@ -1105,9 +1108,7 @@ def _delete(node: Node, path: Sequence[int]) -> Node | None:
 # -- Genetic operators ---------------------------------------------------------------------
 
 
-def random_topology(
-    rng: np.random.Generator, pool: Sequence[str], n_elements: int
-) -> Node:
+def random_topology(rng: np.random.Generator, pool: Sequence[str], n_elements: int) -> Node:
     """Build a random topology by repeatedly combining nodes in series or in parallel."""
     nodes: list[Node] = [ElementNode(str(rng.choice(pool))) for _ in range(n_elements)]
     while len(nodes) > 1:
@@ -1157,9 +1158,7 @@ def mutate(
     path = paths[int(rng.integers(len(paths)))]
     subtree = subtree_at(node, path)
     fresh = ElementNode(str(rng.choice(pool)))
-    combined = (
-        series(subtree, fresh) if operation == "insert_series" else parallel(subtree, fresh)
-    )
+    combined = series(subtree, fresh) if operation == "insert_series" else parallel(subtree, fresh)
     return replace_subtree(node, path, combined)
 
 
@@ -1356,9 +1355,7 @@ class _Evaluator:
         a two-minute run and decisive in a ten-minute one, which is exactly the shape of the
         first EV3 measurement (+39% topologies at 120 s, +7% at 600 s).
         """
-        return self._fitted(
-            circuit, generation, initial=initial, global_search=False, restarts=1
-        )
+        return self._fitted(circuit, generation, initial=initial, global_search=False, restarts=1)
 
     def _search(self, circuit: Circuit, generation: int) -> Candidate | None:
         """The reduced-budget global search this class has always run."""
@@ -1402,6 +1399,173 @@ class _Evaluator:
         if not math.isfinite(result.statistics.aicc):
             return None
         return Candidate(circuit, result, generation)
+
+    def evaluate_all(
+        self,
+        items: Sequence[_Offspring],
+        generation: int,
+        executor: multiprocessing.pool.Pool | None,
+    ) -> list[Candidate | None]:
+        """The whole-population counterpart of :meth:`evaluate`.
+
+        ``executor=None`` calls :meth:`evaluate` once per item, in the given order, and is
+        therefore byte-identical to the loop it replaces -- cache and ``best_cost`` are read
+        and written between items exactly as they always were. With an executor, the two
+        expensive stages -- the warm polish and the reduced-budget global search -- are fanned
+        across processes a generation at a time, so a lookup sees the cache and ``best_cost``
+        as of the *start* of the generation rather than the update-as-you-go ordering
+        :meth:`evaluate` gives them. That is the same staleness :func:`_screen_parallel`
+        already accepts within one chunk, and for the same reason it cannot change which fit is
+        ultimately reported: tier 2 always refits the shortlist at full budget regardless of
+        which tier-1 path a topology took. It can change which topologies *reach* the
+        shortlist, which is exactly what X6 (``docs/TOPOLOGY_6PLUS_PLAN.md`` section 5) exists
+        to measure.
+        """
+        if executor is None:
+            return [self.evaluate(node, generation, parent) for node, parent in items]
+
+        prepared: list[_Prepared | None] = []
+        for node, parent in items:
+            try:
+                circuit = Circuit(simplify(node))
+            except CircuitError:
+                prepared.append(None)
+                continue
+            key = circuit.canonical_form()
+            seen = key in self.cache
+            known = self.cache.get(key)
+            if seen and known is None:
+                prepared.append(None)
+                continue
+            if not seen and not is_plausible(circuit):
+                self.cache[key] = None
+                prepared.append(None)
+                continue
+            prepared.append(
+                _Prepared(circuit, key, seen, known, self._warm_start(parent, circuit, known))
+            )
+
+        polish_indices: list[int] = []
+        polish_tasks: list[tuple[str, int, dict[str, float]]] = []
+        for i, p in enumerate(prepared):
+            if p is not None and p.warm is not None:
+                polish_indices.append(i)
+                polish_tasks.append((p.circuit.to_string(), self.seed, p.warm))
+
+        polished: dict[int, Candidate | None] = {}
+        if polish_tasks:
+            for i, wire in zip(
+                polish_indices, executor.map(_evolve_polish_worker, polish_tasks), strict=True
+            ):
+                p = prepared[i]
+                assert p is not None
+                polished[i] = (
+                    None
+                    if wire is None
+                    else Candidate(p.circuit, FitResult.from_wire(wire), generation)
+                )
+
+        search_indices: list[int] = []
+        search_tasks: list[tuple[str, int, int, int, int, float]] = []
+        for i, p in enumerate(prepared):
+            if p is None or p.seen:
+                continue
+            polished_candidate = polished.get(i)
+            if polished_candidate is None or not self._close_enough(polished_candidate):
+                search_indices.append(i)
+                search_tasks.append(
+                    (
+                        p.circuit.to_string(),
+                        self.seed,
+                        self.restarts,
+                        self.popsize,
+                        self.maxiter,
+                        self.tol,
+                    )
+                )
+
+        searched: dict[int, Candidate | None] = {}
+        if search_tasks:
+            for i, wire in zip(
+                search_indices, executor.map(_evolve_search_worker, search_tasks), strict=True
+            ):
+                p = prepared[i]
+                assert p is not None
+                searched[i] = (
+                    None
+                    if wire is None
+                    else Candidate(p.circuit, FitResult.from_wire(wire), generation)
+                )
+
+        results: list[Candidate | None] = []
+        for i, p in enumerate(prepared):
+            if p is None:
+                results.append(None)
+                continue
+            best = _cheaper(_cheaper(polished.get(i), searched.get(i)), p.known)
+            self.cache[p.key] = best
+            if best is not None:
+                cost = _fit_cost(best.result)
+                if cost < self.best_cost.get(best.complexity, math.inf):
+                    self.best_cost[best.complexity] = cost
+            results.append(best)
+        return results
+
+
+class _Prepared(NamedTuple):
+    """One tree's cache lookup, resolved before either expensive fit stage runs."""
+
+    circuit: Circuit
+    key: str
+    seen: bool
+    known: Candidate | None
+    warm: dict[str, float] | None
+
+
+def _evolve_polish_worker(task: tuple[str, int, dict[str, float]]) -> dict[str, Any] | None:
+    """One warm polish in a worker process, the parallel counterpart of
+    :meth:`_Evaluator._polish`."""
+    text, seed, initial = task
+    try:
+        result = fit(
+            text,
+            _WORKER["spectrum"],
+            weighting=_WORKER["weighting"],
+            initial=initial,
+            global_search=False,
+            restarts=1,
+            local=SCREEN_LOCAL,
+            seed=seed,
+        )
+    except (ValueError, CircuitError, np.linalg.LinAlgError):
+        return None
+    if not math.isfinite(result.statistics.aicc):
+        return None
+    return result.to_wire()
+
+
+def _evolve_search_worker(task: tuple[str, int, int, int, int, float]) -> dict[str, Any] | None:
+    """One reduced-budget global search in a worker process, the parallel counterpart of
+    :meth:`_Evaluator._search`."""
+    text, seed, restarts, popsize, maxiter, tol = task
+    try:
+        result = fit(
+            text,
+            _WORKER["spectrum"],
+            weighting=_WORKER["weighting"],
+            global_search=True,
+            restarts=restarts,
+            popsize=popsize,
+            maxiter=maxiter,
+            tol=tol,
+            local=PUBLISH_LOCAL,
+            seed=seed,
+        )
+    except (ValueError, CircuitError, np.linalg.LinAlgError):
+        return None
+    if not math.isfinite(result.statistics.aicc):
+        return None
+    return result.to_wire()
 
 
 def _same_response(a: Candidate, b: Candidate) -> bool:
@@ -1620,14 +1784,13 @@ def discover(
             started=started,
             warm_accept=warm_accept,
             criterion=criterion,
+            workers=workers,
         )
         # The genetic search never completes a pool, so it cannot produce the evidence the
         # widening rests on. Saying "unasked" rather than leaving the field empty is the
         # difference between a check that came back negative and no check at all.
         if derive_pool:
-            evolved.pool_choice = choose_pool(
-                spectrum, residual_runs_z=math.nan, base=codes
-            )
+            evolved.pool_choice = choose_pool(spectrum, residual_runs_z=math.nan, base=codes)
         return evolved
 
     candidates, complete_up_to, n_screened, grown_to = _exhaustive(
@@ -1674,9 +1837,7 @@ def discover(
     # first and the genetic search second means the expensive, unreliable stage is only reached
     # once the cheap, reliable one has been given every element the data admits.
     if derive_pool:
-        pool_choice = choose_pool(
-            spectrum, residual_runs_z=_best_runs_z(candidates), base=codes
-        )
+        pool_choice = choose_pool(spectrum, residual_runs_z=_best_runs_z(candidates), base=codes)
         remaining = None if time_limit is None else time_limit - (time.perf_counter() - started)
         if pool_choice.added and (remaining is None or remaining > 0.0):
             base_complete_up_to = complete_up_to
@@ -1742,6 +1903,7 @@ def discover(
                 started=time.perf_counter(),
                 warm_accept=warm_accept,
                 criterion=criterion,
+                workers=workers,
             )
             candidates = _unique_best(candidates + evolved.candidates, criterion)
             n_screened += evolved.n_evaluated
@@ -1970,17 +2132,21 @@ def excluded_equivalents(
                         executor.map(
                             _screen_worker,
                             [
-                                (task.text, seed, task.abandon_above, budget.popsize,
-                                 budget.maxiter, budget.restarts)
+                                (
+                                    task.text,
+                                    seed,
+                                    task.abandon_above,
+                                    budget.popsize,
+                                    budget.maxiter,
+                                    budget.restarts,
+                                )
                                 for task in batch.tasks
                             ],
                         )
                     )
                 else:
                     costs = [
-                        _screen_one(
-                            task, target, weighting=weighting, seed=seed, budget=budget
-                        )
+                        _screen_one(task, target, weighting=weighting, seed=seed, budget=budget)
                         for task in batch.tasks
                     ]
                 batch = plan.send(costs)
@@ -2031,9 +2197,6 @@ def _is_underfitted(candidates: Sequence[Candidate]) -> bool:
     return False if math.isnan(z) else bool(z < RUNS_Z_LIMIT)
 
 
-
-
-
 def _evolve(
     spectrum: Spectrum,
     *,
@@ -2055,8 +2218,20 @@ def _evolve(
     started: float,
     warm_accept: float = WARM_ACCEPT_FACTOR,
     criterion: Criterion = DEFAULT_CRITERION,
+    workers: int = 1,
 ) -> DiscoveryResult:
-    """Regularised evolution over the topology grammar, warm-started from each parent."""
+    """Regularised evolution over the topology grammar, warm-started from each parent.
+
+    ``workers`` fans both tiers across processes exactly as :func:`_exhaustive` already does --
+    [measured, docs/TOPOLOGY_6PLUS_PLAN.md section 5.11, X6] this search never had that option
+    before: every evolve measurement in this repo before that section ran single-threaded, on
+    194-798 core-seconds against the exhaustive control's six-way run, while all twelve of those
+    runs were still bounded by ``generations`` rather than by ``time_limit``. Parallelism
+    therefore was not what those runs were missing; it is wired in anyway because a search this
+    document calls a *fallback* has no principled reason to run on one core when the search it
+    falls back from does not, and because a wall-clock comparison between the two is not
+    correctable after the fact -- only re-run under matching resources.
+    """
     rng = np.random.default_rng(seed)
     evaluator = _Evaluator(
         spectrum,
@@ -2081,56 +2256,57 @@ def _evolve(
 
     scored: list[Candidate] = []
     generation = 0
-    for generation in range(generations):
-        for tree, parent in trees:
-            candidate = evaluator.evaluate(tree, generation, parent)
-            if candidate is not None:
-                scored.append(candidate)
-        if time_limit is not None and time.perf_counter() - started > time_limit:
-            break
+    with _worker_pool(workers, spectrum, weighting) as executor:
+        for generation in range(generations):
+            for candidate in evaluator.evaluate_all(trees, generation, executor):
+                if candidate is not None:
+                    scored.append(candidate)
+            if time_limit is not None and time.perf_counter() - started > time_limit:
+                break
 
+            alive = _unique_best(scored, criterion)
+            if not alive:
+                trees = []
+                for _ in range(population):
+                    size = int(rng.integers(min_elements, max_elements + 1))
+                    trees.append((random_topology(rng, pool, size), None))
+                continue
+
+            trees = _next_generation(
+                _breeding_pool(alive, criterion=criterion),
+                rng,
+                pool,
+                max_elements,
+                population,
+                criterion,
+                # Crowding is a property of the whole archive, not of the front the pool is
+                # (:func:`_complexity_frequencies`). Computed only when it can change something:
+                # the default scaling is zero and the count would otherwise walk the archive once
+                # per generation to be multiplied away.
+                frequencies=(_complexity_frequencies(alive) if PARSIMONY_SCALING else None),
+            )
+
+        # Only refitted candidates are reported, which is the rule SCREEN_POPSIZE states and the
+        # rule `_exhaustive` has always followed: every number that reaches the user comes from
+        # the full-budget refit. [measured, docs/EVOLVE_SEARCH_PLAN.md section 1.4] This search
+        # used to merge the unrefitted archive back in -- `_unique_best(refined + alive)` -- and
+        # 82% of the Pareto rows it reported then carried screening-grade chi-squareds, standard
+        # errors and therefore "free?" marks, with nothing in the report able to say which rows
+        # those were. The archive is not lost: it selects the shortlist, and `n_evaluated` still
+        # counts it.
         alive = _unique_best(scored, criterion)
-        if not alive:
-            trees = []
-            for _ in range(population):
-                size = int(rng.integers(min_elements, max_elements + 1))
-                trees.append((random_topology(rng, pool, size), None))
-            continue
-
-        trees = _next_generation(
-            _breeding_pool(alive, criterion=criterion),
-            rng,
-            pool,
-            max_elements,
-            population,
-            criterion,
-            # Crowding is a property of the whole archive, not of the front the pool is
-            # (:func:`_complexity_frequencies`). Computed only when it can change something:
-            # the default scaling is zero and the count would otherwise walk the archive once
-            # per generation to be multiplied away.
-            frequencies=(
-                _complexity_frequencies(alive) if PARSIMONY_SCALING else None
-            ),
+        shortlist = _shortlist_candidates(alive, n_refine, criterion)
+        refined, attempted = _refine(
+            shortlist,
+            spectrum,
+            weighting,
+            final_restarts,
+            seed,
+            deadline=None if time_limit is None else started + time_limit * REFIT_HEADROOM,
+            criterion=criterion,
+            executor=executor,
+            workers=workers,
         )
-
-    # Only refitted candidates are reported, which is the rule SCREEN_POPSIZE states and the
-    # rule `_exhaustive` has always followed: every number that reaches the user comes from the
-    # full-budget refit. [measured, docs/EVOLVE_SEARCH_PLAN.md section 1.4] This search used to
-    # merge the unrefitted archive back in -- `_unique_best(refined + alive)` -- and 82% of the
-    # Pareto rows it reported then carried screening-grade chi-squareds, standard errors and
-    # therefore "free?" marks, with nothing in the report able to say which rows those were.
-    # The archive is not lost: it selects the shortlist, and `n_evaluated` still counts it.
-    alive = _unique_best(scored, criterion)
-    shortlist = _shortlist_candidates(alive, n_refine, criterion)
-    refined, attempted = _refine(
-        shortlist,
-        spectrum,
-        weighting,
-        final_restarts,
-        seed,
-        deadline=None if time_limit is None else started + time_limit * REFIT_HEADROOM,
-        criterion=criterion,
-    )
     # Tier 2 is authoritative even when it scores worse than the reduced fit did: a full-budget
     # refit that lands in a different basin is the better estimate of that topology, and keeping
     # whichever number happened to be smaller would be picking the fit by its answer.
@@ -2149,9 +2325,7 @@ def _evolve(
         # Set only when the tier really was cut short. A finished refit that dropped a few
         # unfittable topologies is not a partial report, and saying so would cry wolf on the
         # one signal that means "these numbers are still moving".
-        refit_progress=(
-            None if attempted >= len(shortlist) else (len(refined), len(shortlist))
-        ),
+        refit_progress=(None if attempted >= len(shortlist) else (len(refined), len(shortlist))),
         criterion=criterion,
     )
 
@@ -2212,9 +2386,7 @@ def enumerate_candidates(
     point of exhaustive discovery. It takes a spectrum only to derive the endpoint behaviour
     the feasibility filter tests against.
     """
-    behaviour = (
-        EndpointBehaviour.from_spectrum(spectrum) if feasibility_filter else None
-    )
+    behaviour = EndpointBehaviour.from_spectrum(spectrum) if feasibility_filter else None
 
     # Both level sources yield whole element counts in ascending order; the constrained one
     # grows the skeleton outwards and stops itself before materialising a level too large to
@@ -2223,9 +2395,7 @@ def enumerate_candidates(
     if skeleton is None:
         levels = ((n, enumerate_topologies(pool, n)) for n in range(floor, limit + 1))
     else:
-        levels = grow_up_to(
-            skeleton, pool, limit, max_frontier=max_candidates * FRONTIER_HEADROOM
-        )
+        levels = grow_up_to(skeleton, pool, limit, max_frontier=max_candidates * FRONTIER_HEADROOM)
 
     texts: list[str] = []
     # (element count, how many topologies have been queued once that level is complete), used
@@ -2362,9 +2532,7 @@ def _exhaustive(
             if grown:
                 scored = list(scored) + grown
                 n_seen += len(grown)
-                grown_to = max(
-                    count_elements(Circuit.parse(text).root) for _cost, text in grown
-                )
+                grown_to = max(count_elements(Circuit.parse(text).root) for _cost, text in grown)
 
         candidates = _refit_shortlist(
             scored, spectrum, weighting, final_restarts, seed, n_refine, executor, criterion
@@ -2601,9 +2769,7 @@ def run_screen(
     return _screen_one(task, spectrum, weighting=weighting, seed=seed, budget=budget)
 
 
-def run_refit(
-    task: RefitTask, spectrum: Spectrum, *, weighting: Weighting
-) -> FitResult | None:
+def run_refit(task: RefitTask, spectrum: Spectrum, *, weighting: Weighting) -> FitResult | None:
     """One tier-2 refit, for the same kind of worker as :func:`run_screen`.
 
     Returns None when the topology cannot be fitted at all, which :func:`refit_plan` treats as
@@ -2748,9 +2914,7 @@ def _refit_shortlist(
             tasks = batch.tasks
             if executor is not None and len(tasks) > 1:
                 outcomes = list(
-                    executor.map(
-                        _refit_worker, [(t.text, t.restarts, t.seed) for t in tasks]
-                    )
+                    executor.map(_refit_worker, [(t.text, t.restarts, t.seed) for t in tasks])
                 )
             else:
                 outcomes = [
@@ -2869,8 +3033,12 @@ def _grow_all(
                         _screen_worker,
                         [
                             (
-                                t.text, seed, t.abandon_above,
-                                budget.popsize, budget.maxiter, budget.restarts,
+                                t.text,
+                                seed,
+                                t.abandon_above,
+                                budget.popsize,
+                                budget.maxiter,
+                                budget.restarts,
                             )
                             for t in tasks
                         ],
@@ -2879,8 +3047,7 @@ def _grow_all(
                 )
             else:
                 costs = [
-                    _screen_one(task, spectrum, weighting=weighting, seed=seed,
-                                budget=budget)
+                    _screen_one(task, spectrum, weighting=weighting, seed=seed, budget=budget)
                     for task in tasks
                 ]
             produced.extend(zip(costs, (t.text for t in tasks), strict=True))
@@ -2990,6 +3157,7 @@ def screen_plan(
 
 # -- Growth above the exhaustive limit -------------------------------------------------------
 
+
 def growth_plan(
     scored: Sequence[tuple[float, str]],
     *,
@@ -3067,9 +3235,7 @@ def growth_plan(
         )
 
     level = rank(
-        (cost, text)
-        for cost, text in scored
-        if math.isfinite(cost) and size_of(text) == start_size
+        (cost, text) for cost, text in scored if math.isfinite(cost) and size_of(text) == start_size
     )[:width]
 
     produced: list[tuple[float, str]] = []
@@ -3111,9 +3277,7 @@ def growth_plan(
             if cost < best_by_complexity.get(complexity, math.inf):
                 best_by_complexity[complexity] = float(cost)
 
-        level = rank((c, t) for c, t in produced if size_of(t) == size and math.isfinite(c))[
-            :width
-        ]
+        level = rank((c, t) for c, t in produced if size_of(t) == size and math.isfinite(c))[:width]
         if not level:
             break
 
@@ -3184,8 +3348,12 @@ def _screen_parallel(
                     _screen_worker,
                     [
                         (
-                            task.text, seed, task.abandon_above,
-                            budget.popsize, budget.maxiter, budget.restarts,
+                            task.text,
+                            seed,
+                            task.abandon_above,
+                            budget.popsize,
+                            budget.maxiter,
+                            budget.restarts,
                         )
                         for task in tasks
                     ],
@@ -3373,6 +3541,8 @@ def _refine(
     seed: int,
     deadline: float | None = None,
     criterion: Criterion = DEFAULT_CRITERION,
+    executor: multiprocessing.pool.Pool | None = None,
+    workers: int = 1,
 ) -> tuple[list[Candidate], int]:
     """Refit the shortlist at full budget, since the search used a reduced one.
 
@@ -3393,26 +3563,41 @@ def _refine(
     shortlist arrives grouped by element count and is walked best-of-each-size first. Without
     it a deadline drops whichever sizes the archive happened to mention last, first-ranked
     candidate included.
+
+    ``executor`` parallelises this tier exactly as :func:`_refit_shortlist` already does for the
+    exhaustive stage's tier 2 -- unlike the generation loop in :meth:`_Evaluator.evaluate_all`,
+    each candidate here is an independent full-budget fit with nothing cached between them, so
+    there is no staleness to accept. The only thing that moves is the deadline check's
+    granularity, from one candidate to one batch of ``workers``, the same trade
+    :func:`_grow_all` already makes per level.
     """
     out: list[Candidate] = []
     attempted = 0
-    for candidate in _refit_order(candidates, criterion):
-        # The first is always attempted: a report with no rows in it cannot be read at all, and
-        # one full-budget fit is the least that can honestly be published. Everything after it
-        # answers to the clock.
+    ordered = _refit_order(candidates, criterion)
+    step = max(1, workers) if executor is not None else 1
+    i = 0
+    while i < len(ordered):
+        # The first batch is always attempted: a report with no rows in it cannot be read at
+        # all, and one full-budget fit is the least that can honestly be published. Every batch
+        # after it answers to the clock.
         if attempted and deadline is not None and time.perf_counter() > deadline:
             break
-        attempted += 1
-        try:
-            result = fit(
-                candidate.circuit,
-                spectrum,
-                weighting=weighting,
-                restarts=restarts,
-                seed=seed,
-            )
-        except (ValueError, CircuitError, np.linalg.LinAlgError):
-            continue
-        if math.isfinite(result.statistics.aicc):
-            out.append(Candidate(candidate.circuit, result, candidate.generation))
+        batch = ordered[i : i + step]
+        i += step
+        attempted += len(batch)
+        if executor is not None and len(batch) > 1:
+            outcomes: list[FitResult | None] = [
+                None if wire is None else FitResult.from_wire(wire)
+                for wire in executor.map(
+                    _refit_worker,
+                    [(c.circuit.to_string(), restarts, seed) for c in batch],
+                )
+            ]
+        else:
+            outcomes = [
+                _full_fit(c.circuit.to_string(), spectrum, weighting, restarts, seed) for c in batch
+            ]
+        for candidate, result in zip(batch, outcomes, strict=True):
+            if result is not None:
+                out.append(Candidate(candidate.circuit, result, candidate.generation))
     return out, attempted
