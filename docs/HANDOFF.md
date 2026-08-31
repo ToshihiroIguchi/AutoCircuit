@@ -2627,6 +2627,29 @@ Fixing any one alone changes nothing, which is what happened to `EVOLVE_SEARCH_P
   recommended and `ser7` 0/3 even reported. This is not a search failure; it is the sixth element
   being genuinely unresolved by that spectrum, and it is the reason a global default would be
   dishonest for series-shaped parts. Full table in `TOPOLOGY_6PLUS_PLAN.md` §5.9.
+- **X6: the genetic fallback (`_evolve`) had no `workers`, where `_exhaustive` already did — every
+  evolve measurement in this repo before commit `d10046d` ran single-threaded.** [measured,
+  `benchmarks/six_plus/x6_workers.py`, `TOPOLOGY_6PLUS_PLAN.md` §5.11] With `generations` set high
+  enough that `time_limit` (300 s) binds instead of the iteration cap, `workers=8` bought 39–48%
+  more generations than `workers=1` at *lower* wall clock on both `par6` and `ser6` — a real win,
+  and nowhere near an 8x one (~5–6% scaling efficiency per core, likely because each generation
+  dispatches two sequential batches, polish then search, each well under `population=40` once the
+  cache-hit majority `EVOLVE_SEARCH_PLAN.md` §1.3 already measured is subtracted out).
+  **It changed no recovery outcome**: `par6` was already reported/on-front/recommended at
+  `workers=1`, and `ser6` stayed off the front and unrecommended at `workers=8` despite the extra
+  generations and 413 distinct topologies fitted — the same reading §5.9/§5.10 already gave that
+  shape, that its obstacle is the five-element residual already sitting inside the noise floor,
+  not search reach. So the asymmetry was real and worth fixing (a fallback should not carry a
+  handicap the exhaustive stage does not), but it was never why any six-element truth went
+  unrecovered. `workers` now flows through `discover()` to `_evolve` exactly as it already did to
+  `_exhaustive`; `workers=1` (default) is byte-identical to the loop it replaces.
+- **X2 (the identifiability ladder) and X3 (a trigger for when the sixth element is real) are not
+  done** — the reason `GROWTH_DEFAULT` stays 0 rather than becoming automatic. X2 is a noise ×
+  points-per-decade × truth grid (`TOPOLOGY_6PLUS_PLAN.md` §4.3, §5.12) that no published curve
+  answers (§3.4); X3 needs its ROC. §5.9's `par6`/`mix6`/`par7`/`mix7` (30% → 1.3% residual) versus
+  `ser6`/`ser7` (residual already at 1.4–1.7%, inside the noise floor) is the design lead: a
+  trigger built only from the first four truths would fire on the last two as well, and grow
+  toward an element the data does not support.
 
 ### Environment
 
