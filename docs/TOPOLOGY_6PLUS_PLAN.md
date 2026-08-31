@@ -1,8 +1,8 @@
 # Six elements and up — the plan for the part of discovery that does not work
 
 **Status: experiments run, X4 (§5.9), X7 (§5.10) and X6 (§5.11) complete; the growth stage of §6
-is implemented and ships opt-in; X2 and X3 are not done and are named as such in §5.12.** Claims
-marked
+is implemented and ships opt-in; X2 is running (2 of 6 truths measured, §5.12) and X3 is not done,
+named as such in §5.12.** Claims marked
 **[measured]** carry a number from a script under `benchmarks/`; everything else is a hypothesis
 and is labelled as one. Read `docs/EVOLVE_SEARCH_PLAN.md` and
 `docs/SEARCH_ALGORITHM_SCREENING.md` first; this document takes their measurements as given and
@@ -856,18 +856,62 @@ the fallback because a search this document calls a fallback should not carry an
 handicap the exhaustive stage does not, not because it was found to close any of the four gaps
 §2 names.
 
-### 5.12 X2, X3 — not done
+### 5.12 X2 (interim) and X3 (not done)
 
-- **X2 (the identifiability ladder)** — the noise × points-per-decade × truth grid. §3.4 records
-  that no such curve exists in the literature, so this is the round's most likely publishable
-  contribution and it is the one that did not get machine time.
+**X2 — the identifiability ladder, 2 of 6 truths [measured, interim].**
+`benchmarks/six_plus/identifiability.py` operationalises section 4.3's grid exactly as section
+5.2's own method: simulate the truth at `(noise, points_per_decade)`, enumerate every R,C,L
+topology up to the truth's own element count, screen all of them (`fit.screen`, tier-1, seed=0),
+and read `gain = best(n−1) / best(n)`. Noise ∈ {0.1%, 0.3%, 1%, 3%}, points/decade ∈ {5, 10, 20},
+one data seed (1, distinct from the arenas' 0). `par6` and `ser6` first, because they are the pair
+section 5.9/5.11 already put on opposite sides of growth's recovery:
+
+| truth | noise | ppd=5 | ppd=10 | ppd=20 |
+|---|---:|---:|---:|---:|
+| `par6` | 0.1% | 77182.6 | 59312.0 | 51868.8 |
+| `par6` | 0.3% | 8575.1 | 6591.3 | 5765.8 |
+| `par6` | 1% | 772.0 | 594.1 | 520.3 |
+| `par6` | 3% | 86.3 | 66.8 | 58.8 |
+| `ser6` | 0.1% | **1.010** | 28.6 | 25.7 |
+| `ser6` | 0.3% | **1.017** | 3.9 | 3.7 |
+| `ser6` | 1% | **1.012** | 1.258 | 1.239 |
+| `ser6` | 3% | **1.107** | 1.036 | 1.026 |
+
+**`par6` never crosses into "not distinguishable" anywhere on this grid** — its worst cell (3%
+noise, 10 ppd) still gains 66.8x, three orders of magnitude above section 5.2's own "nothing"
+reading (1.007x on a genuinely five-element truth). That is not a surprise this late: `par6` is a
+`tune()`-maximised truth (section 4.6), so its sixth element is, by construction, the most
+identifiable member of its topology's parameter family.
+
+**`ser6` crosses it twice, for two different reasons, and only one of them is noise.** At 5
+points/decade, `gain` sits at 1.01–1.12 across the *entire* noise range — sparse sampling alone
+holds this truth at the boundary regardless of how clean the data is, which section 5.2's
+noise-only framing cannot express. At 10 or 20 points/decade the ladder is visible and behaves as
+expected — 28.6x at 0.1% noise, falling roughly as `1/noise²` (0.1%→0.3% is a 3x noise increase
+and a 7.3x `gain` drop, close to the 9x a pure square law predicts) — until it reaches **1.24–1.26
+at exactly the configuration (1% noise, 10 points/decade) every other experiment in this document
+uses as its default**, which is the quantitative form of section 5.9's qualitative reading that
+`ser6`'s five-element residual already sits inside the noise floor. `points_per_decade=20` never
+differs materially from `10` for either truth (51868.8 vs 59312.0, 1.239 vs 1.258) — the third
+rung of the density axis is doing little work, worth remembering if this grid's cost is revisited.
+
+**Not yet run: `mix6`, `par7`, `ser7`, `mix7`.** The seven-element truths cost roughly 5x per cell
+(11033 R,C,L topologies against 2174), so the full grid is the two shown here plus ~3.5–5 hours of
+additional machine time; that run was started (`benchmarks/six_plus/x2_ladder.json`, resumable)
+and this section will be updated with the six-truth table once it finishes. What is safe to say
+already: the two truths measured are not a curve yet, they are the two ends of one — a truth built
+to be identifiable that never fails, and a truth already known to sit at the edge that fails at
+*low* sampling density regardless of noise and fails at *ordinary* noise regardless of density.
+
 - **X3 (a trigger that fires when the sixth element is real)** — the reason growth ships
   **off** rather than automatic. §5.9's 30% → 1.3% on `par6`/`mix6`/`par7`/`mix7` is the design
   lead and the measurement it needs is the ROC over X2's grid, reported beside a false-positive
   rate on five-element truths. `ser6`/`ser7` (§5.9) supply the other half a trigger must get
   right: their residual sits at 1.4–1.7%, already inside the noise floor, and a trigger built only
   from the first four truths would fire there too and grow toward an element the data does not
-  support.
+  support. X2's `ser6` row above is the same reading in cost-ratio form: a trigger built on
+  `gain` alone would need to separate `ser6`'s 1.24x at the default configuration from whatever
+  the remaining truths' six-element rows read at the same cell, which is not yet measured.
 
 X7 is answered, in §5.10: on `par6`, `mix6`, `par7` and `mix7`, parsimony recommended the larger
 truth as soon as the search put it on the front, so the reporting axis was not the obstacle
