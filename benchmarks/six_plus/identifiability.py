@@ -60,11 +60,11 @@ sys.path.insert(0, str(_HERE))
 
 from truths import BY_ID, Truth  # noqa: E402
 
-from autocircuit.core.circuit import Circuit
-from autocircuit.core.enumerate import enumerate_up_to
-from autocircuit.core.fit import screen
-from autocircuit.core.simulate import log_frequencies, simulate
-from autocircuit.core.spectrum import Spectrum
+from autocircuit.core.circuit import Circuit  # noqa: E402
+from autocircuit.core.enumerate import enumerate_up_to  # noqa: E402
+from autocircuit.core.fit import screen  # noqa: E402
+from autocircuit.core.simulate import log_frequencies, simulate  # noqa: E402
+from autocircuit.core.spectrum import Spectrum  # noqa: E402
 
 #: The six pre-registered truths section 4.3 names -- the three five-element rows are the
 #: negative control for a different experiment (section 4.7) and are not part of this grid.
