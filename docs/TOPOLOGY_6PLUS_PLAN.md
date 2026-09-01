@@ -1,8 +1,7 @@
 # Six elements and up — the plan for the part of discovery that does not work
 
-**Status: experiments run, X4 (§5.9), X7 (§5.10) and X6 (§5.11) complete; the growth stage of §6
-is implemented and ships opt-in; X2 is running (2 of 6 truths measured, §5.12) and X3 is not done,
-named as such in §5.12.** Claims marked
+**Status: experiments run, X4 (§5.9), X7 (§5.10), X6 (§5.11) and X2 (§5.12) complete; the growth
+stage of §6 is implemented and ships opt-in; X3 is not done, named as such in §5.12.** Claims marked
 **[measured]** carry a number from a script under `benchmarks/`; everything else is a hypothesis
 and is labelled as one. Read `docs/EVOLVE_SEARCH_PLAN.md` and
 `docs/SEARCH_ALGORITHM_SCREENING.md` first; this document takes their measurements as given and
@@ -856,15 +855,16 @@ the fallback because a search this document calls a fallback should not carry an
 handicap the exhaustive stage does not, not because it was found to close any of the four gaps
 §2 names.
 
-### 5.12 X2 (interim) and X3 (not done)
+### 5.12 X2 (complete) and X3 (not done)
 
-**X2 — the identifiability ladder, 2 of 6 truths [measured, interim].**
+**X2 — the identifiability ladder, complete: 6 of 6 truths, 72 of 72 cells [measured].**
 `benchmarks/six_plus/identifiability.py` operationalises section 4.3's grid exactly as section
 5.2's own method: simulate the truth at `(noise, points_per_decade)`, enumerate every R,C,L
 topology up to the truth's own element count, screen all of them (`fit.screen`, tier-1, seed=0),
 and read `gain = best(n−1) / best(n)`. Noise ∈ {0.1%, 0.3%, 1%, 3%}, points/decade ∈ {5, 10, 20},
-one data seed (1, distinct from the arenas' 0). `par6` and `ser6` first, because they are the pair
-section 5.9/5.11 already put on opposite sides of growth's recovery:
+one data seed (1, distinct from the arenas' 0).
+
+Four truths never approach "not distinguishable" at any cell on the grid:
 
 | truth | noise | ppd=5 | ppd=10 | ppd=20 |
 |---|---:|---:|---:|---:|
@@ -872,16 +872,40 @@ section 5.9/5.11 already put on opposite sides of growth's recovery:
 | `par6` | 0.3% | 8575.1 | 6591.3 | 5765.8 |
 | `par6` | 1% | 772.0 | 594.1 | 520.3 |
 | `par6` | 3% | 86.3 | 66.8 | 58.8 |
+| `mix6` | 0.1% | 77210.6 | 59325.8 | 51879.3 |
+| `mix6` | 0.3% | 8578.2 | 6592.9 | 5766.9 |
+| `mix6` | 1% | 772.3 | 594.3 | 520.4 |
+| `mix6` | 3% | 86.4 | 66.8 | 58.8 |
+| `par7` | 0.1% | 29687.6 | 23723.0 | 20882.8 |
+| `par7` | 0.3% | 3299.0 | 2638.8 | 2321.6 |
+| `par7` | 1% | 297.6 | 239.0 | 209.9 |
+| `par7` | 3% | 33.9 | 27.6 | 24.2 |
+| `mix7` | 0.1% | 29618.9 | 23771.6 | 20989.9 |
+| `mix7` | 0.3% | 3291.4 | 2644.4 | 2333.5 |
+| `mix7` | 1% | 296.9 | 239.6 | 211.0 |
+| `mix7` | 3% | 33.8 | 27.7 | 24.3 |
+
+**Worst cell across all four is still 24.2x** (`par7`, 3% noise / 20 ppd), an order of magnitude
+above section 5.2's own "nothing" reading (1.007x on a genuinely five-element truth). That is not
+a surprise this late: every truth here is `tune()`-maximised (section 4.6), so each one's extra
+element is, by construction, the most identifiable member of its topology's parameter family. And
+**`mix6` tracks `par6` cell for cell, `mix7` tracks `par7` cell for cell** — every pair agrees to
+within 0.1% at every one of the 12 cells — which says the "mix" truths' extra structure does not
+change which element is hardest to see; the sixth (seventh) element is the same kind of easy
+regardless of what else the circuit contains.
+
+The two series-shaped truths are the opposite story:
+
+| truth | noise | ppd=5 | ppd=10 | ppd=20 |
+|---|---:|---:|---:|---:|
 | `ser6` | 0.1% | **1.010** | 28.6 | 25.7 |
 | `ser6` | 0.3% | **1.017** | 3.9 | 3.7 |
 | `ser6` | 1% | **1.012** | 1.258 | 1.239 |
 | `ser6` | 3% | **1.107** | 1.036 | 1.026 |
-
-**`par6` never crosses into "not distinguishable" anywhere on this grid** — its worst cell (3%
-noise, 10 ppd) still gains 66.8x, three orders of magnitude above section 5.2's own "nothing"
-reading (1.007x on a genuinely five-element truth). That is not a surprise this late: `par6` is a
-`tune()`-maximised truth (section 4.6), so its sixth element is, by construction, the most
-identifiable member of its topology's parameter family.
+| `ser7` | 0.1% | **1.874** | 1.536 | 1.378 |
+| `ser7` | 0.3% | **1.067** | 1.063 | 1.043 |
+| `ser7` | 1% | **1.034** | 1.012 | 1.014 |
+| `ser7` | 3% | **1.037** | 1.012 | 1.014 |
 
 **`ser6` crosses it twice, for two different reasons, and only one of them is noise.** At 5
 points/decade, `gain` sits at 1.01–1.12 across the *entire* noise range — sparse sampling alone
@@ -891,36 +915,42 @@ expected — 28.6x at 0.1% noise, falling roughly as `1/noise²` (0.1%→0.3% is
 and a 7.3x `gain` drop, close to the 9x a pure square law predicts) — until it reaches **1.24–1.26
 at exactly the configuration (1% noise, 10 points/decade) every other experiment in this document
 uses as its default**, which is the quantitative form of section 5.9's qualitative reading that
-`ser6`'s five-element residual already sits inside the noise floor. `points_per_decade=20` never
-differs materially from `10` for either truth (51868.8 vs 59312.0, 1.239 vs 1.258) — the third
-rung of the density axis is doing little work, worth remembering if this grid's cost is revisited.
+`ser6`'s five-element residual already sits inside the noise floor.
 
-**Update, 5 of 6 truths [measured, interim]: `mix6` and `par7` land on the identifiable side,
-`ser7` lands harder on the crossed side than `ser6` did.** `mix6` never leaves the thousands
-(worst cell 58.8x, at 3% noise / 20 ppd — matching `par6`'s worst cell, 58.8x, almost exactly).
-`par7` stays identifiable throughout too, worst cell 24.2x (3% noise / 20 ppd) — lower than the
-six-element parallel/mixed truths but nowhere near the boundary. `ser7` never gets there even at
-its easiest cell: 1.87x at 0.1% noise / 5 ppd, falling to 1.01–1.07x everywhere at 0.3% noise and
-above, at *every* points-per-decade tried — where `ser6` still reached 25–29x at 0.1% noise with
-10–20 points/decade, `ser7` cannot clear roughly 2x even there. The run was interrupted (by
-request, before a shutdown) with `mix7` — the last of the six truths — not yet started; the row
-above stands as the read on five of six and `benchmarks/six_plus/x2_ladder.json` resumes from
-where it stopped (`python identifiability.py --out benchmarks/six_plus/x2_ladder.json --workers
-8`, same command, already-computed cells are skipped). Reading so far: **shape predicts the
-crossing far more than element count does** — both series-shaped truths cross into "not
-distinguishable" at or near the standard 1%-noise/10-ppd configuration and both non-series shapes
-stay one to three orders of magnitude clear of it at every cell tried, and adding a seventh
-element made the series shape's crossing *more* severe rather than less.
+**`ser7` never clears roughly 1.9x anywhere on the grid, and it is the one truth where more points
+per decade makes the extra element *harder* to see, not easier.** Its best cell is not its
+cleanest — 1.874x at 0.1% noise sampled at only 5 points/decade — and `gain` *falls* as
+`points_per_decade` rises at every noise level (0.1%: 1.874 → 1.536 → 1.378; 0.3%: 1.067 → 1.063 →
+1.043), the opposite of `ser6`'s behaviour, where more points always helped or was neutral. At the
+project's standard configuration (1% noise, 10 ppd) `ser7` reads 1.012x — indistinguishable from
+"nothing" to three digits, and worse than `ser6`'s 1.258x at the same cell. This direction reversal
+is measured, not explained; a plausible reading is that `ser7`'s extra element affects the spectrum
+over a narrower band than `ser6`'s did, so added points mostly land off that band and dilute rather
+than sharpen the signal, but that has not been checked and should not be assumed of any other
+truth. `points_per_decade=20` never differs materially from `10` for either series truth (25.7 vs
+28.6 for `ser6`; 1.378 vs 1.536 for `ser7`) — the third rung of the density axis does little work
+across the whole grid, six-element and seven-element alike.
+
+**Reading, all 72 cells: shape predicts the crossing far more than element count or size does.**
+Both series-shaped truths cross into "not distinguishable" at or near the standard 1%-noise/10-ppd
+configuration, and every non-series shape — parallel or mixed, six or seven elements — stays one to
+three orders of magnitude clear of that boundary at every cell tried. Adding a seventh element made
+the series shape's crossing *more* severe (`ser6`'s 1.258x at the default cell fell to `ser7`'s
+1.012x) while leaving the non-series shapes' margin roughly where it was in kind, if not in exact
+size (`par6`'s 594x at the default cell vs `par7`'s 239x — both still far from 1). The full grid is
+`benchmarks/six_plus/x2_ladder.json`, 72 of 72 cells.
 
 - **X3 (a trigger that fires when the sixth element is real)** — the reason growth ships
   **off** rather than automatic. §5.9's 30% → 1.3% on `par6`/`mix6`/`par7`/`mix7` is the design
   lead and the measurement it needs is the ROC over X2's grid, reported beside a false-positive
   rate on five-element truths. `ser6`/`ser7` (§5.9) supply the other half a trigger must get
   right: their residual sits at 1.4–1.7%, already inside the noise floor, and a trigger built only
-  from the first four truths would fire there too and grow toward an element the data does not
-  support. X2's `ser6` row above is the same reading in cost-ratio form: a trigger built on
-  `gain` alone would need to separate `ser6`'s 1.24x at the default configuration from whatever
-  the remaining truths' six-element rows read at the same cell, which is not yet measured.
+  from the four non-series truths would fire there too and grow toward an element the data does
+  not support. X2's `ser6`/`ser7` rows above are the same reading in cost-ratio form: a trigger
+  built on `gain` alone would need to separate `ser6`'s 1.24x and `ser7`'s 1.01x at the default
+  configuration from the four non-series truths' hundreds-to-tens-of-thousands at the same cell —
+  X2's grid is now complete and ready to score a candidate rule against, but no rule has been
+  built or scored yet.
 
 X7 is answered, in §5.10: on `par6`, `mix6`, `par7` and `mix7`, parsimony recommended the larger
 truth as soon as the search put it on the front, so the reporting axis was not the obstacle

@@ -2643,13 +2643,21 @@ Fixing any one alone changes nothing, which is what happened to `EVOLVE_SEARCH_P
   handicap the exhaustive stage does not), but it was never why any six-element truth went
   unrecovered. `workers` now flows through `discover()` to `_evolve` exactly as it already did to
   `_exhaustive`; `workers=1` (default) is byte-identical to the loop it replaces.
-- **X2 (the identifiability ladder) and X3 (a trigger for when the sixth element is real) are not
-  done** — the reason `GROWTH_DEFAULT` stays 0 rather than becoming automatic. X2 is a noise ×
-  points-per-decade × truth grid (`TOPOLOGY_6PLUS_PLAN.md` §4.3, §5.12) that no published curve
-  answers (§3.4); X3 needs its ROC. §5.9's `par6`/`mix6`/`par7`/`mix7` (30% → 1.3% residual) versus
-  `ser6`/`ser7` (residual already at 1.4–1.7%, inside the noise floor) is the design lead: a
-  trigger built only from the first four truths would fire on the last two as well, and grow
-  toward an element the data does not support.
+- **X2 (the identifiability ladder) is complete, 6 of 6 truths / 72 of 72 cells [measured,
+  `benchmarks/six_plus/identifiability.py`, `TOPOLOGY_6PLUS_PLAN.md` §5.12]; X3 (a trigger for
+  when the sixth element is real) is not done — the reason `GROWTH_DEFAULT` stays 0 rather than
+  becoming automatic.** X2 is a noise × points-per-decade × truth grid (§4.3) that no published
+  curve answers (§3.4): `par6`, `mix6`, `par7` and `mix7` never leave the tens-to-tens-of-thousands
+  range at any of their 48 cells (worst 24.2x), while `ser6` and `ser7` sit at or near `gain≈1`
+  across most of the grid and cross into "not distinguishable" at or near the project's standard
+  1%-noise/10-ppd configuration (`ser6` 1.258x, `ser7` 1.012x) — **shape predicts the crossing far
+  more than element count does**, and the seventh element made the series shape's crossing worse,
+  not better. §5.9's `par6`/`mix6`/`par7`/`mix7` (30% → 1.3% residual) versus `ser6`/`ser7`
+  (residual already at 1.4–1.7%, inside the noise floor) is the same finding read off recovery
+  rate rather than cost ratio, and is still the design lead for X3, which needs the ROC over this
+  now-complete grid: a trigger built only from the four non-series truths would fire on the other
+  two as well, and grow toward an element the data does not support. No candidate rule has been
+  built or scored yet.
 
 ### Environment
 

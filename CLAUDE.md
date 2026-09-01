@@ -424,7 +424,8 @@ static-site Web UI running the same core via WASM (Pyodide).
 
 16. `docs/TOPOLOGY_6PLUS_PLAN.md` — six elements and up, which is where the automatic path stops
    working. **Experiments run and recorded; the growth stage is implemented and shipped
-   opt-in; X4, X6 and X7 are complete (§5.9, §5.11, §5.10); X2 and X3 remain open (§5.12).** Its §2 is the part to read first, because
+   opt-in; X4, X6, X7 and X2 are complete (§5.9, §5.11, §5.10, §5.12); X3 remains open (§5.12).**
+   Its §2 is the part to read first, because
    it is the reframing the rest depends on: "six elements does not work" is **four** independent
    problems — whether the spectrum distinguishes six elements from five at all (**information**),
    whether the class is reached (**search**), whether it is fitted well enough to *score*
@@ -486,7 +487,16 @@ static-site Web UI running the same core via WASM (Pyodide).
    the same reading §5.9 and §5.10 already gave that shape, that its obstacle is the residual
    already sitting inside the noise floor rather than search reach. So the asymmetry X6 measured
    (single-threaded evolve against six-way exhaustive) was real and worth fixing, and it was never
-   the reason any six-element truth went unrecovered.
+   the reason any six-element truth went unrecovered. **X2 [measured, §5.12], the identifiability
+   ladder over all 6 truths × 12 (noise, points-per-decade) cells = 72 cells:** `par6`, `mix6`,
+   `par7` and `mix7` never approach "not distinguishable" anywhere on the grid (worst cell 24.2x,
+   an order of magnitude clear), while `ser6` and `ser7` sit at or near `gain≈1` across most of it
+   and cross into "not distinguishable" at or near the project's standard 1%-noise/10-ppd cell
+   (`ser6` 1.258x, `ser7` 1.012x) — **shape predicts the crossing far more than element count
+   does**, and the seventh element made the series shape's crossing worse rather than better. This
+   is why `GROWTH_DEFAULT` stays `0`: the search evidence (X4) and the identifiability evidence
+   (X2) agree on which shape growth should not be trusted for. X3, the decision rule that would
+   read this grid and fire only when the extra element is real, is not yet built.
 
 Update these when decisions change.
 
