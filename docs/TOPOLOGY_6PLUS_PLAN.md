@@ -1,7 +1,9 @@
 # Six elements and up — the plan for the part of discovery that does not work
 
-**Status: experiments run, X4 (§5.9), X7 (§5.10), X6 (§5.11) and X2 (§5.12) complete; the growth
-stage of §6 is implemented and ships opt-in; X3 is not done, named as such in §5.12.** Claims marked
+**Status: experiments run, X4 (§5.9), X7 (§5.10), X6 (§5.11), X2 and X3 (both §5.12) complete; the
+growth stage of §6 is implemented and ships opt-in.** X3's measurement did not produce a trigger to
+ship: no candidate dominates the incumbent runs test on both recovery and false-positive rate, so
+`GROWTH_DEFAULT` stays `0` and `_is_underfitted` is unchanged. Claims marked
 **[measured]** carry a number from a script under `benchmarks/`; everything else is a hypothesis
 and is labelled as one. Read `docs/EVOLVE_SEARCH_PLAN.md` and
 `docs/SEARCH_ALGORITHM_SCREENING.md` first; this document takes their measurements as given and
@@ -855,7 +857,7 @@ the fallback because a search this document calls a fallback should not carry an
 handicap the exhaustive stage does not, not because it was found to close any of the four gaps
 §2 names.
 
-### 5.12 X2 (complete) and X3 (not done)
+### 5.12 X2 and X3 (both complete)
 
 **X2 — the identifiability ladder, complete: 6 of 6 truths, 72 of 72 cells [measured].**
 `benchmarks/six_plus/identifiability.py` operationalises section 4.3's grid exactly as section
@@ -940,17 +942,73 @@ the series shape's crossing *more* severe (`ser6`'s 1.258x at the default cell f
 size (`par6`'s 594x at the default cell vs `par7`'s 239x — both still far from 1). The full grid is
 `benchmarks/six_plus/x2_ladder.json`, 72 of 72 cells.
 
-- **X3 (a trigger that fires when the sixth element is real)** — the reason growth ships
-  **off** rather than automatic. §5.9's 30% → 1.3% on `par6`/`mix6`/`par7`/`mix7` is the design
-  lead and the measurement it needs is the ROC over X2's grid, reported beside a false-positive
-  rate on five-element truths. `ser6`/`ser7` (§5.9) supply the other half a trigger must get
-  right: their residual sits at 1.4–1.7%, already inside the noise floor, and a trigger built only
-  from the four non-series truths would fire there too and grow toward an element the data does
-  not support. X2's `ser6`/`ser7` rows above are the same reading in cost-ratio form: a trigger
-  built on `gain` alone would need to separate `ser6`'s 1.24x and `ser7`'s 1.01x at the default
-  configuration from the four non-series truths' hundreds-to-tens-of-thousands at the same cell —
-  X2's grid is now complete and ready to score a candidate rule against, but no rule has been
-  built or scored yet.
+- **X3 (a trigger that fires when the sixth element is real) — complete, and it did not produce a
+  trigger to ship.** `benchmarks/six_plus/trigger.py` scores the four candidates section 4.3
+  named — (a) the current runs test, (b) a nested F-test between the best model at the smaller
+  size and its own one-element extensions (`enumerate._insertions`, so the comparison is nested
+  *by construction* rather than by picking the independently-best topology of the larger size),
+  (c) a parametric bootstrap of (b)'s statistic (needed because the inserted element's parameter
+  sits at a boundary of its range under the null, which breaks the asymptotic F-distribution's
+  regularity conditions), and (d) X9's `stabilisation_order`, read as a margin over the same
+  estimator's reading on a clean, noise-free simulation of the smaller model's own fitted circuit
+  — against a **108-row labelled set**: X2's own 72 cells (six truths × 12 grid cells, where
+  growing one element is always correct) plus 36 more built the same way from `par5`/`ser5`/
+  `mix5` at the boundary (5 → 6), where it never is. [measured, `benchmarks/six_plus/x3_trigger.json`]
+
+  | candidate | recovery (real=True) | false-positive rate (real=False) |
+  |---|---:|---:|
+  | (a) runs test | 52.78% (38/72) | **0.00%** (0/36) |
+  | (b) F-test | **80.56%** (58/72) | 16.67% (6/36) |
+  | (c) bootstrap | 51.39% (37/72) | 5.56% (2/36) |
+  | (d) pole margin | 11.11% (8/72) | 22.22% (8/36) |
+
+  **No candidate dominates the incumbent on both axes, so nothing replaces it.** Of the four,
+  only (a) and (b) sit on the recovery/false-positive Pareto front; (c) is dominated by (a)
+  outright (52.78%/0.00% beats 51.39%/5.56% on both numbers), and (d) is dominated by (a) on both
+  axes too — it is the fourth independent measurement in this repository finding pole-order
+  estimation unreliable under noise, after X9 itself. Per section 4.3's own decision rule ("the
+  winner replaces `_is_underfitted`, or nothing does, and the trigger is removed rather than left
+  in place looking like a check"), the honest reading is that **nothing wins outright**: (b) would
+  roughly triple recovery (52.78% → 80.56%) but at a false-positive rate more than three times the
+  nominal 5% the bootstrap was built to hold to, and accepting that trade is a choice this
+  measurement can inform but not make. `_is_underfitted` is therefore left as it stands, and
+  `GROWTH_DEFAULT` stays `0` for the same reason X4 already gave it: no report-side check
+  measured here is trustworthy enough to promise the user "the sixth element is real."
+
+  **The bootstrap did exactly the job it was built for, and it cost recovery to do it.** At 100
+  replicates per cell (screen-grade refits of both the smaller model and its extension on data
+  resimulated from the smaller model's own fit), (c)'s false-positive rate lands at 5.56% against
+  a nominal alpha of 0.05 -- 2 false positives on 36 negative cells is within one event of the 1.8
+  the calibration target predicts. All six of (b)'s false positives sit at `p` between 0.026 and
+  0.042 -- just inside the 0.05 line, not by orders of magnitude -- and the bootstrap disagrees
+  with four of the six, reading the identical fit as not significant (`boot_p` 0.06-0.16) rather
+  than as a coin-flip's difference from the asymptotic answer. The clearest case: `mix5` at 0.3%
+  noise, 5 points/decade extends its own best fit `p(R1-C1,R2-C2,R3)` with an inductor,
+  `p(R1-C1,p(R2-C2,R3)-L1)`, and the asymptotic test calls that significant at `p = 0.026`
+  (`f = 5.15`) where the bootstrap on the same pair reads `p = 0.059` -- not quite. That is the
+  boundary-null problem section 4.3 predicted, measured rather than assumed: the inserted
+  element's parameter can go to zero (or infinity) at the null, which is exactly the condition
+  under which a plain extra-sum-of-squares F-test is known to be anti-conservative, and here the
+  effect is real but modest -- a handful of borderline calls near the 5% line, not a test that is
+  wrong by many orders of magnitude.
+
+  **The shape-dependence X2 measured in cost ratios reappears here in fire/no-fire terms, cell for
+  cell, and (d) never clears the project's default operating point at all.** Over the whole grid
+  (a) is 0/12 on both `ser6` and `ser7` against 100% and 58.33% on `par6`/`par7`, the parallel-
+  shaped truths at the same two sizes -- the same asymmetry X2 already read off cost ratios. At
+  the project's standard configuration (1% noise, 10 points/decade) -- the one cell every other
+  measurement in this document reports at -- **(d) reads "no" on every one of the six real
+  boundaries**, `par6`/`mix6`/`par7` included, so at this cell it recovers nothing at all; its
+  11.11% overall recovery comes entirely from other cells. `ser7` is where every candidate agrees:
+  (a), (b), (c) and (d) all read "no" there, (b)'s own asymptotic `p = 0.876` nowhere near
+  significant, so *no* candidate here would have grown `ser7` at the pipeline's own default
+  operating point. `ser6` is not as absolute -- (a) and (d) read "no" but (b) and (c) both
+  correctly fire (`p = 2.5e-08`, `boot_p = 0.0198`) -- so the standard cell alone understates how
+  much of the series shape a trigger can reach; it is `ser7`, not the shape in general, that
+  nothing here recovers at the project's default settings. The reading X2 already made still
+  holds: a trigger tuned on `par6`/`mix6`/`par7`/`mix7` alone, exactly the four truths section 4.3
+  named as the design lead, would have looked reliable while missing part of the series-shaped
+  case a trigger has to get right.
 
 X7 is answered, in §5.10: on `par6`, `mix6`, `par7` and `mix7`, parsimony recommended the larger
 truth as soon as the search put it on the front, so the reporting axis was not the obstacle

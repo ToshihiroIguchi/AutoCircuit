@@ -424,7 +424,8 @@ static-site Web UI running the same core via WASM (Pyodide).
 
 16. `docs/TOPOLOGY_6PLUS_PLAN.md` — six elements and up, which is where the automatic path stops
    working. **Experiments run and recorded; the growth stage is implemented and shipped
-   opt-in; X4, X6, X7 and X2 are complete (§5.9, §5.11, §5.10, §5.12); X3 remains open (§5.12).**
+   opt-in; X4, X6, X7, X2 and X3 are all complete (§5.9, §5.11, §5.10, §5.12). X3's measurement
+   did not produce a trigger worth shipping — see §5.12.**
    Its §2 is the part to read first, because
    it is the reframing the rest depends on: "six elements does not work" is **four** independent
    problems — whether the spectrum distinguishes six elements from five at all (**information**),
@@ -495,8 +496,23 @@ static-site Web UI running the same core via WASM (Pyodide).
    (`ser6` 1.258x, `ser7` 1.012x) — **shape predicts the crossing far more than element count
    does**, and the seventh element made the series shape's crossing worse rather than better. This
    is why `GROWTH_DEFAULT` stays `0`: the search evidence (X4) and the identifiability evidence
-   (X2) agree on which shape growth should not be trusted for. X3, the decision rule that would
-   read this grid and fire only when the extra element is real, is not yet built.
+   (X2) agree on which shape growth should not be trusted for. **X3 [measured, §5.12], the
+   decision rule that would read this grid and fire only when the extra element is real, is
+   complete — and it did not produce a trigger worth shipping.** Scored on a 108-row labelled set
+   (X2's 72 real boundaries plus 36 more built the same way from three five-element negative
+   controls) against four candidates — the current runs test, a nested F-test between the best
+   smaller-size model and its own one-element extensions, a parametric bootstrap of that
+   statistic, and X9's pole count read as a margin — **no candidate dominates the incumbent runs
+   test on both recovery and false-positive rate**: the runs test is 52.78% recovery / 0.00% false
+   positives, the F-test is 80.56% / 16.67%, the bootstrap (which calibrates the F-test's
+   boundary-null problem correctly, landing within one event of its own 5% target) is 51.39% /
+   5.56% — dominated by the plain runs test — and the pole-count margin is 11.11% / 22.22%,
+   dominated on both axes and the fourth independent measurement in this repository finding
+   pole-order estimation unreliable under noise. `_is_underfitted` is unchanged and
+   `GROWTH_DEFAULT` stays `0` for the reason X4 already gave it, now doubled: no report-side check
+   measured here is trustworthy enough to promise the user the sixth element is real, and the
+   series shape X2 flagged is where every candidate agrees least — at the project's own standard
+   cell, `ser7` is read "no" by all four.
 
 Update these when decisions change.
 

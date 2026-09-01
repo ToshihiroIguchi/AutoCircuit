@@ -24,6 +24,8 @@ interpreter, not a broken environment.
 | `order.py` | information | Can a rational fit to Z(s) say how many relaxations the data supports? (X9) |
 | `recovery.py` | all four | Does the whole pipeline recover the truth, across shapes and sizes? (X4) |
 | `build_arenas.py` | search | Freeze one `screening_round` landscape and target set per truth |
+| `identifiability.py` | information | Where does a sixth/seventh element stop being distinguishable, over (noise, points/decade)? (X2) |
+| `trigger.py` | reporting | Does a candidate decision rule fire exactly when the extra element is real? (X3) |
 
 ## `truths.py` — the truth set
 
@@ -98,6 +100,34 @@ which moved. The five-element truths are scored separately, on whether the recom
 
 This is wall-clock and therefore the *last* check, never the comparison: for comparing searches
 in a unit that does not drift with machine load, use `benchmarks/screening_round` and count fits.
+
+## `identifiability.py` — X2, the identifiability ladder
+
+```powershell
+py -3.13 benchmarks/six_plus/identifiability.py --dry-run
+py -3.13 benchmarks/six_plus/identifiability.py --out benchmarks/six_plus/x2_ladder.json --workers 8
+```
+
+**Complete: 6 truths x 12 (noise, points-per-decade) cells = 72 cells.** Where a sixth/seventh
+element stops being distinguishable from every smaller circuit the pool can build. `par6`, `mix6`,
+`par7` and `mix7` never approach "not distinguishable" anywhere on the grid; `ser6` and `ser7` sit
+at or near the boundary across most of it. See `docs/TOPOLOGY_6PLUS_PLAN.md` section 5.12.
+
+## `trigger.py` — X3, a decision rule scored against X2's grid
+
+```powershell
+py -3.13 benchmarks/six_plus/trigger.py --dry-run
+py -3.13 benchmarks/six_plus/trigger.py --out benchmarks/six_plus/x3_trigger.json `
+    --boot-reps 100 --workers 8
+py -3.13 benchmarks/six_plus/trigger.py --summarize benchmarks/six_plus/x3_trigger.json
+```
+
+**Complete: 108 rows (X2's 72 real boundaries plus 36 more from three five-element negative
+controls).** Scores four candidate triggers -- the current runs test, a nested F-test, a
+parametric bootstrap of it, and X9's pole count as a margin -- and reports each as a
+(recovery, false-positive rate) pair. **Did not produce a trigger worth shipping**: no candidate
+dominates the incumbent runs test on both axes. See `docs/TOPOLOGY_6PLUS_PLAN.md` section 5.12
+for the numbers and the reasoning.
 
 ## `build_arenas.py` — one frozen landscape per truth
 
