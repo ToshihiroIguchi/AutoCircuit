@@ -516,7 +516,8 @@ static-site Web UI running the same core via WASM (Pyodide).
 
 17. `docs/SEARCH_TIME_PLAN.md` — where the topology search spends its time, and the levers on
    it. **§3.1 implemented and shipped, §3.2 measured and its fix rejected, §4.2 measured and
-   its flag rejected, the rest is still plan only.** It is deliberately *not* about the 13x F2
+   its flag rejected, §4.1 measured and its own decision rule keeps it a lever rather than a
+   default, the rest is still plan only.** It is deliberately *not* about the 13x F2
    gap `SEARCH_ALGORITHM_SCREENING.md`
    measured: it collects the F1 and F3 levers the earlier rounds set aside — the per-topology
    setup that is 23–33% of a screen and mostly per-*dataset* work recomputed 2,976 times, a
@@ -560,6 +561,17 @@ static-site Web UI running the same core via WASM (Pyodide).
    the ordinary-noise rows' ratios (up to 5.8x–8.2x), because the flag compares one single-seed
    draw against another single-seed draw of a *different, smaller* topology, which is exactly as
    exposed to the same basin lottery as the parent it is trying to check. Nothing shipped.
+   **§4.1 closes the loop §4.2 opened**: the recovery arm §5.7.2 had deferred (`seeds2` in
+   `benchmarks/six_plus/recovery.py`, coded but never run) was finally run on the same nine
+   truths and three seeds X4 used, and against the decision rule written before the run —
+   "ships as the default only if it moves at least one truth from lost to reported, and
+   removes none" — it moved **zero** of the eighteen large-truth recovery cells (0/18 both
+   before and after, unchanged by shape). This is not a contradiction of §5.7.2's own basin
+   ratio (37.7–41.4x at one seed, 1.06–1.16x at two): that measurement was about the sampled
+   landscape's noise, and these nine truths' own screened landscapes were never shown to
+   contain a mis-screen for a second seed to repair. `screen_restarts=2` stays an available
+   lever, not the shipped default — the fourth item in this section to be measured and not
+   ship, after §3.2 and §4.2's rejections and alongside §3.1's more qualified acceptance.
 
 Update these when decisions change.
 

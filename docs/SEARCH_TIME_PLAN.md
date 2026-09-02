@@ -2,10 +2,12 @@
 
 Status: **§3.1 implemented and shipped (gate T1 passed on revised numbers); §3.2 measured and
 its fix rejected (gate T2 run, not passed, nothing shipped); §4.2 measured and its flag rejected
-(gate T3 run, not passed, nothing shipped); everything else is still plan only.** Written
-2026-09-02. Every number outside §3.1/§3.2/§4.2 and §6's T1/T2/T3 entries is quoted from a
-document that measured it before this plan existed; the rest of the gates in section 6 are what
-this plan would still have to pass, and none of the rest has been run.
+(gate T3 run, not passed, nothing shipped); §4.1 run and its own decision rule says it does not
+ship either (gate T6 run, changed nothing on the nine truths); everything else is still plan
+only.** Written 2026-09-02. Every number outside §3.1/§3.2/§4.1/§4.2 and §6's T1/T2/T3/T6
+entries is quoted from a document that measured it before this plan existed; the rest of the
+gates in section 6 are what this plan would still have to pass, and none of the rest has been
+run.
 
 ## 0. What this plan is and is not
 
@@ -84,6 +86,7 @@ Listed so that nobody spends a day re-deriving them. Each has a measurement besi
 | warm-accept factor between 1.5 and 10 | inside run-to-run spread; the knob is binary | `EVOLVE_SEARCH_PLAN.md` §3.3.1 |
 | raising `WORKER_CHUNK` to cut tier-1 idle | cuts idle 31.7%→13.4% but changes the tier-2 shortlist on a CPE/SKINF pair; not number-preserving | this document, §3.2 |
 | sub-tree re-screen flag | catches 100% of >100x mis-screens, but flags 70.6–78.7% of all topologies -- its own comparison is exactly as noisy as the lottery it targets | this document, §4.2 |
+| universal second screening seed as the shipped default | recovery unchanged on all nine X4 truths at 2x tier-1 cost (0/18 -> 0/18 on the six/seven-element rows, 3/9-3/9-3/9 by shape both before and after) -- stays a lever, not a default | this document, §4.1 |
 
 ## 3. Levers on F1 — seconds per evaluation
 
@@ -265,12 +268,12 @@ inside the noise of a total-wall-clock measurement.
 
 ## 4. Levers on F3 and on the fallback's throughput
 
-### 4.1 The second screening seed: run the experiment that was deferred
+### 4.1 The second screening seed: run the experiment that was deferred [measured, 2026-09-03]
 
 `TOPOLOGY_6PLUS_PLAN.md` §5.7.2 ends: "the case for paying that is a *recovery* measurement
 — does a second seed put truths on the shortlist that one seed lost — and that is X4, below."
 X4 ran 54 runs across the `base` and `grow` arms and none of `seeds2` or `grow+seeds2`. The
-arm is coded (`benchmarks/six_plus/recovery.py:77-82`); it has not been run.
+arm is coded (`benchmarks/six_plus/recovery.py:77-82`); it had not been run.
 
 **Design.** Run `seeds2` on the same nine truths and three seeds X4 used, and report per
 truth: whether a truth-equivalent reached the shortlist, the front, and the recommendation,
@@ -281,6 +284,28 @@ if it moves at least one truth from "lost at the shortlist" to "reported" on a t
 loses, *and* does not remove any. If it changes nothing on those nine, it stays a lever and
 the number is recorded — a 2% mis-screen rate on a random sample does not by itself say the
 truth is among the 2%.
+
+**What was measured.** `benchmarks/six_plus/recovery.py --arms seeds2` on the same nine
+truths and three noise seeds `base`/`grow` already used (27 runs, resumed into the existing
+`x4_recovery.json`). On the six- and seven-element rows, `seeds2` reports 0/18 — identical to
+`base`'s 0/18 — and the by-shape breakdown is unchanged in every cell: parallel 3/9, series
+3/9, mixed 3/9, both before and after. The five-element negative control also does not move
+(9/9 recommended correctly, 0/9 over-grown, both arms). Median wall-clock on the large truths
+rose only 20s → 24s, not the ~2x a doubled tier-1 cost might suggest, because tier 1 is a
+minority of a run that also pays for tier-2 refits and (on `base`/`seeds2`, `growth_width=0`)
+no growth stage.
+
+**The decision rule's own answer is no.** Nothing moved from "lost at the shortlist" to
+"reported" on any of the six truths `base` already loses, so the rule written before this ran
+does not license `seeds2` as the default. This is not a contradiction of §4.2's `>100x`
+basin-lottery finding — the six large truths' own screened landscapes were never shown here to
+contain a mis-screened row at all, so a second seed had nothing to repair on *these specific*
+nine truths. `TOPOLOGY_6PLUS_PLAN.md` §5.7.2's ratio measurement (mean 37.7–41.4x at one seed,
+1.06–1.16x at two) stays correct as a statement about the sampled landscape; it does not
+transfer into a recovery win on this arena, which is exactly why the decision rule asked for a
+recovery measurement instead of trusting the ratio. **`screen_restarts=2` stays a lever
+(`discover(..., screen_restarts=2)`), not the shipped default.** The X4/T6 table is recorded
+in full below regardless of the outcome, per the rule that a run is reported whatever it says.
 
 ### 4.2 A selective re-screen flag -- measured, and rejected [measured, 2026-09-03]
 
@@ -392,7 +417,7 @@ generation) and then either fixed in an afternoon or closed with the number.
 | §3.1 setup hoist | 23–33% of a screen | **[implemented, measured]** 10.4% at `workers=1`, no measurable effect at `workers=8` on this machine | no (byte-identical, confirmed) |
 | §3.2 streaming dispatch | inter-chunk idle | **[measured, rejected]** 31.7% idle confirmed, but the only lever found (a bigger batch) is not number-preserving -- reverted | -- |
 | §3.3 kernel micro-opt | 36–47% of a screen | screen ≤ 1.2–1.3x | last-place bits (digit gate) |
-| §4.1 second seed | F3 | recovery, at 2x tier-1 cost | yes, deliberately |
+| §4.1 second seed | F3 | **[measured, not shipped]** 0/18 -> 0/18 on the X4 large truths, no cell moved -- stays a lever | yes, deliberately (unused) |
 | §4.2 selective flag | F3 | **[measured, rejected]** catches 100% of >100x mis-screens but flags 70.6–78.7% of everything -- not selective, nothing shipped | -- |
 | §4.3 evolve dispatch | fallback throughput | more distinct topologies per second at 8 workers | evolve only |
 
@@ -450,8 +475,12 @@ number is reported as a pair, rested and loaded, per `WEB_UI_PLAN.md`'s W3 prece
 - **T5 (kernel micro-opt).** Every reported digit of the three references' `--json` reports
   equal before and after; the byte fingerprint difference is recorded in this document, not
   suppressed. Kernel bucket falls by at least a quarter, else the change is reverted.
-- **T6 (second seed).** The §4.1 decision rule, applied to the nine X4 truths, with the
-  per-truth table recorded whatever it says.
+- **T6 (second seed). [run, 2026-09-03; the decision rule's answer is no.]** `seeds2` on the
+  same nine X4 truths and three seeds: 0/18 on the six/seven-element rows, identical to
+  `base`'s 0/18, and unchanged by shape (3/9/3/9/3/9 both arms). The five-element negative
+  control also does not move (9/9, 0/9 over-grown, both arms). Nothing moved from "lost at the
+  shortlist" to "reported," so per the rule written before the run, `screen_restarts=2` does
+  not become the default. It remains available as a lever.
 
 ## 7. Order of work
 
@@ -461,10 +490,12 @@ number is reported as a pair, rested and loaded, per `WEB_UI_PLAN.md`'s W3 prece
 3. **[done, rejected]** §4.2's catch-rate measurement and T3 — catches 100% of measured
    mis-screens but flags 70.6–78.7% of everything, not the "under 50%" the decision rule
    required; nothing shipped from this step.
-4. §4.1 / T6 — the deferred experiment, without a flag (step 3 closed with nothing to combine).
+4. **[done, not shipped]** §4.1 / T6 — the deferred experiment, without a flag (step 3 closed
+   with nothing to combine): `seeds2` changes 0 of 18 large-truth recovery cells against
+   `base`, so its own decision rule keeps it a lever rather than the default.
 5. §4.3 and T4.
 6. §3.3 and T5, last, because it is the only F1 item that changes bits.
 7. The one cheap count from §3.4 (class multiplicity in a landscape table), recorded either
    way.
 
-Steps 2–7 are not implemented yet.
+Steps 5–7 are not implemented yet.
