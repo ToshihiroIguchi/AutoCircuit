@@ -1,10 +1,11 @@
 # Where the topology search spends its time, and what may be done about it
 
 Status: **§3.1 implemented and shipped (gate T1 passed on revised numbers); §3.2 measured and
-its fix rejected (gate T2 run, not passed, nothing shipped); everything else is still plan
-only.** Written 2026-09-02. Every number outside §3.1/§3.2 and §6's T1/T2 entries is quoted from
-a document that measured it before this plan existed; the rest of the gates in section 6 are
-what this plan would still have to pass, and none of the rest has been run.
+its fix rejected (gate T2 run, not passed, nothing shipped); §4.2 measured and its flag rejected
+(gate T3 run, not passed, nothing shipped); everything else is still plan only.** Written
+2026-09-02. Every number outside §3.1/§3.2/§4.2 and §6's T1/T2/T3 entries is quoted from a
+document that measured it before this plan existed; the rest of the gates in section 6 are what
+this plan would still have to pass, and none of the rest has been run.
 
 ## 0. What this plan is and is not
 
@@ -82,6 +83,7 @@ Listed so that nobody spends a day re-deriving them. Each has a measurement besi
 | rational approximation / AAA / Loewner | exact without noise, 0.04–0.20 recovery with it | `TOPOLOGY_6PLUS_PLAN.md` §3.3–3.4 |
 | warm-accept factor between 1.5 and 10 | inside run-to-run spread; the knob is binary | `EVOLVE_SEARCH_PLAN.md` §3.3.1 |
 | raising `WORKER_CHUNK` to cut tier-1 idle | cuts idle 31.7%→13.4% but changes the tier-2 shortlist on a CPE/SKINF pair; not number-preserving | this document, §3.2 |
+| sub-tree re-screen flag | catches 100% of >100x mis-screens, but flags 70.6–78.7% of all topologies -- its own comparison is exactly as noisy as the lottery it targets | this document, §4.2 |
 
 ## 3. Levers on F1 — seconds per evaluation
 
@@ -280,7 +282,7 @@ loses, *and* does not remove any. If it changes nothing on those nine, it stays 
 the number is recorded — a 2% mis-screen rate on a random sample does not by itself say the
 truth is among the 2%.
 
-### 4.2 A selective re-screen flag (cheaper than 4.1; measure its catch rate first)
+### 4.2 A selective re-screen flag -- measured, and rejected [measured, 2026-09-03]
 
 A universal second seed pays 100% to repair 1–2%. A flag that names the suspicious screens
 would pay only for those. One principled flag is available from the order tier 1 already
@@ -296,11 +298,59 @@ screen's time and cannot change a result for the worse. This is the same shape a
 resonance probe in `KK_RESONANCE_PLAN.md` §2: a second look asked only of what already looks
 wrong, able to move a verdict in one direction only.
 
-**Measure first, on the existing sample.** The 360-topology, 5-seed sample from §5.7.2 is
-enough to answer both questions without a search run: what fraction of the > 100x mis-screens
-does the flag catch, and what fraction of all topologies does it flag. If the flag catches
-most of the mis-screens at a flag rate well below 50%, it is strictly cheaper than §4.1 and
-goes into the same recovery arena; if it catches few, the item closes and §4.1 stands alone.
+**The existing sample turned out to be unusable.** `benchmarks/six_plus/x8_screen_seeds.json`
+(the 360-topology, 5-seed sample behind §5.7.2's basin-lottery table) has no committed
+generating script, and every one of its 360 rows' seed-0 cost mismatches a fresh
+`fit.screen(text, spectrum, seed=0)` call by 0.1–0.5% today. That is not the FitContext hoist
+(§3.1): `core/fit.py` checked out at `98215c9`, the commit immediately before the hoist,
+reproduces today's number exactly (57.21511445652943, not the sample's
+57.055920071212284) for the first sampled `par5` row. Whatever budget or environment produced
+the sample cannot be recovered, so building a flag decision on numbers that cannot be
+reproduced would be exactly the kind of unmeasured claim this document exists to avoid.
+
+**What was measured instead.** A fresh, self-consistent dataset, covering every enumerated
+topology rather than a 120-row sample: `enumerate_up_to(("R","C","L"), n_max)` for `par5`
+(449 topologies, n≤5), `mix5` (449, n≤5) and `par6` (2174, n≤6), each topology screened at 5
+seeds with today's code (`benchmarks/screening_round/landscape.py`'s own method, extended to 5
+seeds; not a `discover()` run — no genetic fallback, no tier 2). One-element-removed
+reductions (`circuit.remove_subtree` at every leaf) that are not `is_plausible_node`-admissible
+— chiefly a bare `parallel(L, C)` block, which is not a real lossy two-terminal component and
+so is never emitted by `enumerate_up_to` at all — are excluded from the floor rather than
+treated as missing data, because the real level-by-level search never screens an implausible
+topology either and so it can never serve as an already-known floor. Every eligible topology
+(n ≥ 2 elements) had at least one plausible reduction in all three arenas
+(`n_no_plausible_reduction = 0`).
+
+| arena | eligible | >100x mis-screens | flagged (strict, seed0 > best plausible sub-cost) | catch rate | flag rate |
+|---|---:|---:|---:|---:|---:|
+| `par5` | 446 | 4 | 340 | 100% | 76.2% |
+| `mix5` | 446 | 2 | 315 | 100% | 70.6% |
+| `par6` | 2171 | 5 | 1709 | 100% | 78.7% |
+
+**The flag catches every measured >100x mis-screen — and flags three-quarters of everything.**
+The decision rule written before this ran was "ships to the recovery arena only if it catches
+the majority at a flag rate under 50%"; catch rate clears that bar and flag rate misses it by
+more than 20 points in every arena, so **the flag does not pass on its own decision rule.**
+
+**No tolerance rescues it, because the flag's own comparison is exactly as noisy as the
+problem it targets.** Among rows flagged but not counted as >100x mis-screens, the violation
+ratio (`seed0 / sub_best`) tops out at 7.7x (`par5`), 8.2x (`mix5`) and 5.8x (`par6`) — so a
+threshold anywhere above ~10x looked, before checking the mis-screens themselves, like it
+would cut the flag rate to nearly nothing. It does not survive contact with the mis-screen
+rows: their own `seed0 / sub_best` ratios run from **1.20x to 8.17x** — for example
+`par6`'s `p(p(R1,C1)-R2,C2,C3)-R3`-shaped row is 2069x worse than the best of 5 seeds
+(the >100x definition) yet only 1.20x worse than its own sub-topology's single-seed cost,
+because the sub-topology's seed-0 draw is itself sometimes in a bad basin. The two
+distributions fully overlap between 1.2x and 8.2x, so no fixed threshold separates a real
+mis-screen from ordinary single-seed noise on this comparison: the flag compares one seed
+against another seed, and a bimodal landscape does not stop being bimodal because one of the
+two draws belongs to a smaller topology.
+
+**Closed.** `_is_underfitted`-style selective re-screening is not implemented. §4.1's universal
+second seed is the only lever this document has that showed real separation on the underlying
+problem (mean ratio 37.7–41.4x at one seed down to 1.06–1.16x at two, §5.7.2) — a comparison
+between *independent* draws of the same topology, not between one topology's draw and a
+different (smaller) topology's draw. It stands alone; T4.1/T6, below, is still unrun.
 
 ### 4.3 `_evolve`: propose until unique, and merge the two dispatch barriers
 
@@ -343,7 +393,7 @@ generation) and then either fixed in an afternoon or closed with the number.
 | §3.2 streaming dispatch | inter-chunk idle | **[measured, rejected]** 31.7% idle confirmed, but the only lever found (a bigger batch) is not number-preserving -- reverted | -- |
 | §3.3 kernel micro-opt | 36–47% of a screen | screen ≤ 1.2–1.3x | last-place bits (digit gate) |
 | §4.1 second seed | F3 | recovery, at 2x tier-1 cost | yes, deliberately |
-| §4.2 selective flag | F3 | recovery, at a cost to be measured | yes, deliberately |
+| §4.2 selective flag | F3 | **[measured, rejected]** catches 100% of >100x mis-screens but flags 70.6–78.7% of everything -- not selective, nothing shipped | -- |
 | §4.3 evolve dispatch | fallback throughput | more distinct topologies per second at 8 workers | evolve only |
 
 Stacked, §3.1–§3.3 might make one screen 1.5–2x cheaper. That is real and it is not the 13x
@@ -383,9 +433,15 @@ number is reported as a pair, rested and loaded, per `WEB_UI_PLAN.md`'s W3 prece
   shortlist on at least one CPE/SKINF pair. **T2 does not pass as written**, because the change
   that would pass its speed half fails its correctness half, and the code shipped is unchanged
   from before this section ran.
-- **T3 (selective flag).** On the 360-topology, 5-seed sample: report the fraction of
-  > 100x mis-screens the flag catches and the fraction of all topologies it flags. Ships to
-  the recovery arena only if it catches the majority at a flag rate under 50%.
+- **T3 (selective flag). [run, 2026-09-03; not passed -- withdrawn, not reworded.]** The
+  360-topology sample this gate was written against turned out to be unreproducible with
+  today's code (§4.2) and not caused by §3.1, so the measurement ran on a fresh, self-consistent
+  dataset covering every enumerated topology in the same three arenas instead (446/446/2171
+  eligible). Catch rate is 100% in all three; flag rate is 76.2%/70.6%/78.7%, not under 50%.
+  **T3 does not pass as written**, and no threshold rescues it: the mis-screen rows' own
+  `seed0 / sub_best` ratios (1.20x–8.17x) overlap the ordinary-noise rows' ratios (up to
+  5.8x–8.2x) completely, because the flag compares one single-seed draw against another. Nothing
+  shipped from this section.
 - **T4 (evolve dispatch).** Frozen-landscape arena at an unsaturated budget (150 fits, the
   budget §3.4.4 of `EVOLVE_SEARCH_PLAN.md` used to separate arms): hit rate not lower than
   the control by McNemar at the seed count that resolved the last comparison (480). At 300 s
@@ -402,8 +458,10 @@ number is reported as a pair, rested and loaded, per `WEB_UI_PLAN.md`'s W3 prece
 1. **[done]** §3.1 and T1 — number-preserving, in-process, benefits the browser as well.
 2. **[done, rejected]** §3.2's idle measurement, and T2 — the idle is real (31.7%) but the
    only fix found is not number-preserving; nothing shipped from this step.
-3. §4.2's catch-rate measurement on the existing sample (no search run needed); then T3.
-4. §4.1 / T6 — the deferred experiment, with or without the flag from step 3.
+3. **[done, rejected]** §4.2's catch-rate measurement and T3 — catches 100% of measured
+   mis-screens but flags 70.6–78.7% of everything, not the "under 50%" the decision rule
+   required; nothing shipped from this step.
+4. §4.1 / T6 — the deferred experiment, without a flag (step 3 closed with nothing to combine).
 5. §4.3 and T4.
 6. §3.3 and T5, last, because it is the only F1 item that changes bits.
 7. The one cheap count from §3.4 (class multiplicity in a landscape table), recorded either

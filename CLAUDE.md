@@ -515,8 +515,9 @@ static-site Web UI running the same core via WASM (Pyodide).
    cell, `ser7` is read "no" by all four.
 
 17. `docs/SEARCH_TIME_PLAN.md` — where the topology search spends its time, and the levers on
-   it. **§3.1 implemented and shipped, §3.2 measured and its fix rejected, the rest is still
-   plan only.** It is deliberately *not* about the 13x F2 gap `SEARCH_ALGORITHM_SCREENING.md`
+   it. **§3.1 implemented and shipped, §3.2 measured and its fix rejected, §4.2 measured and
+   its flag rejected, the rest is still plan only.** It is deliberately *not* about the 13x F2
+   gap `SEARCH_ALGORITHM_SCREENING.md`
    measured: it collects the F1 and F3 levers the earlier rounds set aside — the per-topology
    setup that is 23–33% of a screen and mostly per-*dataset* work recomputed 2,976 times, a
    chunked `Pool.map` whose idle turned out to be 31.7%, the second screening seed whose
@@ -544,7 +545,21 @@ static-site Web UI running the same core via WASM (Pyodide).
    threshold across more candidates, and that measurably changes which candidate reaches the
    tier-2 shortlist on at least one CPE/SKINF pair — disproving `discover.py`'s own
    long-standing, never-tested comment that a stale threshold "can never change a result." The
-   change was reverted rather than shipped on the strength of that comment.
+   change was reverted rather than shipped on the strength of that comment. **§4.2, the
+   sub-tree re-screen flag, is the third rejection and the one that also caught a stale
+   benchmark**: its own decision rule was "ships only if it catches the majority of >100x
+   mis-screens at a flag rate under 50%," and the 360-topology sample that rule was meant to
+   run against turned out to be unreproducible with today's code at all — every one of its
+   rows' seed-0 cost differs from a fresh `screen()` call by 0.1–0.5%, confirmed **not** caused
+   by §3.1's hoist (`core/fit.py` checked out at the commit before it reproduces today's number
+   exactly, not the sample's). The measurement was rebuilt fresh and self-consistently instead,
+   covering every enumerated topology in the same three arenas (446/446/2171) rather than a
+   120-row sample: the flag catches **100%** of the measured >100x mis-screens, and flags
+   **70.6–78.7%** of everything, nowhere near "under 50%." No tolerance rescues it — the
+   mis-screen rows' own violation ratios against their sub-topology (1.20x–8.17x) fully overlap
+   the ordinary-noise rows' ratios (up to 5.8x–8.2x), because the flag compares one single-seed
+   draw against another single-seed draw of a *different, smaller* topology, which is exactly as
+   exposed to the same basin lottery as the parent it is trying to check. Nothing shipped.
 
 Update these when decisions change.
 
