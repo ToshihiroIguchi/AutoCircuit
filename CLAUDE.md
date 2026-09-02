@@ -514,6 +514,17 @@ static-site Web UI running the same core via WASM (Pyodide).
    series shape X2 flagged is where every candidate agrees least — at the project's own standard
    cell, `ser7` is read "no" by all four.
 
+17. `docs/SEARCH_TIME_PLAN.md` — where the topology search spends its time, and the levers on
+   it. **Plan only; nothing implemented and no gate run.** It is deliberately *not* about the
+   13x F2 gap `SEARCH_ALGORITHM_SCREENING.md` measured: it collects the F1 and F3 levers the
+   earlier rounds set aside — the per-topology setup that is 23–33% of a screen and mostly
+   per-*dataset* work recomputed 2,976 times, a chunked `Pool.map` whose idle has never been
+   measured, the second screening seed whose recovery arm is coded and has never been run,
+   and `_evolve`'s two-barrier dispatch behind X6's 5–6%-per-core scaling. Its §2 is the list
+   of what is settled and must not be re-tried, §5 states the ceiling before anything is built
+   (perhaps 1.5–2x on a screen, not 13x), and §6's gates are byte-identical fingerprints for
+   the levers that change no number and reported-digit equality for the one that changes bits.
+
 Update these when decisions change.
 
 ## Stack and conventions
