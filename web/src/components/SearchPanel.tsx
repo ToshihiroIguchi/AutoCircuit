@@ -2,8 +2,8 @@
 // controls, a run button, and the state-dependent text under it -- except a search is a job, not
 // an interactive request, so the button toggles into Cancel instead of just showing "busy".
 
-import type { CriterionWire } from "../core/types";
-import { AUTO_POOL } from "../core/types";
+import type { CatalogueWire, CriterionWire } from "../core/types";
+import { AUTO_POOL, CUSTOM_POOL } from "../core/types";
 import { MAX_WORKERS } from "../worker/pool";
 
 export interface SearchPanelProps {
@@ -14,6 +14,11 @@ export interface SearchPanelProps {
   poolNames: string[];
   poolName: string;
   onPoolName: (name: string) => void;
+  /** The element catalogue the custom pool is built from; null until the worker has answered. */
+  catalogue: CatalogueWire | null;
+  /** Codes checked for the custom pool, used only while `poolName === CUSTOM_POOL`. */
+  customPool: string[];
+  onCustomPool: (codes: string[]) => void;
   exhaustiveLimit: number;
   onExhaustiveLimit: (value: number) => void;
   useSkeleton: boolean;
@@ -27,6 +32,13 @@ export interface SearchPanelProps {
   onWeighting: (value: string) => void;
   running: boolean;
   disabled: boolean;
+  /**
+   * Gates the Discover button alone. Distinct from `disabled` -- which locks every control,
+   * the custom-pool checkboxes included -- because an empty custom pool must stop a run without
+   * also locking the checkboxes a user would need to fix it, which is a deadlock a user cannot
+   * get out of.
+   */
+  startDisabled: boolean;
   error: string | null;
   onStart: () => void;
   onCancel: () => void;
@@ -52,7 +64,11 @@ export function SearchPanel(props: SearchPanelProps) {
           >
             {props.poolNames.map((name) => (
               <option key={name} value={name}>
-                {name === AUTO_POOL ? "auto — the spectrum chooses" : name}
+                {name === AUTO_POOL
+                  ? "auto — the spectrum chooses"
+                  : name === CUSTOM_POOL
+                    ? "custom — choose elements"
+                    : name}
               </option>
             ))}
           </select>
@@ -125,13 +141,56 @@ export function SearchPanel(props: SearchPanelProps) {
           <button
             type="button"
             className="search-panel__run"
-            disabled={props.disabled}
+            disabled={props.startDisabled}
             onClick={props.onStart}
           >
             Discover
           </button>
         )}
       </div>
+
+      {/* The CLI's `--pool` already takes a comma list of arbitrary codes (`main.py`); this is
+          that same freedom on the web side, since a named pool is an assertion about the part
+          and the person running this search may know something the presets do not group
+          together. */}
+      {props.poolName === CUSTOM_POOL && (
+        <div className="search-panel__custom-pool">
+          {props.catalogue === null ? (
+            <p className="search-panel__hint">Waiting for the element catalogue…</p>
+          ) : (
+            <>
+              <ul className="search-panel__custom-pool-list">
+                {props.catalogue.elements.map((element) => {
+                  const checked = props.customPool.includes(element.code);
+                  return (
+                    <li key={element.code}>
+                      <label title={element.name}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={locked}
+                          onChange={(event) => {
+                            const next = event.target.checked
+                              ? [...props.customPool, element.code]
+                              : props.customPool.filter((code) => code !== element.code);
+                            props.onCustomPool(next);
+                          }}
+                        />
+                        <span className="search-panel__custom-pool-code">{element.code}</span>
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
+              {props.customPool.length === 0 && (
+                <p className="search-panel__hint">
+                  Check at least one element to search with a custom pool.
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       {/* There is no genetic fallback in the browser (docs/WEB_UI_PLAN.md section 7), so a
           topology above this limit was never a candidate -- not screened, not rejected, simply

@@ -42,7 +42,7 @@ import type {
   SpectrumWire,
   VersionsWire,
 } from "./core/types";
-import { AUTO_POOL } from "./core/types";
+import { AUTO_POOL, CUSTOM_POOL } from "./core/types";
 import { ExcludedRun, idleExcluded, type ExcludedProgress } from "./core/excluded";
 import { idleProgress, SearchRun, type SearchProgress } from "./core/search";
 import { ThemeContext, useTheme } from "./core/theme";
@@ -488,7 +488,9 @@ export function App() {
         pool:
           settings.poolName === AUTO_POOL
             ? undefined
-            : catalogue?.pools[settings.poolName],
+            : settings.poolName === CUSTOM_POOL
+              ? settings.customPool
+              : catalogue?.pools[settings.poolName],
         skeleton: settings.useSkeleton ? skeleton : null,
         exhaustiveLimit: settings.exhaustiveLimit,
         weighting: settings.weighting,

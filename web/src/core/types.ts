@@ -213,6 +213,16 @@ export type RefitTaskWire = [circuit: string, restarts: number, seed: number];
 export const AUTO_POOL = "auto";
 
 /**
+ * The pool selection that means "the codes checked in the panel, and nothing else".
+ *
+ * The CLI's `--pool` already accepts a comma list of arbitrary codes (`main.py`); this is that
+ * same freedom on the web side, where a `<select>` of named pools could previously offer only
+ * `auto` or one of the catalogue's presets. Not a named pool in `catalogue.pools` -- it must
+ * never collide with one the core registers.
+ */
+export const CUSTOM_POOL = "custom";
+
+/**
  * One reported circuit read as internal structure, and what its equivalence class says about it.
  *
  * The numbers are geometry-free by decision, not by omission: `Z(f)` fixes a capacitance and

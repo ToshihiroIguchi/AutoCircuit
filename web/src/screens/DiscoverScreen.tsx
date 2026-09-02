@@ -21,7 +21,7 @@ import type {
   CriterionWire,
   LoadedSpectrum,
 } from "../core/types";
-import { AUTO_POOL } from "../core/types";
+import { AUTO_POOL, CUSTOM_POOL } from "../core/types";
 import { decodeArray, decodeComplexArray } from "../core/wire";
 import type { SearchState } from "../App";
 import { BridgeClient } from "../worker/client";
@@ -90,6 +90,8 @@ export interface DiscoverScreenProps {
  *  `workers`, which sizes the pool rather than the search. */
 export interface SearchSettings {
   poolName: string;
+  /** Codes checked in the panel, used only while `poolName === CUSTOM_POOL`. */
+  customPool: string[];
   exhaustiveLimit: number;
   useSkeleton: boolean;
   workers: number;
@@ -115,6 +117,7 @@ export function defaultSearchSettings(): SearchSettings {
     // line -- "what kind of part is this?" is the expert judgement this project exists to
     // remove, and a non-expert's wrong answer to it silently narrows the search.
     poolName: AUTO_POOL,
+    customPool: [],
     exhaustiveLimit: 4,
     useSkeleton: false,
     workers: defaultPoolSize(),
@@ -164,7 +167,8 @@ export function DiscoverScreen({
   onPick,
   onFitCircuit,
 }: DiscoverScreenProps) {
-  const { poolName, exhaustiveLimit, useSkeleton, workers, seed, weighting, criterion } = settings;
+  const { poolName, customPool, exhaustiveLimit, useSkeleton, workers, seed, weighting, criterion } =
+    settings;
   const overlay = useOverlay(search);
 
   const running = search?.running ?? false;
@@ -198,10 +202,15 @@ export function DiscoverScreen({
         criterion={criterion}
         onCriterion={(value) => onSettings({ criterion: value })}
         poolNames={
-          catalogue === null ? [poolName] : [AUTO_POOL, ...Object.keys(catalogue.pools)]
+          catalogue === null
+            ? [poolName]
+            : [AUTO_POOL, ...Object.keys(catalogue.pools), CUSTOM_POOL]
         }
         poolName={poolName}
         onPoolName={(value) => onSettings({ poolName: value })}
+        catalogue={catalogue}
+        customPool={customPool}
+        onCustomPool={(codes) => onSettings({ customPool: codes })}
         exhaustiveLimit={exhaustiveLimit}
         onExhaustiveLimit={(value) => onSettings({ exhaustiveLimit: value })}
         useSkeleton={useSkeleton}
@@ -215,6 +224,12 @@ export function DiscoverScreen({
         onWeighting={(value) => onSettings({ weighting: value })}
         running={running}
         disabled={!ready || catalogue === null || spectrum === null}
+        startDisabled={
+          !ready ||
+          catalogue === null ||
+          spectrum === null ||
+          (poolName === CUSTOM_POOL && customPool.length === 0)
+        }
         error={search?.error ?? null}
         onStart={() => spectrum !== null && onStart(spectrum)}
         onCancel={onCancel}
