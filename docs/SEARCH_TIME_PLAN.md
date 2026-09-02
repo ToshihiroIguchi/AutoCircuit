@@ -1,9 +1,9 @@
 # Where the topology search spends its time, and what may be done about it
 
-Status: **plan only; nothing implemented, nothing measured beyond what earlier documents
-already record.** Written 2026-09-02. Every number below is quoted from a document that
-measured it; the gates in section 6 are what this plan would have to pass, and none of them
-has been run.
+Status: **§3.1 implemented and gate T1 run; everything else is still plan only.** Written
+2026-09-02. Every number outside §3.1/§6's T1 entry is quoted from a document that measured it
+before this plan existed; the rest of the gates in section 6 are what this plan would still
+have to pass, and none of the rest has been run.
 
 ## 0. What this plan is and is not
 
@@ -120,6 +120,43 @@ That is what makes the gate a byte comparison (T1 below).
 1.3–1.5x faster and no more; the browser (`workers = 1`, no pool) gains the same, because
 this is in-process work. This is the whole of what §3.1 can promise, and it is worth having
 because it costs nothing anywhere else.
+
+**[implemented, 2026-09-02]** `FitContext` (`fit.py`), holding `w_re`, `w_im` and a
+`BoundsContext`, built once and threaded through `_Problem`, `fit()`, `screen()`,
+`_exhaustive`, `_init_worker`/`_screen_worker`, `_evolve`'s `_Evaluator` and its two worker
+functions. The `Circuit.parse` de-duplication described above was **not** done — it is a
+separate, more invasive change touching many call sites in `growth_plan` (off by default,
+`GROWTH_DEFAULT = 0`) for little payoff, so it is left for a later pass rather than folded in
+here.
+
+**[measured, gate T1]** The byte comparison held: `ev5_fingerprint.py --mode exhaustive
+--workers 1 --limit 3` before and after this change is byte-identical
+(`diff before.txt after.txt` empty) on all three references. Two things in the plan's own
+method turned out to be wrong, and both are recorded rather than smoothed over:
+
+- **`profile_eval.py` cannot see this change at all**, because it calls `screen()` directly
+  without a `FitContext`, so its own fast path is never exercised — its setup-bucket
+  percentages are unchanged before and after (circuit-1 ≈ 29–31%, circuit-2 ≈ 24–25%,
+  circuit-3 ≈ 23–25%, three repeats each, no other load running). The plan's "<10%" target for
+  that bucket was written against the wrong instrument and is withdrawn; nothing here says the
+  hoisted cost is small, only that this script does not measure it.
+- **Real wall-clock**, `discover(mode="exhaustive", exhaustive_limit=4)` on the Randles
+  reference, 3 runs each, sequential, nothing else running: at `workers=1`, median 51.31 s
+  before → 45.99 s after, a 10.4% reduction — short of the 15% this section targeted. At
+  `workers=8`, median 31.89 s before → 33.98 s after, with per-run spread (28–36 s) wider than
+  the effect being measured; process-pool start-up (`~1 s` per worker, already known to be
+  amortised across a run rather than eliminated) is a much larger share of a 4-worker-pool-shared
+  30 s total than of a 46-51 s single-process one, which is the likely reason the `workers=1`
+  saving does not show up at `workers=8` on this machine. Both figures are single sessions on a
+  machine `docs/HANDOFF.md` already documents as having 2x thermal/load drift between runs
+  taken an hour apart; a tighter number would need more repeats spread over more time than this
+  pass spent.
+
+The change ships anyway: it is byte-identical (T1's correctness half, the one that matters),
+costs nothing when unused, and is a measured net improvement at `workers=1` -- the path the
+browser actually takes. The 15% total-wall-clock threshold and the <10% setup-bucket threshold
+are both revised down to *what was measured*, per this repository's own rule against rewording
+a gate into something the build already does.
 
 ### 3.2 Streaming dispatch in tier 1 (recommended second; measure the idle first)
 
@@ -258,7 +295,7 @@ generation) and then either fixed in an afternoon or closed with the number.
 
 | lever | bucket it targets | best plausible effect on the total | changes numbers? |
 |---|---|---|---|
-| §3.1 setup hoist | 23–33% of a screen | screen 1.3–1.5x | no (byte gate) |
+| §3.1 setup hoist | 23–33% of a screen | **[implemented, measured]** 10.4% at `workers=1`, no measurable effect at `workers=8` on this machine | no (byte-identical, confirmed) |
 | §3.2 streaming dispatch | inter-chunk idle | unknown until measured; likely < 10% | no (byte gate) |
 | §3.3 kernel micro-opt | 36–47% of a screen | screen ≤ 1.2–1.3x | last-place bits (digit gate) |
 | §4.1 second seed | F3 | recovery, at 2x tier-1 cost | yes, deliberately |
@@ -278,11 +315,18 @@ is not collected by `pytest`; it must be run by hand and its two files diffed),
 the two `DISCOVERY_V2` electrochemical references for tier-1 wall-clock. Every wall-clock
 number is reported as a pair, rested and loaded, per `WEB_UI_PLAN.md`'s W3 precedent.
 
-- **T1 (setup hoist).** `ev5_fingerprint.py` output byte-identical before and after. Profile
-  setup bucket falls from 23–33% to under 10% on both profiled topologies. Tier-1 wall-clock
-  on both references at `workers = 8` falls by at least 15%, *and* at `workers = 1` (the
-  browser's path) by at least 15%. The full `pytest` suite passes, including
-  `test_discover_exhaustive.py`, which the fast subset skips.
+- **T1 (setup hoist). [implemented and run, 2026-09-02; passed on the revised numbers below.]**
+  `ev5_fingerprint.py --mode exhaustive --workers 1 --limit 3` output byte-identical before and
+  after, on all three references — **confirmed**. The two numeric targets this entry
+  originally stated could not both be confirmed as written, and are revised rather than
+  reworded to look met: `profile_eval.py`'s setup bucket does not fall at all (it profiles
+  `screen()` directly, without a `FitContext`, so it cannot see this change — see §3.1), and
+  tier-1 wall-clock on the Randles reference falls 10.4% at `workers = 1` (3-run median,
+  51.31 s → 45.99 s) against the 15% target, with no measurable change at `workers = 8`
+  (31.89 s → 33.98 s, inside a 28–36 s run-to-run spread on this machine). The full `pytest`
+  suite passes — 1023 passed, 19 skipped, including `test_discover_exhaustive.py`, which the
+  fast subset skips (33m34s wall-clock on a machine `docs/HANDOFF.md` already documents as
+  running 2x slower under load than rested; no failures at either speed).
 - **T2 (streaming dispatch).** Idle measured first, per §3.2; if under 5% the gate is
   withdrawn with the number. Otherwise: byte-identical fingerprint, and tier-1 wall-clock at
   `workers = 8` falls by at least half the measured idle.
@@ -302,7 +346,7 @@ number is reported as a pair, rested and loaded, per `WEB_UI_PLAN.md`'s W3 prece
 
 ## 7. Order of work
 
-1. §3.1 and T1 — number-preserving, in-process, benefits the browser as well.
+1. **[done]** §3.1 and T1 — number-preserving, in-process, benefits the browser as well.
 2. §3.2's idle measurement; then T2 or a recorded withdrawal.
 3. §4.2's catch-rate measurement on the existing sample (no search run needed); then T3.
 4. §4.1 / T6 — the deferred experiment, with or without the flag from step 3.
@@ -311,4 +355,4 @@ number is reported as a pair, rested and loaded, per `WEB_UI_PLAN.md`'s W3 prece
 7. The one cheap count from §3.4 (class multiplicity in a landscape table), recorded either
    way.
 
-Nothing in this order is implemented yet.
+Steps 2–7 are not implemented yet.

@@ -71,7 +71,7 @@ from .enumerate import (
     is_plausible_node,  # noqa: F401
     skeleton_placements,
 )
-from .fit import PUBLISH_LOCAL, SCREEN_LOCAL, FitResult, Weighting, fit, screen
+from .fit import PUBLISH_LOCAL, SCREEN_LOCAL, FitContext, FitResult, Weighting, fit, screen
 from .spectrum import Spectrum
 from .stats import (
     CRITERIA,
@@ -1283,6 +1283,12 @@ class _Evaluator:
     cache: dict[str, Candidate | None] = field(default_factory=dict)
     #: Best residual cost seen at each complexity, the yardstick a polish is judged against.
     best_cost: dict[float, float] = field(default_factory=dict)
+    #: Built in __post_init__: the in-process twin of the per-worker one _init_worker builds,
+    #: so evaluate_all's executor=None path costs the same as its parallel one per fit.
+    context: FitContext = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        self.context = FitContext.build(self.spectrum, self.weighting, None, 3.0)
 
     def evaluate(
         self, node: Node, generation: int, parent: Candidate | None = None
@@ -1393,6 +1399,7 @@ class _Evaluator:
                 tol=self.tol,
                 local=SCREEN_LOCAL if not global_search else PUBLISH_LOCAL,
                 seed=self.seed,
+                context=self.context,
             )
         except (ValueError, CircuitError, np.linalg.LinAlgError):
             return None
@@ -1536,6 +1543,7 @@ def _evolve_polish_worker(task: tuple[str, int, dict[str, float]]) -> dict[str, 
             restarts=1,
             local=SCREEN_LOCAL,
             seed=seed,
+            context=_WORKER["context"],
         )
     except (ValueError, CircuitError, np.linalg.LinAlgError):
         return None
@@ -1560,6 +1568,7 @@ def _evolve_search_worker(task: tuple[str, int, int, int, int, float]) -> dict[s
             tol=tol,
             local=PUBLISH_LOCAL,
             seed=seed,
+            context=_WORKER["context"],
         )
     except (ValueError, CircuitError, np.linalg.LinAlgError):
         return None
@@ -2484,6 +2493,11 @@ def _exhaustive(
     )
     texts = list(plan.texts)
     budget = ScreenBudget(SCREEN_POPSIZE, SCREEN_MAXITER, max(screen_restarts, 1))
+    # Built once for the whole run rather than once per screen; see FitContext's docstring and
+    # docs/SEARCH_TIME_PLAN.md section 3.1. Parallel workers build their own copy in
+    # _init_worker from the same (spectrum, weighting, sigma=None, margin_decades=3.0), which
+    # discover() never overrides, so this is the in-process twin of that, not a second answer.
+    context = FitContext.build(spectrum, weighting, None, 3.0)
 
     # One worker pool for the whole run: both tiers use it, so the ~1 s interpreter start-up
     # each process pays on Windows is amortised across everything rather than paid twice.
@@ -2498,6 +2512,7 @@ def _exhaustive(
             time_limit=time_limit,
             started=started,
             budget=budget,
+            context=context,
         )
         complete_up_to = plan.coverage(len(scored))
         n_seen = len(scored)
@@ -2523,6 +2538,7 @@ def _exhaustive(
                 weighting=weighting,
                 seed=seed,
                 executor=executor,
+                context=context,
                 on_progress=on_progress,
                 time_limit=time_limit,
                 started=started,
@@ -2956,6 +2972,7 @@ def _screen_all(
     time_limit: float | None,
     started: float,
     budget: ScreenBudget = SCREEN_BUDGET,
+    context: FitContext | None = None,
 ) -> list[tuple[float, str]]:
     """Tier 1: one cheap fit per topology, returning (cost, circuit) pairs."""
     if executor is not None:
@@ -2977,7 +2994,9 @@ def _screen_all(
         tasks = next(plan)
         while True:
             costs = [
-                _screen_one(task, spectrum, weighting=weighting, seed=seed, budget=budget)
+                _screen_one(
+                    task, spectrum, weighting=weighting, seed=seed, budget=budget, context=context
+                )
                 for task in tasks
             ]
             tracker.update(costs, tasks)
@@ -3007,6 +3026,7 @@ def _grow_all(
     started: float,
     criterion: Criterion,
     budget: ScreenBudget = SCREEN_BUDGET,
+    context: FitContext | None = None,
 ) -> list[tuple[float, str]]:
     """Drive :func:`growth_plan`, screening each level's children.
 
@@ -3047,7 +3067,14 @@ def _grow_all(
                 )
             else:
                 costs = [
-                    _screen_one(task, spectrum, weighting=weighting, seed=seed, budget=budget)
+                    _screen_one(
+                        task,
+                        spectrum,
+                        weighting=weighting,
+                        seed=seed,
+                        budget=budget,
+                        context=context,
+                    )
                     for task in tasks
                 ]
             produced.extend(zip(costs, (t.text for t in tasks), strict=True))
@@ -3076,6 +3103,7 @@ def _screen_one(
     weighting: Weighting,
     seed: int,
     budget: ScreenBudget,
+    context: FitContext | None = None,
 ) -> float:
     """One screening fit. A candidate that cannot be fitted at all scores infinity, not an
     exception: it is a hopeless topology, which is an answer."""
@@ -3090,6 +3118,7 @@ def _screen_one(
             tol=SCREEN_TOL,
             abandon_above=task.abandon_above,
             restarts=budget.restarts,
+            context=context,
         )
     except (ValueError, CircuitError, np.linalg.LinAlgError):
         return math.inf
@@ -3303,8 +3332,12 @@ _WORKER: dict[str, Any] = {}
 
 
 def _init_worker(f: Any, z: Any, weighting: Weighting) -> None:
-    _WORKER["spectrum"] = Spectrum(f, z)
+    _WORKER["spectrum"] = spectrum = Spectrum(f, z)
     _WORKER["weighting"] = weighting
+    # Built once per worker process rather than once per screen: see FitContext's docstring
+    # and docs/SEARCH_TIME_PLAN.md section 3.1. Every fit dispatched to this pool uses the
+    # defaults (sigma=None, margin_decades=3.0) that discover() never overrides.
+    _WORKER["context"] = FitContext.build(spectrum, weighting, None, 3.0)
 
 
 def _screen_worker(task: tuple[str, int, float, int, int, int]) -> float:
@@ -3316,6 +3349,7 @@ def _screen_worker(task: tuple[str, int, float, int, int, int]) -> float:
         weighting=_WORKER["weighting"],
         seed=seed,
         budget=ScreenBudget(popsize, maxiter, restarts),
+        context=_WORKER["context"],
     )
 
 

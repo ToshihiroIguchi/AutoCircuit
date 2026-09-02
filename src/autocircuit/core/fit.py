@@ -77,6 +77,7 @@ def search_space(
     fixed: dict[str, float] | None = None,
     bounds: dict[str, tuple[float, float]] | None = None,
     margin_decades: float = 3.0,
+    _bounds_ctx: BoundsContext | None = None,
 ) -> tuple[Float, Float, Float]:
     """The interval the fitter searches for each parameter, and the value it starts from.
 
@@ -88,6 +89,12 @@ def search_space(
     This is public because the browser draws a model curve before anything has been fitted, and
     that curve has to start from the point the fitter itself starts from. :class:`_Problem`
     calls it too, so there is one implementation rather than a second one for display.
+
+    ``_bounds_ctx`` lets :class:`_Problem` hand in a :class:`BoundsContext` it already has by
+    way of a :class:`FitContext`, instead of this function deriving another one identical to it
+    from the same spectrum -- see ``docs/SEARCH_TIME_PLAN.md`` section 3.1. Underscore-prefixed
+    because it is an internal fast path: passing one built for a different spectrum or
+    ``margin_decades`` than the arguments here silently fits the wrong data.
     """
     names = circuit.param_names
     held = dict(fixed or {})
@@ -95,7 +102,11 @@ def search_space(
     if unknown:
         raise ValueError(f"cannot fix unknown parameters: {', '.join(sorted(unknown))}")
 
-    ctx = BoundsContext.from_data(spectrum.omega, spectrum.z, margin_decades)
+    ctx = (
+        _bounds_ctx
+        if _bounds_ctx is not None
+        else BoundsContext.from_data(spectrum.omega, spectrum.z, margin_decades)
+    )
     lower, upper = circuit.bounds(ctx)
     if bounds:
         unknown = set(bounds) - set(names)
@@ -398,6 +409,39 @@ def report_dict(
     return payload
 
 
+@dataclass(frozen=True)
+class FitContext:
+    """Everything one :class:`_Problem` needs that depends on the data and not the circuit.
+
+    ``_Problem.__init__`` used to recompute the residual weight vectors and the data-derived
+    bounds scale from scratch on every call -- identical work every time for a fixed
+    ``(spectrum, weighting, sigma, margin_decades)``, because neither depends on the topology
+    being fitted. Exhaustive discovery builds a ``_Problem`` once per enumerated candidate,
+    thousands of times in one run against the same spectrum, so this is built once by the
+    caller and handed in instead (``docs/SEARCH_TIME_PLAN.md`` section 3.1).
+
+    What stays genuinely per-topology -- the parameter bounds :meth:`Circuit.bounds` derives
+    from this, the starting point, the log-scale mask -- is not here, because it differs for
+    every circuit and there is nothing to share.
+    """
+
+    w_re: Float
+    w_im: Float
+    bounds: BoundsContext
+
+    @classmethod
+    def build(
+        cls,
+        spectrum: Spectrum,
+        weighting: Weighting,
+        sigma: Float | None,
+        margin_decades: float = 3.0,
+    ) -> FitContext:
+        w_re, w_im = weight_vectors(spectrum.z, weighting, sigma)
+        bounds = BoundsContext.from_data(spectrum.omega, spectrum.z, margin_decades)
+        return cls(w_re=w_re, w_im=w_im, bounds=bounds)
+
+
 class _Problem:
     """Precomputed residual machinery for one (circuit, spectrum, weighting) combination."""
 
@@ -410,13 +454,17 @@ class _Problem:
         fixed: dict[str, float],
         bounds: dict[str, tuple[float, float]] | None,
         margin_decades: float,
+        context: FitContext | None = None,
     ) -> None:
         self.circuit = circuit
         self.spectrum = spectrum
         self.weighting = weighting
         self.omega = spectrum.omega
         self.z_data = spectrum.z
-        self.w_re, self.w_im = weight_vectors(spectrum.z, weighting, sigma)
+        if context is not None:
+            self.w_re, self.w_im = context.w_re, context.w_im
+        else:
+            self.w_re, self.w_im = weight_vectors(spectrum.z, weighting, sigma)
 
         names = circuit.param_names
         unknown = set(fixed) - set(names)
@@ -435,6 +483,7 @@ class _Problem:
             fixed=fixed,
             bounds=bounds,
             margin_decades=margin_decades,
+            _bounds_ctx=context.bounds if context is not None else None,
         )
 
         self.log_mask_all = circuit.log_mask()
@@ -536,6 +585,7 @@ def fit(
     global_search: bool = True,
     local: LocalBudget = PUBLISH_LOCAL,
     time_limit: float | None = None,
+    context: FitContext | None = None,
 ) -> FitResult:
     """Fit ``circuit`` to ``spectrum`` without requiring initial parameter values.
 
@@ -559,6 +609,12 @@ def fit(
             anything whose numbers will be reported; :data:`SCREEN_LOCAL` is for fits that
             only rank, and is what :func:`screen` uses. See :class:`LocalBudget`.
         time_limit: Wall-clock budget in seconds for the global stage, per restart.
+        context: Precomputed :class:`FitContext` for this ``(spectrum, weighting, sigma,
+            margin_decades)`` combination, from :meth:`FitContext.build`. Skips recomputing the
+            residual weights and the data-derived bounds scale, worthwhile when many topologies
+            are fitted against the same spectrum, as discovery does. Leave at ``None`` and it is
+            built for you; passing one built for different arguments silently fits the wrong
+            data, so this is for callers that already hold one, not a knob to reach for by hand.
 
     Returns:
         A :class:`FitResult` with parameters, uncertainties and identifiability warnings.
@@ -567,7 +623,7 @@ def fit(
     if isinstance(circuit, str):
         circuit = Circuit.parse(circuit)
     problem = _Problem(
-        circuit, spectrum, weighting, sigma, fixed or {}, bounds, margin_decades
+        circuit, spectrum, weighting, sigma, fixed or {}, bounds, margin_decades, context
     )
 
     if not global_search and initial is None:
@@ -667,6 +723,7 @@ def screen(
     margin_decades: float = 3.0,
     abandon_above: float = math.inf,
     restarts: int = 1,
+    context: FitContext | None = None,
 ) -> float:
     """Rank-only fit: return the weighted sum of squared residuals and nothing else.
 
@@ -694,10 +751,14 @@ def screen(
 
     Raises the same exceptions as :func:`fit`; callers screening many topologies should catch
     ``ValueError``, ``CircuitError`` and ``numpy.linalg.LinAlgError``.
+
+    ``context`` is the same precomputed :class:`FitContext` :func:`fit` accepts, and matters
+    more here: a screen is the dominant cost of an exhaustive run and is run once per
+    enumerated topology against one unchanging spectrum.
     """
     if isinstance(circuit, str):
         circuit = Circuit.parse(circuit)
-    problem = _Problem(circuit, spectrum, weighting, sigma, {}, None, margin_decades)
+    problem = _Problem(circuit, spectrum, weighting, sigma, {}, None, margin_decades, context)
     best = math.inf
     for offset in range(max(restarts, 1)):
         x = _global_stage(
