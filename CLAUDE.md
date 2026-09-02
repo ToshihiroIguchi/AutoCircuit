@@ -515,25 +515,36 @@ static-site Web UI running the same core via WASM (Pyodide).
    cell, `ser7` is read "no" by all four.
 
 17. `docs/SEARCH_TIME_PLAN.md` — where the topology search spends its time, and the levers on
-   it. **§3.1 implemented and gate T1 run; the rest is still plan only.** It is deliberately
-   *not* about the 13x F2 gap `SEARCH_ALGORITHM_SCREENING.md` measured: it collects the F1 and
-   F3 levers the earlier rounds set aside — the per-topology setup that is 23–33% of a screen
-   and mostly per-*dataset* work recomputed 2,976 times, a chunked `Pool.map` whose idle has
-   never been measured, the second screening seed whose recovery arm is coded and has never
-   been run, and `_evolve`'s two-barrier dispatch behind X6's 5–6%-per-core scaling. Its §2 is
-   the list of what is settled and must not be re-tried, §5 states the ceiling before anything
-   is built (perhaps 1.5–2x on a screen, not 13x), and §6's gates are byte-identical
-   fingerprints for the levers that change no number and reported-digit equality for the one
-   that changes bits. **§3.1, the `FitContext` hoist, is done and its own gate is where the
-   plan's a priori numbers met a real machine**: the byte-identity half held exactly (three
-   references, `ev5_fingerprint.py` before/after, identical), but the two numeric targets did
-   not survive contact — `profile_eval.py`'s setup bucket cannot move at all because that
-   script calls `screen()` without a `FitContext` and so never exercises the hoisted path, and
-   the wall-clock win measured 10.4% at `workers=1` against a 15% target and vanished into a
-   28–36 s run-to-run spread at `workers=8`, on a machine this repository already knew ran 2x
-   slower loaded than rested. Both targets are revised down to what was measured rather than
-   reworded to look met, and the change ships anyway because it is free when unused and a real
-   win on the one path (`workers=1`) the browser actually takes.
+   it. **§3.1 implemented and shipped, §3.2 measured and its fix rejected, the rest is still
+   plan only.** It is deliberately *not* about the 13x F2 gap `SEARCH_ALGORITHM_SCREENING.md`
+   measured: it collects the F1 and F3 levers the earlier rounds set aside — the per-topology
+   setup that is 23–33% of a screen and mostly per-*dataset* work recomputed 2,976 times, a
+   chunked `Pool.map` whose idle turned out to be 31.7%, the second screening seed whose
+   recovery arm is coded and has never been run, and `_evolve`'s two-barrier dispatch behind
+   X6's 5–6%-per-core scaling. Its §2 is the list of what is settled and must not be re-tried,
+   §5 states the ceiling before anything is built (perhaps 1.5–2x on a screen, not 13x), and
+   §6's gates are byte-identical fingerprints for the levers that change no number and
+   reported-digit equality for the one that changes bits. **§3.1, the `FitContext` hoist, is
+   done and its own gate is where the plan's a priori numbers met a real machine**: the
+   byte-identity half held exactly (three references, `ev5_fingerprint.py` before/after,
+   identical), but the two numeric targets did not survive contact — `profile_eval.py`'s setup
+   bucket cannot move at all because that script calls `screen()` without a `FitContext` and so
+   never exercises the hoisted path, and the wall-clock win measured 10.4% at `workers=1`
+   against a 15% target and vanished into a 28–36 s run-to-run spread at `workers=8`, on a
+   machine this repository already knew ran 2x slower loaded than rested. Both targets are
+   revised down to what was measured rather than reworded to look met, and the change ships
+   anyway because it is free when unused and a real win on the one path (`workers=1`) the
+   browser actually takes. **§3.2 is the sharper lesson**: the idle was real (31.7%, confirmed
+   by pid-tagged instrumentation of the dispatch), but the fix the plan itself proposed
+   (`Pool.imap`, smaller chunksize) does not touch the actual cause — `Pool.map`'s own
+   chunksize heuristic already rebalances *within* a batch, so the barrier is the batch
+   *boundary*, and only a bigger batch (`WORKER_CHUNK` 64→256) moves the number (31.7%→13.4%
+   idle, confirmed twice). That fix was implemented, and it **fails its own byte-identity
+   requirement**: on the skin-effect reference, a bigger batch shares a stale `abandon_above`
+   threshold across more candidates, and that measurably changes which candidate reaches the
+   tier-2 shortlist on at least one CPE/SKINF pair — disproving `discover.py`'s own
+   long-standing, never-tested comment that a stale threshold "can never change a result." The
+   change was reverted rather than shipped on the strength of that comment.
 
 Update these when decisions change.
 

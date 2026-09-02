@@ -1,9 +1,10 @@
 # Where the topology search spends its time, and what may be done about it
 
-Status: **§3.1 implemented and gate T1 run; everything else is still plan only.** Written
-2026-09-02. Every number outside §3.1/§6's T1 entry is quoted from a document that measured it
-before this plan existed; the rest of the gates in section 6 are what this plan would still
-have to pass, and none of the rest has been run.
+Status: **§3.1 implemented and shipped (gate T1 passed on revised numbers); §3.2 measured and
+its fix rejected (gate T2 run, not passed, nothing shipped); everything else is still plan
+only.** Written 2026-09-02. Every number outside §3.1/§3.2 and §6's T1/T2 entries is quoted from
+a document that measured it before this plan existed; the rest of the gates in section 6 are
+what this plan would still have to pass, and none of the rest has been run.
 
 ## 0. What this plan is and is not
 
@@ -80,6 +81,7 @@ Listed so that nobody spends a day re-deriving them. Each has a measurement besi
 | element-cap staging 6 vs 7 | changes nothing on either arena | `SEARCH_ALGORITHM_SCREENING.md` §4.3 |
 | rational approximation / AAA / Loewner | exact without noise, 0.04–0.20 recovery with it | `TOPOLOGY_6PLUS_PLAN.md` §3.3–3.4 |
 | warm-accept factor between 1.5 and 10 | inside run-to-run spread; the knob is binary | `EVOLVE_SEARCH_PLAN.md` §3.3.1 |
+| raising `WORKER_CHUNK` to cut tier-1 idle | cuts idle 31.7%→13.4% but changes the tier-2 shortlist on a CPE/SKINF pair; not number-preserving | this document, §3.2 |
 
 ## 3. Levers on F1 — seconds per evaluation
 
@@ -158,25 +160,67 @@ browser actually takes. The 15% total-wall-clock threshold and the <10% setup-bu
 are both revised down to *what was measured*, per this repository's own rule against rewording
 a gate into something the build already does.
 
-### 3.2 Streaming dispatch in tier 1 (recommended second; measure the idle first)
+### 3.2 Streaming dispatch in tier 1 -- measured, and the obvious fix does not work
 
 `_screen_parallel` (`discover.py:3322-3370`) hands `Pool.map` a chunk of `WORKER_CHUNK = 64`
 tasks and waits for the whole chunk. Screens are 0.3–1.8 s with tails, so at each chunk
 boundary seven of eight workers idle for as long as the slowest screen in that chunk. The
 time-limit check and the `abandon_above` refresh also wait for the boundary.
 
-**Design.** `Pool.imap` (ordered, so the plan's `send(costs)` contract is untouched) with a
-`chunksize` small enough to keep the queue fed, and the plan generator advanced as results
-arrive rather than per 64. The abandon threshold refreshes as results land.
+**[measured, 2026-09-02]** The idle is real and well past the 5% withdrawal bar this section
+originally set. A pid-tagged instrumentation of `_screen_parallel`'s own dispatch (each worker
+timestamps its own tasks; idle = pool wall-clock time not covered by any worker's own busy
+time, per chunk) on the Randles reference at `workers=8`, default pool, `exhaustive_limit=4`
+(567 topologies, one run): **31.7% of tier-1 wall-clock idle**, with individual chunks up to
+52.4%. `Pool.map`'s own chunksize heuristic already redistributes sub-chunks across workers as
+they free up *within* one 64-task batch, but the batch is still a hard synchronisation
+barrier: once all 64 tasks are claimed, an idle worker has nothing left to steal and waits for
+the batch's slowest straggler, however many workers finished early.
 
-**Why this changes no number.** The code's own comment at `discover.py:3334-3336` states
-that a stale abandon threshold "costs a little time but can never change a result"; a
-fresher one cannot either. Order is preserved, so every screen sees the same seed and the
-same task text.
+**The originally planned fix does not touch the actual cause.** `Pool.imap` with a smaller
+chunksize changes how a *fixed-size* batch is sub-divided across workers, which `Pool.map`
+already does adequately (§3.2's own instrumentation shows plenty of dynamic rebalancing
+happening inside a batch). The barrier is the batch *boundary* itself: `screen_plan`'s
+`send(costs)` contract needs every cost in the batch before it can compute the next one's
+`abandon_above` values, so no dispatch mechanism can hand an idle worker something from the
+*next* batch early. What actually moves the idle number is the batch size: raising it from 64
+to 256 cut idle from 31.7% to 13.4% on the same reference (two runs, 256 also measured at
+16.5%/10.7%/12.8% per-chunk on a second run) -- more tasks per batch gives the existing dynamic
+rebalancing more room before it runs out of work to steal.
 
-**Measure first.** Instrument one run of the two `DISCOVERY_V2` references at `workers = 8`
-to log, per chunk, the spread between the first and last worker to finish. If the summed
-idle is under ~5% of tier-1 wall-clock this item is dropped with the number beside it.
+**And that fix is not number-preserving, contrary to this section's own original claim.**
+`discover.py`'s comment on `_screen_parallel` states a stale `abandon_above` threshold "costs a
+little time but can never change a result" -- untested, and wrong at least once. Bumping
+`WORKER_CHUNK` from 64 to 256 and re-running `ev5_fingerprint.py --mode exhaustive --workers 8
+--limit 3` (isolated from the §3.1 change already shipped, which is present in both sides of
+this comparison) is **not** byte-identical: on the skin-effect reference, one candidate
+(`p(CPE1-SKINF1,L1)`, complexity 6.0) appears in the `WORKER_CHUNK=256` report and not the
+`WORKER_CHUNK=64` one, and a different one (`p(CPE1-SKINF1,CPE2)`, complexity 7.5) appears only
+at 64. The mechanism is exactly the one the comment dismissed: a batch of 256 candidates shares
+one stale threshold for longer than a batch of 64 does, which candidates get their local polish
+computed rather than skipped shifts near the boundary, and for at least one CPE/SKINF pair
+(elements this repository's own `KK_RESONANCE_PLAN.md` already knows are prone to near-tied,
+resonance-adjacent fits) that shift crosses whichever line decides the tier-2 shortlist. **The
+`WORKER_CHUNK` bump was implemented, found to fail its own byte-identity requirement, and
+reverted** rather than shipped on the strength of an unverified comment.
+
+**What is not known, and was not chased down here:** whether the *currently shipped* value
+(`WORKER_CHUNK = 64`, unchanged) already carries some version of this effect against the
+zero-staleness case (`chunk=1`, fully synchronous refresh), or whether the effect only appears
+once a batch grows past some size between 64 and 256. `ev5_fingerprint.py` at `workers = 8`
+against a `chunk = 1` parallel run would answer it directly; that comparison was not run,
+because the question this section set out to answer -- does `WORKER_CHUNK` have headroom to
+give back to idle -- was already answered no. The dismissive comment in `discover.py` is left
+in place for now rather than edited on the strength of one measurement at one other value; it
+should be revisited together with whatever answers the question above.
+
+**What would actually work, not attempted here.** Decoupling the two things `WORKER_CHUNK`
+currently conflates -- how many tasks are dispatched to the worker pool in one `Pool.map` call
+(the idle lever) and how often `abandon_above` refreshes (the correctness-sensitive one) --
+would need `screen_plan`'s generator contract to accept partial batches, which is shared with
+the browser's own driving code (`discover.py:3129-3131`) and was set aside in this plan's
+original write-up as too invasive to fold into a first pass. It stays out of scope here; this
+section's finding is that the cheap version of this lever does not exist.
 
 ### 3.3 Kernel micro-optimisation without compilation (third; changes bits)
 
@@ -296,7 +340,7 @@ generation) and then either fixed in an afternoon or closed with the number.
 | lever | bucket it targets | best plausible effect on the total | changes numbers? |
 |---|---|---|---|
 | §3.1 setup hoist | 23–33% of a screen | **[implemented, measured]** 10.4% at `workers=1`, no measurable effect at `workers=8` on this machine | no (byte-identical, confirmed) |
-| §3.2 streaming dispatch | inter-chunk idle | unknown until measured; likely < 10% | no (byte gate) |
+| §3.2 streaming dispatch | inter-chunk idle | **[measured, rejected]** 31.7% idle confirmed, but the only lever found (a bigger batch) is not number-preserving -- reverted | -- |
 | §3.3 kernel micro-opt | 36–47% of a screen | screen ≤ 1.2–1.3x | last-place bits (digit gate) |
 | §4.1 second seed | F3 | recovery, at 2x tier-1 cost | yes, deliberately |
 | §4.2 selective flag | F3 | recovery, at a cost to be measured | yes, deliberately |
@@ -327,9 +371,18 @@ number is reported as a pair, rested and loaded, per `WEB_UI_PLAN.md`'s W3 prece
   suite passes — 1023 passed, 19 skipped, including `test_discover_exhaustive.py`, which the
   fast subset skips (33m34s wall-clock on a machine `docs/HANDOFF.md` already documents as
   running 2x slower under load than rested; no failures at either speed).
-- **T2 (streaming dispatch).** Idle measured first, per §3.2; if under 5% the gate is
-  withdrawn with the number. Otherwise: byte-identical fingerprint, and tier-1 wall-clock at
-  `workers = 8` falls by at least half the measured idle.
+- **T2 (streaming dispatch). [run, 2026-09-02; not passed -- withdrawn, not reworded.]** The
+  idle was measured first, per the original plan: 31.7%, well past the 5% withdrawal bar, so
+  the section proceeded to a fix. `Pool.imap` with a smaller chunksize was not implemented
+  because the instrumentation that measured the idle also showed `Pool.map`'s own chunksize
+  heuristic already rebalances within a batch -- the barrier is the batch boundary, not the
+  dispatch mechanism. Raising `WORKER_CHUNK` (64 -> 256) does cut idle (31.7% -> 13.4%,
+  confirmed on two runs) but fails the byte-identity half of this gate: `ev5_fingerprint.py
+  --workers 8` differs before/after on the skin-effect reference, because a bigger batch shares
+  a stale `abandon_above` threshold across more candidates, and that measurably moves the tier-2
+  shortlist on at least one CPE/SKINF pair. **T2 does not pass as written**, because the change
+  that would pass its speed half fails its correctness half, and the code shipped is unchanged
+  from before this section ran.
 - **T3 (selective flag).** On the 360-topology, 5-seed sample: report the fraction of
   > 100x mis-screens the flag catches and the fraction of all topologies it flags. Ships to
   the recovery arena only if it catches the majority at a flag rate under 50%.
@@ -347,7 +400,8 @@ number is reported as a pair, rested and loaded, per `WEB_UI_PLAN.md`'s W3 prece
 ## 7. Order of work
 
 1. **[done]** §3.1 and T1 — number-preserving, in-process, benefits the browser as well.
-2. §3.2's idle measurement; then T2 or a recorded withdrawal.
+2. **[done, rejected]** §3.2's idle measurement, and T2 — the idle is real (31.7%) but the
+   only fix found is not number-preserving; nothing shipped from this step.
 3. §4.2's catch-rate measurement on the existing sample (no search run needed); then T3.
 4. §4.1 / T6 — the deferred experiment, with or without the flag from step 3.
 5. §4.3 and T4.
