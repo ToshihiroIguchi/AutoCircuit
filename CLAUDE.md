@@ -615,6 +615,22 @@ static-site Web UI running the same core via WASM (Pyodide).
    than perturbed — both still reported, still each other's listed equivalent, unchanged in
    `.summary()` — the same basin-lottery family §4.3 already names for the evolve fallback's
    RNG stream, seen here for the first time at the ULP level of one kernel's own arithmetic.
+   **§3.4's cheap count is the section's seventh and last measurement, and it closed the order
+   of work in the direction the section's own bound did not expect.** Clustering all five
+   existing frozen landscape tables by screened cost at the same `1e-6` relative tolerance
+   tier 2's own equivalence check uses gives **4.4-5.9x multiplicity over whole tables**, and
+   restricting to same-size topologies only — the closer match to the section's own
+   `R1-p(R2,C1)` / `p(R1,C1-R2)` example — **3.8-4.9x at each table's largest, most expensive
+   size class**, both well past the "under ~1.3x" bound the section said would close the
+   question as bounded-small. It closes anyway, because the two reasons already on record for
+   not building a dedupe (no cheap predictive test runnable *before* fitting; tier 2 refits
+   every equivalence-class member regardless of what tier 1 skipped) do not depend on the size
+   of the number — so this is recorded as a larger-than-hoped, still-unbuilt opportunity rather
+   than a lever this plan ships. Part of the all-sizes number is a distinct, honestly-separated
+   phenomenon and not the section's own example: an over-parameterised superset topology whose
+   extra element gets fitted to irrelevance lands on exactly its subset's cost, which the
+   same-size breakdown shows is not the whole story — genuine same-size duplication is large on
+   its own. All seven steps of section 7's order of work are done.
 
 Update these when decisions change.
 

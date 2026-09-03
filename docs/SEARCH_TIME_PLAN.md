@@ -5,11 +5,11 @@ its fix rejected (gate T2 run, not passed, nothing shipped); §4.2 measured and 
 (gate T3 run, not passed, nothing shipped); §4.1 run and its own decision rule says it does not
 ship either (gate T6 run, changed nothing on the nine truths); §4.3 implemented and shipped
 (gate T4 passed on both halves); §3.3 implemented and shipped in half (gate T5 passed for the
-CPE kernel substitution, measured and not shipped for the buffer-reuse half); everything else is
-still plan only.** Written 2026-09-02. Every number outside §3.1/§3.2/§4.1/§4.2/§4.3/§3.3 and
-§6's T1/T2/T3/T6/T4/T5 entries is quoted from a document that measured it before this plan
-existed; the rest of the gates in section 6 are what this plan would still have to pass, and
-none of the rest has been run.
+CPE kernel substitution, measured and not shipped for the buffer-reuse half); §3.4's class
+multiplicity is measured (4.4-5.9x, past the bound the section hoped would close it) but ships
+nothing, for reasons unaffected by the number. All seven steps of section 7's order of work are
+done.** Written 2026-09-02. Every number outside §3.1/§3.2/§4.1/§4.2/§4.3/§3.3/§3.4 and §6's
+T1/T2/T3/T6/T4/T5 entries is quoted from a document that measured it before this plan existed.
 
 ## 0. What this plan is and is not
 
@@ -266,7 +266,7 @@ reverted rather than kept for a noise-level number, because keeping it would als
 correctness hazard for nothing -- the reused buffer is aliased across calls, so a caller that
 holds a reference past its own use silently reads a later population's values.
 
-### 3.4 Not in this plan: VARPRO, exact-class dedupe before screening
+### 3.4 Not in this plan: VARPRO, exact-class dedupe before screening [multiplicity measured, 2026-09-03]
 
 - **VARPRO** (variable projection) is listed as "still worth a plan" in
   `SEARCH_ALGORITHM_SCREENING.md` §5. Circuit impedance is not linear in most of its
@@ -282,6 +282,35 @@ holds a reference past its own use silently reads a later population's values.
   topologies share a screened cost with another to 1e-6 relative. If the multiplicity is
   under ~1.3x the saving is bounded there and the item closes. The report needs every member
   refitted anyway, so tier 2 could not benefit regardless.
+
+  **Measured, and the bound did not hold.** All five existing frozen landscape tables
+  (`benchmarks/screening_round/land_{rcl6,rcl7,series_rcl6,series_rcl7,rclcpe6}.json`) were
+  clustered by screened cost at `EQUIVALENCE_RTOL = 1e-6` relative -- the same tolerance
+  tier 2's own `_same_response` uses. Over the whole table (every enumerated size together)
+  multiplicity is **4.4-5.9x**, with 85-89% of rows sharing a cost with at least one other
+  row. Restricted to *same-size* topologies -- the closer match to the plan's illustrative
+  example (`R1-p(R2,C1)` / `p(R1,C1-R2)`, both 3 elements) -- the bound still fails at every
+  size from 3 elements up: 1.4x at 3, rising to **3.8-4.9x at the largest size class each table
+  enumerates** (1725-8859 of each table's rows, most of the table's own cost). Some of the
+  all-sizes number is a different, honestly-distinguishable phenomenon and not what the plan's
+  example described: a superset topology whose one extra element gets fitted to
+  irrelevance lands on exactly its subset's cost (the largest cluster in `land_rcl6.json` is
+  `p(R1-C1,R2)` at 3 elements plus 138 larger topologies that all reduce to it), which is
+  over-parameterisation collapsing onto a smaller topology's optimum rather than a same-size
+  cross-shape reparameterisation -- but the same-size breakdown above shows that phenomenon
+  alone does not explain the finding; genuine same-size duplication is real and large at every
+  size that matters.
+
+  This closes the item exactly as the plan said it would, in the direction it did not expect:
+  the saving is *not* shown to be bounded small, and a search that could skip a screen for
+  every row already covered by an already-screened cluster member would skip on the order of
+  80-88% of same-size tier-1 work on these tables. Nothing changes as a result. The two reasons
+  the plan already gave for not building this stand independent of the number: detecting a
+  class *before* fitting is still a symbolic-equivalence problem with no cheap exact test (the
+  clustering used here is a *post hoc* observation on cost, not a predictive test runnable
+  before screening), and the report still needs every member of a reported equivalence class
+  refitted at tier 2 regardless, so this is recorded as a larger-than-hoped, still-unbuilt
+  opportunity rather than a lever this plan ships.
 
 ## 4. Levers on F3 and on the fallback's throughput
 
@@ -614,7 +643,11 @@ number is reported as a pair, rested and loaded, per `WEB_UI_PLAN.md`'s W3 prece
 6. **[done, shipped in half]** §3.3 and T5 -- the CPE `exp(n log(1j*omega))` substitution ships
    (31-33% on `cost_vectorized` for CPE-bearing topologies, reported digits unchanged); the
    buffer-reuse half measured 3-5%, inside this instrument's own noise floor, and is reverted.
-7. The one cheap count from §3.4 (class multiplicity in a landscape table), recorded either
-   way.
+7. **[done, recorded]** The one cheap count from §3.4 (class multiplicity in a landscape
+   table): 4.4-5.9x over whole tables, 3.8-4.9x restricted to same-size topologies at the
+   largest size class each table enumerates -- the "under ~1.3x" bound the section hoped would
+   close the question did not hold, but nothing ships from it, because the two reasons already
+   on record for not building a dedupe (no cheap predictive test; tier 2 refits every
+   equivalence-class member regardless) are unaffected by the count.
 
-Step 7 is not implemented yet.
+All seven steps of this order of work are done.
