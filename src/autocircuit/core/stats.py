@@ -35,8 +35,19 @@ type Criterion = Literal["aic", "aicc", "bic", "caic", "hqc", "waic", "ftest"]
 #: Every criterion a caller may name, in the order a menu should offer them.
 CRITERIA: tuple[Criterion, ...] = ("aic", "aicc", "bic", "caic", "hqc", "waic", "ftest")
 
-#: The default, everywhere. AICc was the default until 2026-08-16.
-DEFAULT_CRITERION: Criterion = "aic"
+#: The default, everywhere. AICc was the default until 2026-08-16; AIC until 2026-09-04.
+#:
+#: Changed by ``docs/CRITERION_SELECTION_PLAN.md``: :attr:`~discover.DiscoveryResult.recommended`
+#: is provably criterion-blind by construction, and whether the truth reaches
+#: ``report.pareto`` at all measured tied between AIC and BIC on every one of 37 matched cells and
+#: identical across all six scored criteria on a nine-truth standard-cell check -- so this switch
+#: changes no recommendation, on the same evidence base that already showed no recovery cost. What
+#: moved is :attr:`~discover.DiscoveryResult.by_criterion`, the secondary "what the criterion
+#: alone would pick" line: under AIC it named something with more elements than a five-element
+#: truth in 15 of 19 negative-control cells (79%) and disagreed with ``recommended`` in 65% of all
+#: 37; under BIC, 0 of 19 and 16%. See that plan's Status section for the full numbers and what
+#: was and was not run.
+DEFAULT_CRITERION: Criterion = "bic"
 
 #: How each one is written in a report or a menu.
 CRITERION_LABELS: dict[Criterion, str] = {

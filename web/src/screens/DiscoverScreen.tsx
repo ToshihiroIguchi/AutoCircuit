@@ -123,7 +123,7 @@ export function defaultSearchSettings(): SearchSettings {
     workers: defaultPoolSize(),
     seed: 0,
     weighting: "modulus",
-    criterion: "aic",
+    criterion: "bic",
   };
 }
 

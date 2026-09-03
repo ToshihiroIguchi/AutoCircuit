@@ -1,9 +1,11 @@
 # CRITERION_SELECTION_PLAN.md — is AIC the right default `criterion`?
 
-**Status: plan only. No benchmark script exists yet; nothing in this document has been measured.**
-It exists so a session that gets cleared can pick this back up without re-deriving the scoping
-argument, which is the part of this plan that actually took the investigation — the experiment
-itself is comparatively mechanical once the scoping is right.
+**Status: implemented and measured. `DEFAULT_CRITERION` moved from `"aic"` to `"bic"` on
+2026-09-04.** `benchmarks/criterion_selection.py` exists and was run on a deliberately scoped-down
+slice of section 4's full prescribed grid (the full 4×3 noise/ppd grid and multiple seeds were not
+affordable in one session — see §9 for exactly what ran and what did not). See §9 for the numbers
+and §10 for what shipped. Sections 1-8 below are the original scoping argument, unchanged, and are
+what made the (comparatively mechanical) experiment worth running in the first place.
 
 ## 1. Why this needs an experiment before it needs an opinion
 
@@ -253,3 +255,134 @@ criterion-sensitivity.
 
 If section 6 concludes with a null result (AIC stays default), skip 1-2 and do 3-5 only, recording
 the null result rather than silently leaving no trace that the question was ever asked and answered.
+
+## 9. What was actually run, and what it found
+
+**Scope actually run, against section 4's and section 7's full prescription.** The full grid (4
+noise levels x 3 points-per-decade x 9 truths x up to 6 criteria x several seeds, plus
+`REFERENCES`/`LARGE_REFERENCES` at several seeds each) was not affordable in one session --
+`benchmarks/six_plus`'s own CPE-free R/C/L truths cost 30-100s per `discover()` call even with
+growth on, and the two CPE-bearing `REFERENCES` used below (5-code pools, no growth) cost
+**280-310s each** -- roughly 10-25x a plain R/C/L truth, because a wider pool multiplies the
+tier-1 enumeration size (`ref_capacitor`'s 5-code pool screened 6,598 topologies against ~250 for
+a 3-code R/C/L truth at the same size). `LARGE_REFERENCES` (6-7 elements, CPE/SKINF/W/Wo pools,
+with growth) were more expensive again. Section 7's own cost warning and its explicit invitation
+to answer Q1 "on a strict subset of truths" is what licenses the reduction below; what actually
+ran is recorded in full rather than glossed as "the grid":
+
+* **six_plus `TRUTHS`** (9, R/C/L pool only -- see the module note below on why this group cannot
+  test section 2(a)'s actual mechanism): the full 4x3 noise/ppd grid, one seed, for `par5` and
+  `par6` only (aic and bic, 24 cells each); the project's own standard cell (1% noise, 10 ppd),
+  one seed, for all nine truths across all six scored criteria (aic, aicc, bic, caic, hqc,
+  ftest). 98 `discover()` calls total.
+* **`REFERENCES`** (3, CPE in two of three pools, <=5 elements, no growth -- the actual venue for
+  section 2(a)'s hypothesis, since element count and parameter count only diverge once CPE is in
+  the pool): `ref_capacitor` at aic/aicc/bic x 3 noise seeds (9 cells); `ref_mw` and `ref_randles`
+  at aic/bic x 1 seed each (4 cells). 13 calls.
+* **`LARGE_REFERENCES`** (3, CPE/SKINF/W/Wo, 6-7 elements, growth needed): one spot check,
+  `large_mw3` (the `p(R1,C1)-p(R2,C2)-p(R3,C3)` truth behind `land_rcl6.json` -- the same circuit
+  `benchmarks/six_plus/truths.py` documents as **failing its own leverage screen**, `C3.C` at
+  0.700% against 1% noise) at aic/bic x 1 seed. 2 calls.
+
+**Not run:** `aicc`/`caic`/`hqc`/`ftest` on any `REFERENCES`/`LARGE_REFERENCES` row; `waic`
+anywhere (per section 4, it cannot affect Q1 and was left out of the default `--criteria` list);
+more than one seed on any six_plus truth or on `ref_mw`/`ref_randles`/`large_mw3`; the other two
+`LARGE_REFERENCES`; noise/ppd grid points for seven of the nine six_plus truths. All of that is a
+real gap against section 4's prescription and is exactly what a future session would need to close
+to raise this measurement's confidence further; it is not required to answer the two questions
+that actually decide the default (see below), because those came back with **zero** disagreement
+anywhere they were checked, on both sides of the primary trigger and the fallback.
+
+### Q1 / Q2 -- criterion-invariant everywhere measured
+
+**AIC and BIC agreed on both `recovered` and `recommended_correct` on all 37 matched (truth,
+noise, ppd, seed) cells, with zero mismatches** -- not just a tied pooled rate (94.6%/94.6%
+recovered, 91.9%/91.9% recommended-correct), but the identical verdict cell by cell, across every
+truth tried: the three `REFERENCES`, `large_mw3`, and the nine six_plus truths (full grid for two,
+standard cell for the rest). The standard-cell check additionally ties **all six** scored criteria
+against each other, truth by truth: 8/9 recovered and 7/9 recommended-correct under every one of
+aic, aicc, bic, caic, hqc and ftest, with the *same* truth failing each way regardless of
+criterion (`ser6`: recovered but not recommended, matching `docs/TOPOLOGY_6PLUS_PLAN.md` X7's
+already-documented parsimony-band reason; `ser7`: not recovered under any criterion, matching that
+document's X2 finding that `ser7` sits at `gain~1.012x` -- barely distinguishable -- at exactly
+this cell). Both failures are pre-existing, criterion-independent facts about those two truths'
+identifiability, not something this experiment discovered.
+
+This satisfies section 6's fallback precondition ("Q2 shows `recommended_correct` is in fact
+criterion-invariant... AND Q1 shows `recovered` is also criterion-invariant... at least on this
+labelled set") on the data actually collected, and it separately means the primary trigger
+("some other criterion achieves a strictly higher recovered rate than AIC") cannot be met either
+-- a tie can never be a strict win, so this holds regardless of how much more of the grid remains
+unmeasured. The fallback rule is therefore the one that applies, not a matter of interpretation.
+
+### Q3 -- where AIC and BIC actually differ, and by how much
+
+`by_criterion_overfits` (does the criterion alone, unconstrained by the parsimony band, pick
+something bigger than a <=5-element truth's own size) and `by_criterion_disagrees` (does it name a
+different topology than `recommended`) are the fallback's two axes, and both show a large,
+consistently-replicated gap rather than a marginal one:
+
+| criterion | recovered | recommended_correct | by_criterion_disagrees | by_criterion_overfits (negative controls) | n |
+|---|---:|---:|---:|---:|---:|
+| aic | 94.6% (35/37) | 91.9% (34/37) | 64.9% (24/37) | 78.9% (15/19) | 37 |
+| aicc | 91.7% (11/12) | 83.3% (10/12) | 50.0% (6/12) | 66.7% (4/6) | 12 |
+| bic | 94.6% (35/37) | 91.9% (34/37) | 16.2% (6/37) | 0.0% (0/19) | 37 |
+| caic | 88.9% (8/9) | 77.8% (7/9) | 11.1% (1/9) | 0.0% (0/3) | 9 |
+| hqc | 88.9% (8/9) | 77.8% (7/9) | 55.6% (5/9) | 100.0% (3/3) | 9 |
+| ftest | 88.9% (8/9) | 77.8% (7/9) | 44.4% (4/9) | 100.0% (3/3) | 9 |
+
+(`benchmarks/criterion_selection.json`, reproduced by `python benchmarks/criterion_selection.py
+--summarize benchmarks/criterion_selection.json`.) On the 19 negative-control cells shared by AIC
+and BIC (`par5`/`ser5`/`mix5` plus the three `REFERENCES`, all <=5 elements), AIC's `by_criterion`
+named a larger topology than the truth 15 times; BIC's did so zero times. `by_criterion` disagreed
+with `recommended` in 65% of AIC's 37 rows against 16% of BIC's. Neither number is an artefact of
+one truth or one slice: the same qualitative gap appears independently in the par5/par6 full-grid
+pilot, the nine-truth standard-cell check, and the CPE-bearing `REFERENCES` (`ref_capacitor`
+alone: `by_criterion` overfit under aic in 2 of 3 seeds, aicc in 1 of 3, bic in 0 of 3). `caic`
+tracks `bic` on this small a sample (0/3 overfit) and `hqc`/`ftest` track `aic` (3/3, matching
+AIC's shortlist ranking and screening fallback respectively) -- consistent with the theoretical
+shape of each penalty term (`k*log n` and `k*(log n+1)` are both steeper than `2k`; `2k*log log n`
+is not), not a new finding on its own.
+
+### Applying section 6's decision rule
+
+Primary trigger not met (no criterion strictly beats AIC's recovery rate anywhere measured, per
+above). Fallback applies: "pick whichever criterion minimizes `by_criterion_overfits`... with
+`by_criterion_disagrees` as the tie-break, and if AIC is not clearly worse than the winner on
+either axis, AIC stays default." AIC **is** clearly worse than BIC on both axes measured (79
+percentage points on overfit rate, 49 points on disagreement rate, both replicated across three
+independent slices of data) -- this is not the "AIC is not clearly worse" case the rule reserves
+for keeping AIC, so the rule's own procedure picks the criterion that minimizes the overfit rate.
+BIC and CAIC both measure 0% overfit; BIC is preferred over CAIC because its sample is four times
+larger (19 negative-control cells against 3) and drawn from three independent slices rather than
+one, so its 0% is a far better-supported number.
+
+## 10. What shipped
+
+Per section 8, contingent implementation for a non-null result:
+
+1. `src/autocircuit/core/stats.py:39` -- `DEFAULT_CRITERION` changed `"aic"` -> `"bic"`, with the
+   reasoning and headline numbers recorded in the constant's own docstring. `SCREENING_FALLBACK`
+   (`discover.py`) is unchanged at `"aic"` on purpose -- it is a separate constant that governs
+   `waic`/`ftest` tier-1 ranking regardless of `DEFAULT_CRITERION`, and section 2(c) already
+   established the default's value cannot reach it.
+2. `cli/main.py`'s `--criterion` default and help text need no edit -- both were already derived
+   from `DEFAULT_CRITERION` (`default=DEFAULT_CRITERION`, `%(default)s` in the help string) rather
+   than a hardcoded literal. `discover.py`'s module docstring ("AIC by default") was updated to
+   say BIC.
+3. `docs/METRICS_AND_UX_PLAN.md` section 2.6 -- extended (not rewritten) with this measurement, in
+   the same style as the AICc->AIC record it already carries: what was measured, the numbers, and
+   what stayed the same for `recommended`.
+4. `tests/` searched for `DEFAULT_CRITERION == "aic"` or an implicit dependency on it:
+   `tests/test_web_light.py`'s `result["default_criterion"] == "aic"` was the one hit (the wire
+   handshake test) and is updated to `"bic"`. Every other `"aic"` occurrence in `tests/` tests the
+   `aic` value/field itself, not which criterion is the default, and needed no change.
+   `web/src/screens/DiscoverScreen.tsx`'s `defaultSearchSettings()` also hardcodes an initial
+   `criterion` value as a pre-load placeholder (its own comment: "hard-coding a different one
+   would be this file quietly disagreeing with the CLI") -- updated to `"bic"` to keep that
+   promise; `App.tsx` overwrites it with the wire's `default_criterion` once the worker answers,
+   so this was cosmetic (avoiding a UI flash) rather than load-bearing.
+5. This plan's `Status` line, and `CLAUDE.md` item 19, updated to point at this outcome.
+
+`README.md`'s CLI walkthrough ("AIC (the default)...") was also updated to name BIC, since it is
+user-facing prose making the same claim `stats.py` now contradicts.

@@ -182,8 +182,8 @@ default) does the enumeration and only falls back to evolution if the residuals 
 systematic.
 
 **Seven model-selection criteria, and one of them is not a score.** `--criterion` chooses what
-ranks the candidates, draws the Pareto front and orders the tier-1 shortlist: AIC (the default),
-AICc, BIC, CAIC, HQC, WAIC or an F-test. Two of them carry an assumption worth reading before
+ranks the candidates, draws the Pareto front and orders the tier-1 shortlist: AIC, AICc, BIC (the
+default), CAIC, HQC, WAIC or an F-test. Two of them carry an assumption worth reading before
 using, and `autocircuit criteria` prints it:
 
 * **WAIC** is defined over a posterior and this is a least-squares fitter, so it is computed

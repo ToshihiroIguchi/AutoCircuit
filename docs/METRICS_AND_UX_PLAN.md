@@ -15,7 +15,7 @@ same files, and separated here because they are not the same size.
 | # | Item | Size |
 |---|------|------|
 | 1 | Cold start is slow — why, and what actually helps | measure first, then one change |
-| 2 | AIC / AICc / BIC / WAIC / CAIC / HQC / F-test, selectable, default **AIC** | the large one |
+| 2 | AIC / AICc / BIC / WAIC / CAIC / HQC / F-test, selectable, default **BIC** (was AIC 2026-08-16 to 2026-09-04; see §2.6) | the large one |
 | 3 | The `bridge v4 · fit v1 · …` line in the header | delete most of it, move one part |
 | 4 | Tab order: Data, **Discover**, **Fit**, Report | one array |
 | 5 | Discover: draw the selected Pareto-front row | new panel, existing renderer |
@@ -147,9 +147,9 @@ deviance = n · log(SSR / n)          # −2·logL, less the constant n·log(2π
 
 | name | value | note |
 |------|-------|------|
-| AIC | `deviance + 2k` | **the new default** |
+| AIC | `deviance + 2k` | default 2026-08-16 to 2026-09-04; see §2.6 |
 | AICc | `AIC + 2k(k+1)/(n−k−1)` | the old default; the small-sample correction |
-| BIC | `deviance + k·log n` | |
+| BIC | `deviance + k·log n` | **the current default**; see §2.6 |
 | CAIC | `deviance + k·(log n + 1)` | Bozdogan's consistent AIC |
 | HQC | `deviance + 2k·log(log n)` | Hannan–Quinn |
 | WAIC | `−2·lppd + 2·p_waic`, same constant removed | see §2.3 |
@@ -224,13 +224,47 @@ count, with no Jacobian — so AIC, AICc, BIC, CAIC and HQC are exact there and 
 available at all. Under `waic` and `ftest` the screen ranks by AIC, and the docstring says which
 stage that is true of. The screen decides who gets refitted, not who wins.
 
-### 2.6 The default moves from AICc to AIC
+### 2.6 The default moves from AICc to AIC, then from AIC to BIC
 
 Asked for, and it is a real change to published numbers: `AICc − AIC = 2k(k+1)/(n−k−1)`, which on
 a 71-point spectrum is 0.29 at k = 4 and 1.36 at k = 9. It is monotone in k, so the order within
 one parameter count is untouched and only comparisons across counts can move — slightly towards
 the larger model. Every measured front in `docs/` was taken under AICc and stays labelled as
 such; new measurements say which criterion they are under.
+
+**2026-09-04: AIC → BIC, per `docs/CRITERION_SELECTION_PLAN.md`.** That plan's own scoping
+argument is why this could be settled at all: `DiscoveryResult.recommended` is built to ignore
+`criterion` (§2.5 above), so the only things a default change can move are the tier-1→tier-2
+shortlist ranking and the secondary `by_criterion` line. Both were measured, not assumed, on a
+deliberately scoped-down slice of that plan's full prescribed grid (`benchmarks/discovery_v2.py`'s
+`REFERENCES`/`LARGE_REFERENCES`, `benchmarks/six_plus/truths.py`'s nine truths at the project's
+standard 1%-noise/10-ppd cell for seven of them and the full 4×3 noise/ppd grid for two, mostly one
+seed — the full grid and seed sweep the plan specifies was not affordable in one session; see that
+plan's Status section for exactly which cells).
+
+* **The shortlist effect (`recovered`) tied on every cell measured**, not just on average: AIC and
+  BIC agreed on both `recovered` and `recommended_correct` on all 37 matched (truth, noise, ppd,
+  seed) cells with zero mismatches, and all six scored criteria (AIC, AICc, BIC, CAIC, HQC,
+  F-test) agreed truth-by-truth on a nine-truth standard-cell check (8/9 recovered, 7/9
+  recommended, the same truth failing each way under every criterion). So the primary trigger for
+  moving the default — some criterion strictly beating AIC on recovery — was not met, exactly as
+  §1 of that plan judged more likely; this switch rests entirely on the fallback axes.
+* **`by_criterion` is where the two criteria actually differ, and the gap is large, not
+  marginal.** On the five-element negative-control rows (a criterion asked to pick a topology no
+  bigger than a five-element truth's own size), AIC's `by_criterion` named something larger 15 of
+  19 times (79%); BIC's did so 0 of 19. `by_criterion` disagreed with `recommended` in 65% of all
+  37 AIC rows against 16% of the 37 BIC rows. Both patterns replicated independently across three
+  separate slices of the data (a par5/par6 full-grid pilot, the nine-truth standard-cell check,
+  and three CPE-bearing `REFERENCES`) rather than appearing in only one.
+* **What did not change:** `recommended` itself — no code path lets `criterion` reach it — and
+  `SCREENING_FALLBACK`, which stays hardcoded `"aic"` for `waic`/`ftest` at tier 1 regardless of
+  `DEFAULT_CRITERION` (`discover.py`'s own comment on that constant).
+
+Net effect: the report's headline answer is unchanged (provably, by construction, and now also
+measured tied on recovery), and the secondary "what the criterion alone would have picked" line
+now much less often shows an over-fit answer beside a correctly parsimonious `recommended` one on
+small-truth data — which is exactly the confusing-report risk §2.5's `by_criterion` line exists to
+carry honestly rather than to eliminate.
 
 ### 2.7 Where it is plumbed
 

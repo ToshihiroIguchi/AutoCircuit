@@ -114,7 +114,7 @@ print(json.dumps(ask({"op": "version"})))
         "waic",
         "ftest",
     ]
-    assert result["default_criterion"] == "aic"
+    assert result["default_criterion"] == "bic"
     # What the worker schedules on: it sends anything not in this list only once scipy is in, and
     # it reads the list from here rather than keeping its own.
     assert result["light_operations"] == sorted(LIGHT_OPERATIONS)

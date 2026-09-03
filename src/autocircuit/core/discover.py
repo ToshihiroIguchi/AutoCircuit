@@ -3,7 +3,7 @@
 Where :mod:`autocircuit.core.fit` answers "what are the parameters of *this* circuit?", this
 module answers "what circuit?". It evolves a population of topologies, fitting each one with
 the same no-initial-values engine and scoring it by a model-selection criterion
-the caller chooses (AIC by default; see :mod:`autocircuit.core.stats`).
+the caller chooses (BIC by default; see :mod:`autocircuit.core.stats`).
 
 Why not reuse a symbolic-regression package such as PySR? The search *design* transfers, but
 the machinery does not. PySR evolves scalar arithmetic expression trees over a Julia backend,

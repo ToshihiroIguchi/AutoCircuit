@@ -651,23 +651,29 @@ static-site Web UI running the same core via WASM (Pyodide).
    section 3, unchanged) — only a request to refit does, so the Fit screen still computes its own
    number rather than displaying the search's.
 
-19. `docs/CRITERION_SELECTION_PLAN.md` — whether `DEFAULT_CRITERION = "aic"` (`stats.py:39`,
-   switched from AICc on 2026-08-16 per `METRICS_AND_UX_PLAN.md` section 2.6) is actually the
-   right default against BIC, CAIC, HQC or AICc, which no document had measured. **Plan only; no
-   benchmark script exists yet.** Its scoping argument is the part worth not re-deriving:
+19. `docs/CRITERION_SELECTION_PLAN.md` — whether `DEFAULT_CRITERION` (`stats.py:39`) was the
+   right default against BIC, CAIC, HQC or AICc, which no document had measured before this.
+   **Implemented and measured; `DEFAULT_CRITERION` moved `"aic"` → `"bic"` on 2026-09-04.** Its
+   scoping argument is the part worth not re-deriving even now the answer is in:
    `DiscoveryResult.recommended` is built to ignore `criterion` entirely by design
-   (`discover.py:562-585`, chi2-band parsimony plus an always-AICc tie-break), so the open
-   question is narrower than "which criterion is right" — it is whether the *screening-stage*
-   ranking that `criterion` does control (`_quota_by_size`/`_screening_score`,
-   `discover.py:2610-2673`) ever changes which topologies survive to be `recommended`-eligible at
-   all (element count and parameter count diverge once CPE is in the pool, so same-size
-   topologies can rank differently under different penalty terms), and how often the separately
-   reported `by_criterion` value disagrees with `recommended` or overfits a small truth. The plan
-   reuses this project's existing labelled truth sets (`benchmarks/discovery_v2.py`'s
-   `REFERENCES`/`LARGE_REFERENCES`, `benchmarks/six_plus/truths.py`'s nine pre-registered
-   truths and its X2/X3 grid) rather than building a fourth one, and states its decision rule —
-   AIC stays default unless another criterion strictly beats it on recovery without a matched
-   cost in over-fit rate — before any run, per this project's own convention.
+   (`discover.py`, chi2-band parsimony plus an always-AICc tie-break), so the open question was
+   narrower than "which criterion is right" — whether the *screening-stage* ranking `criterion`
+   does control (`_quota_by_size`/`_screening_score`) ever changes which topologies survive to be
+   `recommended`-eligible at all (element count and parameter count diverge once CPE is in the
+   pool), and how often the separately reported `by_criterion` value disagrees with `recommended`
+   or overfits a small truth. **[measured] It does not change eligibility**: AIC and BIC agreed on
+   both `recovered` and `recommended_correct` on all 37 matched cells with zero mismatches
+   (`benchmarks/discovery_v2.py`'s `REFERENCES`/`LARGE_REFERENCES`, `benchmarks/six_plus`'s nine
+   truths — full grid for two, the project's standard 1%-noise/10-ppd cell for the rest, a
+   deliberately scoped-down slice of the plan's full prescribed grid; see that plan's §9 for
+   exactly what ran), and all six scored criteria tied truth-by-truth on the nine-truth
+   standard-cell check. What moved the default is the fallback axis the plan's own decision rule
+   falls back to when eligibility ties: `by_criterion`, the secondary "what the criterion alone
+   would pick" line, named something larger than a five-element truth in 15 of 19 negative-control
+   cells under AIC and 0 of 19 under BIC — a gap that replicated independently across three
+   separate slices of the data, not an artefact of one truth. See that plan's §9-10 for the full
+   numbers and exactly what shipped (`stats.py`, a `tests/test_web_light.py` assertion, the
+   Discover screen's placeholder default, `METRICS_AND_UX_PLAN.md` §2.6, `README.md`).
 
 Update these when decisions change.
 
