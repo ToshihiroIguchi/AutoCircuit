@@ -5,6 +5,7 @@
 import type { CatalogueWire, CriterionWire } from "../core/types";
 import { AUTO_POOL, CUSTOM_POOL } from "../core/types";
 import { MAX_WORKERS } from "../worker/pool";
+import { SymbolPreview } from "./ElementSymbol";
 
 export interface SearchPanelProps {
   /** The model-selection menu, from the running core's own registry rather than from here. */
@@ -159,6 +160,22 @@ export function SearchPanel(props: SearchPanelProps) {
             <p className="search-panel__hint">Waiting for the element catalogue…</p>
           ) : (
             <>
+              {/* Named presets (`component`, `electrochemical`, ...) are an assertion about the
+                  part, same footing as a skeleton -- so they live here as a starting point for
+                  the custom pool rather than as a second, ambiguous default beside `auto`. */}
+              <div className="search-panel__pool-presets">
+                {Object.entries(props.catalogue.pools).map(([name, codes]) => (
+                  <button
+                    type="button"
+                    key={name}
+                    className="search-panel__pool-preset"
+                    disabled={locked}
+                    onClick={() => props.onCustomPool([...codes])}
+                  >
+                    {name}
+                  </button>
+                ))}
+              </div>
               <ul className="search-panel__custom-pool-list">
                 {props.catalogue.elements.map((element) => {
                   const checked = props.customPool.includes(element.code);
@@ -176,6 +193,7 @@ export function SearchPanel(props: SearchPanelProps) {
                             props.onCustomPool(next);
                           }}
                         />
+                        <SymbolPreview code={element.code} />
                         <span className="search-panel__custom-pool-code">{element.code}</span>
                       </label>
                     </li>

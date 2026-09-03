@@ -220,6 +220,8 @@ export function App() {
   // the screen that started it; see the file header.
   const [search, setSearch] = useState<SearchState | null>(null);
   const [fitState, setFitState] = useState<FitState>(defaultFitState);
+  // Bumped by `fitCircuit` alone, never by routine editing -- see that callback's doc comment.
+  const [autoFitToken, setAutoFitToken] = useState(0);
   const [settings, setSettings] = useState<SearchSettings>(defaultSearchSettings);
   const [excluded, setExcluded] = useState<ExcludedState | null>(null);
   const [drt, setDrt] = useState<DrtState | null>(null);
@@ -698,6 +700,12 @@ export function App() {
    * refitting here re-runs the same global search and lands in the same place -- which is true of
    * the weighting, seed and restart count the search used, and false of any others. They come off
    * the report, so they are what the search *did* rather than what this page asked it to do.
+   *
+   * The fitted *values* still do not travel -- only a request to refit does, via `autoFitToken`
+   * below, so the user sees a fitted curve without an extra click. That is not a reversal of the
+   * decision above: the Fit screen still runs its own fit against the topology and settings it
+   * was handed, rather than displaying a number the search already computed. See
+   * `docs/DISCOVER_UX_PLAN.md` section D.
    */
   const fitCircuit = useCallback(
     (text: string) => {
@@ -714,6 +722,7 @@ export function App() {
         }));
       }
       setScreen("fit");
+      setAutoFitToken((n) => n + 1);
     },
     [search?.spectrumId, search?.report, spectra],
   );
@@ -797,6 +806,7 @@ export function App() {
             onCircuit={setCircuit}
             state={fitState}
             onState={setFitState}
+            autoFitToken={autoFitToken}
           />
         ) : screen === "discover" ? (
           <DiscoverScreen

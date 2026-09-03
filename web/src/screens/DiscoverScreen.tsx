@@ -201,11 +201,7 @@ export function DiscoverScreen({
         criteria={criteria}
         criterion={criterion}
         onCriterion={(value) => onSettings({ criterion: value })}
-        poolNames={
-          catalogue === null
-            ? [poolName]
-            : [AUTO_POOL, ...Object.keys(catalogue.pools), CUSTOM_POOL]
-        }
+        poolNames={catalogue === null ? [poolName] : [AUTO_POOL, CUSTOM_POOL]}
         poolName={poolName}
         onPoolName={(value) => onSettings({ poolName: value })}
         catalogue={catalogue}

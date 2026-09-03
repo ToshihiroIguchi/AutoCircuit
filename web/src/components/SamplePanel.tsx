@@ -102,9 +102,11 @@ export function SamplePanel({
 
       {error !== null && <p className="sample-panel__error">{error}</p>}
 
-      {groupsOf(samples ?? []).map(([group, rows]) => (
-        <div key={group}>
-          <h3 className="sample-panel__group">{group}</h3>
+      {groupsOf(samples ?? []).map(([group, rows], index) => (
+        <details key={group} className="sample-panel__group-details" open={index === 0}>
+          <summary className="sample-panel__group">
+            {group} ({rows.length})
+          </summary>
           <ul className="sample-panel__list">
             {rows.map((sample) => (
               <li key={sample.id} className="sample-panel__item">
@@ -133,7 +135,7 @@ export function SamplePanel({
               </li>
             ))}
           </ul>
-        </div>
+        </details>
       ))}
 
       {samples !== null && samples.length > 0 && (

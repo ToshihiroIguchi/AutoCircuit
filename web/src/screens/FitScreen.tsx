@@ -98,6 +98,12 @@ export interface FitScreenProps {
   /** The session's fit state, and the setter that owns it. */
   state: FitState;
   onState: (update: (previous: FitState) => FitState) => void;
+  /**
+   * A one-shot signal from the Discover -> Fit hand-off: any change to its value (not its
+   * truthiness) means "run the fit now, once". Undefined outside that hand-off, so ordinary
+   * navigation to this screen never auto-fits. See docs/DISCOVER_UX_PLAN.md section D.
+   */
+  autoFitToken?: number;
 }
 
 function errorMessage(error: unknown): string {
@@ -131,6 +137,7 @@ export function FitScreen({
   onCircuit: setCircuitText,
   state,
   onState,
+  autoFitToken,
 }: FitScreenProps) {
   const wire = spectrum?.current ?? null;
   const { values, held, bounds, fitting, weighting, restarts, seed } = state;
@@ -314,6 +321,21 @@ export function FitScreen({
       update({ fitting: false });
     }
   }, [client, describe, wire, spectrumId, held, effective, values, params, weighting, restarts, seed, bounds, update]);
+
+  // The Discover -> Fit hand-off's one-shot auto-fit (docs/DISCOVER_UX_PLAN.md section D). The
+  // token, not its truthiness, is the signal: it changes exactly once per hand-off, from the one
+  // call site in `App.fitCircuit`, never from routine circuit editing on this screen. The ref is
+  // only marked once the fit preconditions are actually met and `handleFit` has been called --
+  // marking it as soon as the token is seen would permanently consume it if `describe` is still
+  // mid-round-trip on that first render, and the effect would never retry once parsing finishes.
+  const lastAutoFit = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (autoFitToken === undefined) return;
+    if (autoFitToken === lastAutoFit.current) return;
+    if (describe === null || wire === null || spectrumId === null) return;
+    lastAutoFit.current = autoFitToken;
+    void handleFit();
+  }, [autoFitToken, describe, wire, spectrumId, handleFit]);
 
   const model: ModelOverlay | null = useMemo(() => {
     if (currentFit !== null) {

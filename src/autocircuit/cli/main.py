@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import textwrap
 import time
@@ -664,9 +665,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="ceiling on topologies screened before the exhaustive limit is clamped down",
     )
     p_disc.add_argument(
-        "--workers", type=int, default=1,
-        help="processes for the screening pass; 1 keeps the run single-process (required "
-        "under Pyodide)",
+        "--workers", type=int, default=max(1, (os.cpu_count() or 1) - 1),
+        help="processes for the screening pass (default: cpu_count - 1 on this machine); "
+        "pass 1 to force single-process",
     )
     p_disc.add_argument(
         "--no-feasibility-filter", action="store_true",

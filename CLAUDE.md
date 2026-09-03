@@ -632,7 +632,26 @@ static-site Web UI running the same core via WASM (Pyodide).
    same-size breakdown shows is not the whole story — genuine same-size duplication is large on
    its own. All seven steps of section 7's order of work are done.
 
-18. `docs/CRITERION_SELECTION_PLAN.md` — whether `DEFAULT_CRITERION = "aic"` (`stats.py:39`,
+18. `docs/DISCOVER_UX_PLAN.md` — four usability fixes on the Discover path, raised in a user
+   review of the CLI and web front ends. **Implemented, all four items; verified by `npm run
+   check` and `tests/test_cli.py` (no quantitative gate — these are usability fixes, not a search
+   property to measure).** The CLI's `--workers` now defaults to `cpu_count - 1` on the desktop
+   path (`main.py`'s argparse default only); the library's own `workers: int = 1` defaults are
+   unchanged, so the Pyodide-safety contract `_worker_pool` documents still holds for anything
+   importing `autocircuit.core.discover` directly. The Data screen's Example Data panel now
+   collapses each manifest group into a `<details>`, open only for the first group, with a count
+   in every closed heading. The Discover screen's Pool control is now Auto/Custom only; the named
+   presets (`"component"`, `"electrochemical"`) moved into the custom panel as quick-fill buttons
+   that replace the checkbox selection rather than a dropdown entry sitting next to `auto` — which
+   is the point, since a named pool is the same "what kind of part is this" assertion this project
+   otherwise only allows as an opt-in narrowing — and the checkboxes now show the same
+   `SymbolPreview` the Fit screen's `ElementPalette.tsx` already draws. And the Discover -> Fit
+   hand-off now auto-runs the fit once on arrival, via a one-shot `autoFitToken` counter bumped
+   only by `App.fitCircuit`; the fitted *values* still do not travel (`SCREEN_STATE_PLAN.md`
+   section 3, unchanged) — only a request to refit does, so the Fit screen still computes its own
+   number rather than displaying the search's.
+
+19. `docs/CRITERION_SELECTION_PLAN.md` — whether `DEFAULT_CRITERION = "aic"` (`stats.py:39`,
    switched from AICc on 2026-08-16 per `METRICS_AND_UX_PLAN.md` section 2.6) is actually the
    right default against BIC, CAIC, HQC or AICc, which no document had measured. **Plan only; no
    benchmark script exists yet.** Its scoping argument is the part worth not re-deriving:
