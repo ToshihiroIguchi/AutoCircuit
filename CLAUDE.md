@@ -632,6 +632,24 @@ static-site Web UI running the same core via WASM (Pyodide).
    same-size breakdown shows is not the whole story — genuine same-size duplication is large on
    its own. All seven steps of section 7's order of work are done.
 
+18. `docs/CRITERION_SELECTION_PLAN.md` — whether `DEFAULT_CRITERION = "aic"` (`stats.py:39`,
+   switched from AICc on 2026-08-16 per `METRICS_AND_UX_PLAN.md` section 2.6) is actually the
+   right default against BIC, CAIC, HQC or AICc, which no document had measured. **Plan only; no
+   benchmark script exists yet.** Its scoping argument is the part worth not re-deriving:
+   `DiscoveryResult.recommended` is built to ignore `criterion` entirely by design
+   (`discover.py:562-585`, chi2-band parsimony plus an always-AICc tie-break), so the open
+   question is narrower than "which criterion is right" — it is whether the *screening-stage*
+   ranking that `criterion` does control (`_quota_by_size`/`_screening_score`,
+   `discover.py:2610-2673`) ever changes which topologies survive to be `recommended`-eligible at
+   all (element count and parameter count diverge once CPE is in the pool, so same-size
+   topologies can rank differently under different penalty terms), and how often the separately
+   reported `by_criterion` value disagrees with `recommended` or overfits a small truth. The plan
+   reuses this project's existing labelled truth sets (`benchmarks/discovery_v2.py`'s
+   `REFERENCES`/`LARGE_REFERENCES`, `benchmarks/six_plus/truths.py`'s nine pre-registered
+   truths and its X2/X3 grid) rather than building a fourth one, and states its decision rule —
+   AIC stays default unless another criterion strictly beats it on recovery without a matched
+   cost in over-fit rate — before any run, per this project's own convention.
+
 Update these when decisions change.
 
 ## Stack and conventions
