@@ -106,7 +106,7 @@ check(
     JSON.stringify(["aic", "aicc", "bic", "caic", "hqc", "waic", "ftest"]),
   JSON.stringify(version.result?.criteria),
 );
-check("and names its default, which the page adopts", version.result?.default_criterion === "aic");
+check("and names its default, which the page adopts", version.result?.default_criterion === "bic");
 check(
   "all four readers are present",
   JSON.stringify(version.result?.formats) ===
@@ -369,7 +369,7 @@ check(
 check("nothing is claimed partial when nothing was cut short", report?.refit_progress === null);
 check("it recommends a candidate", typeof report?.recommended === "string", JSON.stringify(report?.recommended));
 check("the Pareto front is not empty", (report?.pareto?.length ?? 0) > 0);
-check("it ran under the default criterion, since none was named", report?.criterion === "aic");
+check("it ran under the default criterion, since none was named", report?.criterion === "bic");
 check(
   // `restarts: 1` above, not the default 5: the point of carrying this to the Fit screen is that
   // it is what the search *did*, so the check is that it reports this run rather than a constant.
@@ -377,7 +377,7 @@ check(
   report?.weighting === "modulus" && report?.seed === 0 && report?.refit_restarts === 1,
   JSON.stringify([report?.weighting, report?.seed, report?.refit_restarts]),
 );
-check("and labels the column its scores are in", report?.score_label === "AIC", report?.score_label);
+check("and labels the column its scores are in", report?.score_label === "BIC", report?.score_label);
 check(
   "every row carries all six scores, not only the one that ranked it",
   report?.pareto?.every((row) =>
@@ -387,8 +387,8 @@ check(
 );
 check(
   "the ranking really is the named criterion's",
-  report?.pareto?.every((row) => row.score === row.aic) === true,
-  JSON.stringify(report?.pareto?.map((row) => [row.score, row.aic])),
+  report?.pareto?.every((row) => row.score === row.bic) === true,
+  JSON.stringify(report?.pareto?.map((row) => [row.score, row.bic])),
 );
 
 // The F-test is the one choice that is not a score, so it is the one worth driving end to end:

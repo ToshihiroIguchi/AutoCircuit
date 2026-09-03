@@ -381,7 +381,17 @@ Per section 8, contingent implementation for a non-null result:
    `criterion` value as a pre-load placeholder (its own comment: "hard-coding a different one
    would be this file quietly disagreeing with the CLI") -- updated to `"bic"` to keep that
    promise; `App.tsx` overwrites it with the wire's `default_criterion` once the worker answers,
-   so this was cosmetic (avoiding a UI flash) rather than load-bearing.
+   so this was cosmetic (avoiding a UI flash) rather than load-bearing. **Missed on the first
+   pass and caught by CI, not by this search**: `web/scripts/smoke.mjs`, the Pyodide end-to-end
+   check `npm run smoke` runs (and the Pages deploy workflow gates on), hardcoded `"aic"` in four
+   assertions -- the wire's `default_criterion`, a search run with no criterion named, the Pareto
+   table's score-column label, and that every row's `score` field equals its `aic` field. All
+   four failed on push (`gh run view` on the `Pages` workflow) and were updated to `"bic"`
+   (the fourth to compare `row.score` against `row.bic` instead); the `ftest` block right after
+   was left alone, since it asserts `ftest` always ranks and labels by AIC regardless of
+   `DEFAULT_CRITERION`, which is still true. `npm run smoke` and `npm run build` were re-run
+   locally (the smoke script shells out to a bare `python`, which needed the numpy-carrying
+   3.13 interpreter on `PATH` rather than this machine's default 3.12 one) and pass.
 5. This plan's `Status` line, and `CLAUDE.md` item 19, updated to point at this outcome.
 
 `README.md`'s CLI walkthrough ("AIC (the default)...") was also updated to name BIC, since it is
