@@ -223,7 +223,9 @@ class ConstantPhaseElement(Element):
     hf_exponent = (-_EXP_LIMITS[1], -_EXP_LIMITS[0])
 
     def impedance(self, omega: Float, values: Float) -> Complex:
-        return 1.0 / (values[0] * (1j * omega) ** values[1])
+        # (1j*omega)**n as exp(n * log(1j*omega)) -- candidate for docs/SEARCH_TIME_PLAN.md
+        # section 3.3's kernel micro-optimisation, measured against the plain power in gate T5.
+        return 1.0 / (values[0] * np.exp(values[1] * np.log(1j * omega)))
 
     def bounds(self, ctx: BoundsContext) -> list[tuple[float, float]]:
         # Q spans between the resistive limit (n->0, Q ~ 1/|Z|) and the capacitive limit

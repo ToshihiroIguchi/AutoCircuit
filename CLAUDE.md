@@ -517,7 +517,9 @@ static-site Web UI running the same core via WASM (Pyodide).
 17. `docs/SEARCH_TIME_PLAN.md` — where the topology search spends its time, and the levers on
    it. **§3.1 implemented and shipped, §3.2 measured and its fix rejected, §4.2 measured and
    its flag rejected, §4.1 measured and its own decision rule keeps it a lever rather than a
-   default, §4.3 implemented and shipped, the rest is still plan only.** It is deliberately *not* about the 13x F2
+   default, §4.3 implemented and shipped, §3.3 implemented and shipped in half (the CPE kernel
+   substitution ships, the buffer-reuse half measured inside the noise floor and does not), the
+   rest is still plan only.** It is deliberately *not* about the 13x F2
    gap `SEARCH_ALGORITHM_SCREENING.md`
    measured: it collects the F1 and F3 levers the earlier rounds set aside — the per-topology
    setup that is 23–33% of a screen and mostly per-*dataset* work recomputed 2,976 times, a
@@ -586,7 +588,33 @@ static-site Web UI running the same core via WASM (Pyodide).
    evaluating 2.6x more topologies, which is not part of T4's decision rule and is not a quality
    regression — `recommended` was `false` on that cell both before and after — but is exactly
    the same single-draw RNG sensitivity `TOPOLOGY_6PLUS_PLAN.md`'s basin-lottery finding already
-   names for tier-1 screening, now seen once in the fallback's own stream.
+   names for tier-1 screening, now seen once in the fallback's own stream. **§3.3 is the sixth
+   measurement in this section and the one that shipped only half of itself.** Its two candidate
+   levers were measured independently rather than together, because the plan's own bullets had
+   already kept them apart: replacing `ConstantPhaseElement.impedance`'s `(1j*omega)**n` with
+   `exp(n * log(1j*omega))`, and reusing the population buffers `to_values_batch`/
+   `cost_vectorized` allocate fresh on every one of a screen's ~41 calls. Isolated,
+   the CPE substitution cuts `cost_vectorized` 31-33% on CPE-bearing topologies and 0% on a
+   non-CPE control — the exact causal fingerprint a real, CPE-specific win should leave — well
+   past the quarter-reduction bar §3.3 sets. Buffer reuse alone measured 3-5% on *every*
+   topology tried, including the non-CPE control, which is indistinguishable from this
+   instrument's own noise floor (±5-8%, visible on that same control, which should show exactly
+   0% for an inert change and does not) — it does not clear its own bar and was reverted rather
+   than kept for a number the control case cannot tell apart from noise, especially since
+   keeping it would also keep a new hazard: the buffer it returns is aliased across calls, so a
+   caller retaining a reference past its own use silently reads a later population's values.
+   T5's "reported digit" comparison had to be built rather than reused, because the raw
+   `--json` payload is full `repr()` precision — the same precision `ev5_fingerprint.py`
+   already fingerprints byte-exactly — so it was run instead against `DiscoveryResult.summary()`,
+   the text a CLI user actually reads, on all three references: identical before and after
+   except the wall-clock line, with the by-product that full exhaustive discovery wall-clock
+   fell 18.7-31.7% across all three. The byte fingerprint does differ, as the plan predicted,
+   and one difference is worth its own line: on the Randles reference, an exactly-tied
+   exact-reparameterisation pair (`p(R1-CPE1,R2)-CPE2` / `p(R1,CPE1)-R2-CPE2`, same score to
+   every digit) swapped which member the restart search lands on, R1/R2 fully exchanged rather
+   than perturbed — both still reported, still each other's listed equivalent, unchanged in
+   `.summary()` — the same basin-lottery family §4.3 already names for the evolve fallback's
+   RNG stream, seen here for the first time at the ULP level of one kernel's own arithmetic.
 
 Update these when decisions change.
 

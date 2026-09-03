@@ -4,10 +4,12 @@ Status: **§3.1 implemented and shipped (gate T1 passed on revised numbers); §3
 its fix rejected (gate T2 run, not passed, nothing shipped); §4.2 measured and its flag rejected
 (gate T3 run, not passed, nothing shipped); §4.1 run and its own decision rule says it does not
 ship either (gate T6 run, changed nothing on the nine truths); §4.3 implemented and shipped
-(gate T4 passed on both halves); everything else is still plan only.** Written 2026-09-02. Every
-number outside §3.1/§3.2/§4.1/§4.2/§4.3 and §6's T1/T2/T3/T6/T4 entries is quoted from a
-document that measured it before this plan existed; the rest of the gates in section 6 are what
-this plan would still have to pass, and none of the rest has been run.
+(gate T4 passed on both halves); §3.3 implemented and shipped in half (gate T5 passed for the
+CPE kernel substitution, measured and not shipped for the buffer-reuse half); everything else is
+still plan only.** Written 2026-09-02. Every number outside §3.1/§3.2/§4.1/§4.2/§4.3/§3.3 and
+§6's T1/T2/T3/T6/T4/T5 entries is quoted from a document that measured it before this plan
+existed; the rest of the gates in section 6 are what this plan would still have to pass, and
+none of the rest has been run.
 
 ## 0. What this plan is and is not
 
@@ -227,7 +229,7 @@ the browser's own driving code (`discover.py:3129-3131`) and was set aside in th
 original write-up as too invasive to fold into a first pass. It stays out of scope here; this
 section's finding is that the cheap version of this lever does not exist.
 
-### 3.3 Kernel micro-optimisation without compilation (third; changes bits)
+### 3.3 Kernel micro-optimisation without compilation (third; changes bits) [implemented, measured, 2026-09-03 -- half shipped, half not]
 
 Two things are visible in the hot path and neither has been tried:
 
@@ -248,6 +250,21 @@ byte fingerprint will not match. The standard this repository already holds fits
 extra cost it comes after §3.1 and §3.2, and it is dropped if the kernel bucket does not fall
 by at least a quarter — the kernel is 36–47% of a screen, so anything less than that is
 inside the noise of a total-wall-clock measurement.
+
+**Measured separately, because they are two independent claims and the plan's own bullets
+already kept them apart.** The two candidates were isolated by patching `elements.py` and
+`fit.py` one at a time and running `profile_eval.py`'s cost-vectorized throughput section
+(200 reps, 5 repeated trials, median taken -- the cProfile-bucket section alone has a noise
+floor of roughly ±5-8%, visible on the topology that carries no CPE and should therefore show
+exactly 0% either way). The CPE `exp(n log(1j*omega))` substitution alone cuts
+`cost_vectorized` time **31-33%** on the two CPE-bearing test topologies and **0%** (within
+noise) on the one that carries no CPE -- the causal fingerprint this instrument is built to
+show. Buffer reuse in `to_values_batch`/`cost_vectorized` alone measured **3-5%** on *every*
+topology, CPE-bearing or not -- indistinguishable from the control's own ±5-8% noise band, so
+it is not a measured win. **Only the CPE substitution ships**; the buffer-reuse half is
+reverted rather than kept for a noise-level number, because keeping it would also keep a new
+correctness hazard for nothing -- the reused buffer is aliased across calls, so a caller that
+holds a reference past its own use silently reads a later population's values.
 
 ### 3.4 Not in this plan: VARPRO, exact-class dedupe before screening
 
@@ -476,7 +493,7 @@ concerned.
 |---|---|---|---|
 | §3.1 setup hoist | 23–33% of a screen | **[implemented, measured]** 10.4% at `workers=1`, no measurable effect at `workers=8` on this machine | no (byte-identical, confirmed) |
 | §3.2 streaming dispatch | inter-chunk idle | **[measured, rejected]** 31.7% idle confirmed, but the only lever found (a bigger batch) is not number-preserving -- reverted | -- |
-| §3.3 kernel micro-opt | 36–47% of a screen | screen ≤ 1.2–1.3x | last-place bits (digit gate) |
+| §3.3 kernel micro-opt | 36–47% of a screen | **[implemented, measured, shipped in half]** `cost_vectorized` on CPE topologies: 31–33% (CPE substitution alone); buffer reuse alone: 3–5%, inside noise, not shipped | CPE-bearing topologies only; reported digits unchanged (T5) |
 | §4.1 second seed | F3 | **[measured, not shipped]** 0/18 -> 0/18 on the X4 large truths, no cell moved -- stays a lever | yes, deliberately (unused) |
 | §4.2 selective flag | F3 | **[measured, rejected]** catches 100% of >100x mis-screens but flags 70.6–78.7% of everything -- not selective, nothing shipped | -- |
 | §4.3 evolve dispatch | fallback throughput | **[implemented, measured, shipped]** `n_evaluated` at `workers=8`, 300 s: `par6` 380→1366, `ser6` 413→1095; frozen-landscape hit rate unchanged (McNemar p=0.63, p=0.50) | evolve only (confirmed: RNG stream, not the exhaustive path) |
@@ -539,9 +556,40 @@ number is reported as a pair, rested and loaded, per `WEB_UI_PLAN.md`'s W3 prece
   `reported` flag (true → false) between baseline and post-change despite evaluating 2.6x more
   topologies, traced to RNG-stream divergence from the retry loop rather than a quality
   regression — `recommended` was `false` on that cell both before and after.
-- **T5 (kernel micro-opt).** Every reported digit of the three references' `--json` reports
-  equal before and after; the byte fingerprint difference is recorded in this document, not
-  suppressed. Kernel bucket falls by at least a quarter, else the change is reverted.
+- **T5 (kernel micro-opt). [implemented and run, 2026-09-03; passed for the CPE half, failed
+  for the buffer-reuse half.]** The two candidates in §3.3 were measured independently before
+  either shipped. The CPE `exp(n log(1j*omega))` substitution cuts `cost_vectorized` 31-33% on
+  CPE-bearing topologies (0% on a non-CPE control, the expected causal fingerprint) --
+  comfortably past the quarter-reduction bar, so it ships. Buffer reuse in
+  `to_values_batch`/`cost_vectorized` measured 3-5% on every topology tried, CPE-bearing or
+  not, indistinguishable from this instrument's own ±5-8% noise floor (established by the
+  non-CPE control, which should show exactly 0% and does not) -- it does not clear its own
+  share of the bar and is reverted, unshipped.
+
+  "Reported digit" was operationalised against `DiscoveryResult.summary()` -- the text a CLI
+  user actually reads -- rather than the raw `--json` payload, because that payload is full
+  `repr()`-precision (`json.dumps` on a float), the same precision `ev5_fingerprint.py`
+  already fingerprints byte-exactly, and the plan's own §3.3 says this lever will not survive
+  that comparison. `.summary()` text was captured for all three references
+  (`exhaustive_limit=4`, `seed=0`, `workers=1`) before and after the CPE change: **identical
+  except the wall-clock line** ("Evaluated N topologies in X s") -- every score, chi2_reduced,
+  RMS|dZ/Z|, complexity mark, equivalents grouping and recommended circuit unchanged. The same
+  wall-clock lines are the bonus this comparison bought for free: full exhaustive discovery
+  fell 193.6s->157.4s (skin-effect, -18.7%), 86.8s->59.3s (Maxwell-Wagner, -31.7%) and
+  58.6s->44.7s (Randles, -23.7%).
+
+  The byte fingerprint (`ev5_fingerprint.py`) does differ, as predicted, and the difference is
+  recorded rather than suppressed: most of the ~500 changed values are last-place-bit noise
+  (~1e-10 to 1e-15 relative), but one is not -- on the Randles reference, an exactly-tied
+  exact-reparameterisation pair (`p(R1-CPE1,R2)-CPE2` and `p(R1,CPE1)-R2-CPE2`, same score to
+  every digit, `-1304.3692338497665` both before and after) swapped which member the "best of
+  5 restarts" search lands on, with R1.R and R2.R fully exchanged rather than perturbed. Both
+  members are still reported, still tied, and still each other's listed equivalent both before
+  and after -- the `.summary()` text is unaffected -- but this is the same basin-lottery family
+  `TOPOLOGY_6PLUS_PLAN.md` already documents for tier-1 screening and `SEARCH_TIME_PLAN.md`
+  §4.3 documents for the evolve fallback's RNG stream, now seen a third time at the ULP level
+  of a single kernel's arithmetic. Full `pytest` suite re-run clean after the change (1023
+  passed, 19 skipped, 978.9s).
 - **T6 (second seed). [run, 2026-09-03; the decision rule's answer is no.]** `seeds2` on the
   same nine X4 truths and three seeds: 0/18 on the six/seven-element rows, identical to
   `base`'s 0/18, and unchanged by shape (3/9/3/9/3/9 both arms). The five-element negative
@@ -563,8 +611,10 @@ number is reported as a pair, rested and loaded, per `WEB_UI_PLAN.md`'s W3 prece
 5. **[done, shipped]** §4.3 and T4 — propose-until-unique plus the merged dispatch barrier,
    both halves of the gate passed (frozen-landscape hit rate unchanged; `workers = 8`
    throughput far above baseline on both truths).
-6. §3.3 and T5, last, because it is the only F1 item that changes bits.
+6. **[done, shipped in half]** §3.3 and T5 -- the CPE `exp(n log(1j*omega))` substitution ships
+   (31-33% on `cost_vectorized` for CPE-bearing topologies, reported digits unchanged); the
+   buffer-reuse half measured 3-5%, inside this instrument's own noise floor, and is reverted.
 7. The one cheap count from §3.4 (class multiplicity in a landscape table), recorded either
    way.
 
-Steps 6–7 are not implemented yet.
+Step 7 is not implemented yet.
