@@ -31,6 +31,7 @@ import multiprocessing
 import multiprocessing.pool
 import time
 from collections.abc import Callable, Generator, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
 from typing import Any, Literal, NamedTuple, cast
 
@@ -249,6 +250,18 @@ BREEDING_EXTRA = 0
 #: A parameter of `mutate` and of `_next_generation` so that the sweep can drive the real
 #: operator, and not of `discover()`, for the reason :data:`BREEDING_EXTRA` is not.
 MUTATION_WEIGHTS: tuple[float, float, float, float] = (0.35, 0.25, 0.25, 0.15)
+
+#: How many times the breeding loop retries a child whose canonical form is already in
+#: `_Evaluator.cache` before accepting the duplicate anyway.
+#:
+#: [`docs/SEARCH_TIME_PLAN.md` section 4.3] Proposals were never checked against the cache
+#: before a population slot was spent on them -- the cache is consulted only in
+#: `_Evaluator.evaluate`/`evaluate_all`, after the fit (or the free cache hit) already
+#: happened. [measured, `docs/EVOLVE_SEARCH_PLAN.md` section 1.3] over half of each late
+#: generation re-proposes an already-evaluated topology. A cap rather than an unbounded retry,
+#: because a converged front can propose nothing new at all -- every neighbour one mutation
+#: away from the elite already known -- and an unbounded loop there would spin forever.
+PROPOSE_RETRY_CAP = 20
 
 #: How hard a crowded complexity level is penalised **when choosing a parent**, in units of the
 #: criterion. PySR's adaptive parsimony; see :func:`_tournament` for the two ways this differs
@@ -1418,15 +1431,24 @@ class _Evaluator:
         ``executor=None`` calls :meth:`evaluate` once per item, in the given order, and is
         therefore byte-identical to the loop it replaces -- cache and ``best_cost`` are read
         and written between items exactly as they always were. With an executor, the two
-        expensive stages -- the warm polish and the reduced-budget global search -- are fanned
-        across processes a generation at a time, so a lookup sees the cache and ``best_cost``
-        as of the *start* of the generation rather than the update-as-you-go ordering
-        :meth:`evaluate` gives them. That is the same staleness :func:`_screen_parallel`
-        already accepts within one chunk, and for the same reason it cannot change which fit is
-        ultimately reported: tier 2 always refits the shortlist at full budget regardless of
-        which tier-1 path a topology took. It can change which topologies *reach* the
-        shortlist, which is exactly what X6 (``docs/TOPOLOGY_6PLUS_PLAN.md`` section 5) exists
-        to measure.
+        expensive stages -- the warm polish and the reduced-budget global search -- run in one
+        worker round trip per item, dispatched together for the whole generation, so a lookup
+        sees the cache and ``best_cost`` as of the *start* of the generation rather than the
+        update-as-you-go ordering :meth:`evaluate` gives them. That is the same staleness
+        :func:`_screen_parallel` already accepts within one chunk, and for the same reason it
+        cannot change which fit is ultimately reported: tier 2 always refits the shortlist at
+        full budget regardless of which tier-1 path a topology took. It can change which
+        topologies *reach* the shortlist, which is exactly what X6
+        (``docs/TOPOLOGY_6PLUS_PLAN.md`` section 5) exists to measure.
+
+        [`docs/SEARCH_TIME_PLAN.md` section 4.3] The polish and the search used to be two
+        ``executor.map`` calls with a full barrier between them, because the accept decision
+        (:meth:`_close_enough`) reads a polished candidate's own fitted cost. With
+        ``warm_accept = math.inf`` (the shipped default) that decision collapses to "is
+        ``reference`` -- the best cost already known at this complexity -- known at all", which
+        does not depend on the polish's outcome and is therefore knowable *before* dispatch.
+        Each worker now decides for itself whether to run the search after its own polish, in
+        one call, so this is one map over the whole generation instead of two.
         """
         if executor is None:
             return [self.evaluate(node, generation, parent) for node, parent in items]
@@ -1452,56 +1474,45 @@ class _Evaluator:
                 _Prepared(circuit, key, seen, known, self._warm_start(parent, circuit, known))
             )
 
-        polish_indices: list[int] = []
-        polish_tasks: list[tuple[str, int, dict[str, float]]] = []
+        indices: list[int] = []
+        tasks: list[_EvolveTask] = []
         for i, p in enumerate(prepared):
-            if p is not None and p.warm is not None:
-                polish_indices.append(i)
-                polish_tasks.append((p.circuit.to_string(), self.seed, p.warm))
-
-        polished: dict[int, Candidate | None] = {}
-        if polish_tasks:
-            for i, wire in zip(
-                polish_indices, executor.map(_evolve_polish_worker, polish_tasks), strict=True
-            ):
-                p = prepared[i]
-                assert p is not None
-                polished[i] = (
-                    None
-                    if wire is None
-                    else Candidate(p.circuit, FitResult.from_wire(wire), generation)
-                )
-
-        search_indices: list[int] = []
-        search_tasks: list[tuple[str, int, int, int, int, float]] = []
-        for i, p in enumerate(prepared):
-            if p is None or p.seen:
+            if p is None:
                 continue
-            polished_candidate = polished.get(i)
-            if polished_candidate is None or not self._close_enough(polished_candidate):
-                search_indices.append(i)
-                search_tasks.append(
-                    (
-                        p.circuit.to_string(),
-                        self.seed,
-                        self.restarts,
-                        self.popsize,
-                        self.maxiter,
-                        self.tol,
-                    )
+            need_search = not p.seen
+            if p.warm is None and not need_search:
+                continue
+            reference = self.best_cost.get(p.circuit.complexity)
+            indices.append(i)
+            tasks.append(
+                (
+                    p.circuit.to_string(),
+                    self.seed,
+                    p.warm,
+                    reference,
+                    self.warm_accept,
+                    need_search,
+                    self.restarts,
+                    self.popsize,
+                    self.maxiter,
+                    self.tol,
                 )
+            )
 
-        searched: dict[int, Candidate | None] = {}
-        if search_tasks:
-            for i, wire in zip(
-                search_indices, executor.map(_evolve_search_worker, search_tasks), strict=True
+        outcomes: dict[int, tuple[Candidate | None, Candidate | None]] = {}
+        if tasks:
+            for i, (polish_wire, search_wire) in zip(
+                indices, executor.map(_evolve_polish_then_search_worker, tasks), strict=True
             ):
                 p = prepared[i]
                 assert p is not None
-                searched[i] = (
+                outcomes[i] = (
                     None
-                    if wire is None
-                    else Candidate(p.circuit, FitResult.from_wire(wire), generation)
+                    if polish_wire is None
+                    else Candidate(p.circuit, FitResult.from_wire(polish_wire), generation),
+                    None
+                    if search_wire is None
+                    else Candidate(p.circuit, FitResult.from_wire(search_wire), generation),
                 )
 
         results: list[Candidate | None] = []
@@ -1509,7 +1520,8 @@ class _Evaluator:
             if p is None:
                 results.append(None)
                 continue
-            best = _cheaper(_cheaper(polished.get(i), searched.get(i)), p.known)
+            polished, searched = outcomes.get(i, (None, None))
+            best = _cheaper(_cheaper(polished, searched), p.known)
             self.cache[p.key] = best
             if best is not None:
                 cost = _fit_cost(best.result)
@@ -1529,52 +1541,84 @@ class _Prepared(NamedTuple):
     warm: dict[str, float] | None
 
 
-def _evolve_polish_worker(task: tuple[str, int, dict[str, float]]) -> dict[str, Any] | None:
-    """One warm polish in a worker process, the parallel counterpart of
-    :meth:`_Evaluator._polish`."""
-    text, seed, initial = task
-    try:
-        result = fit(
-            text,
-            _WORKER["spectrum"],
-            weighting=_WORKER["weighting"],
-            initial=initial,
-            global_search=False,
-            restarts=1,
-            local=SCREEN_LOCAL,
-            seed=seed,
-            context=_WORKER["context"],
-        )
-    except (ValueError, CircuitError, np.linalg.LinAlgError):
-        return None
-    if not math.isfinite(result.statistics.aicc):
-        return None
-    return result.to_wire()
+_EvolveTask = tuple[
+    str, int, "dict[str, float] | None", "float | None", float, bool, int, int, int, float
+]
 
 
-def _evolve_search_worker(task: tuple[str, int, int, int, int, float]) -> dict[str, Any] | None:
-    """One reduced-budget global search in a worker process, the parallel counterpart of
-    :meth:`_Evaluator._search`."""
-    text, seed, restarts, popsize, maxiter, tol = task
-    try:
-        result = fit(
-            text,
-            _WORKER["spectrum"],
-            weighting=_WORKER["weighting"],
-            global_search=True,
-            restarts=restarts,
-            popsize=popsize,
-            maxiter=maxiter,
-            tol=tol,
-            local=PUBLISH_LOCAL,
-            seed=seed,
-            context=_WORKER["context"],
-        )
-    except (ValueError, CircuitError, np.linalg.LinAlgError):
-        return None
-    if not math.isfinite(result.statistics.aicc):
-        return None
-    return result.to_wire()
+def _evolve_polish_then_search_worker(
+    task: _EvolveTask,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """One offspring's whole tier-1 turn -- warm polish, then the reduced-budget global search
+    if the polish did not make it unnecessary -- in a single worker round trip.
+
+    [`docs/SEARCH_TIME_PLAN.md` section 4.3] :meth:`_Evaluator.evaluate_all`'s parallel path
+    used to be two ``executor.map`` calls with a full barrier between them: every polish in the
+    generation, then every search. That barrier is not needed. The accept decision
+    (:meth:`_Evaluator._close_enough`) reads only ``warm_accept`` and ``reference`` -- the best
+    cost already known at this circuit's complexity as of the *start* of the generation, which
+    does not change while a generation's fits are in flight (`_Evaluator.best_cost` is updated
+    only after they all return) -- so both are computable before dispatch and travel in the
+    task tuple. A worker can therefore decide for itself, after its own polish, whether to run
+    the search, and the driver goes back to one map call per generation instead of two.
+
+    ``reference`` and ``need_search`` are precomputed by the driver from state it already has
+    (`_Evaluator.best_cost`, `_Prepared.seen`); the worker never needs `_Evaluator` itself.
+    """
+    text, seed, warm, reference, warm_accept, need_search, restarts, popsize, maxiter, tol = task
+
+    polished: FitResult | None = None
+    if warm is not None:
+        try:
+            polished = fit(
+                text,
+                _WORKER["spectrum"],
+                weighting=_WORKER["weighting"],
+                initial=warm,
+                global_search=False,
+                restarts=1,
+                local=SCREEN_LOCAL,
+                seed=seed,
+                context=_WORKER["context"],
+            )
+        except (ValueError, CircuitError, np.linalg.LinAlgError):
+            polished = None
+        else:
+            if not math.isfinite(polished.statistics.aicc):
+                polished = None
+
+    close_enough = (
+        polished is not None
+        and reference is not None
+        and _fit_cost(polished) <= warm_accept * reference
+    )
+
+    searched: FitResult | None = None
+    if need_search and not close_enough:
+        try:
+            searched = fit(
+                text,
+                _WORKER["spectrum"],
+                weighting=_WORKER["weighting"],
+                global_search=True,
+                restarts=restarts,
+                popsize=popsize,
+                maxiter=maxiter,
+                tol=tol,
+                local=PUBLISH_LOCAL,
+                seed=seed,
+                context=_WORKER["context"],
+            )
+        except (ValueError, CircuitError, np.linalg.LinAlgError):
+            searched = None
+        else:
+            if not math.isfinite(searched.statistics.aicc):
+                searched = None
+
+    return (
+        None if polished is None else polished.to_wire(),
+        None if searched is None else searched.to_wire(),
+    )
 
 
 def _same_response(a: Candidate, b: Candidate) -> bool:
@@ -2293,6 +2337,7 @@ def _evolve(
                 # the default scaling is zero and the count would otherwise walk the archive once
                 # per generation to be multiplied away.
                 frequencies=(_complexity_frequencies(alive) if PARSIMONY_SCALING else None),
+                known=evaluator.cache.keys(),
             )
 
         # Only refitted candidates are reported, which is the rule SCREEN_POPSIZE states and the
@@ -3490,6 +3535,18 @@ def _complexity_frequencies(archive: Sequence[Candidate]) -> dict[float, float]:
     return {key: value / total for key, value in counts.items()}
 
 
+def _breeding_key(node: Node) -> str | None:
+    """The same canonical-form key :meth:`_Evaluator.evaluate` computes for its cache, so the
+    breeding loop's novelty check and the cache it is checking against never disagree on
+    identity. ``None`` when the tree fails to simplify -- rare, and :meth:`_Evaluator.evaluate`
+    discovers the same failure independently and drops it, so there is nothing here to dedupe
+    against."""
+    try:
+        return Circuit(simplify(node)).canonical_form()
+    except CircuitError:
+        return None
+
+
 def _next_generation(
     alive: list[Candidate],
     rng: np.random.Generator,
@@ -3501,6 +3558,7 @@ def _next_generation(
     frequencies: Mapping[float, float] | None = None,
     parsimony: float = PARSIMONY_SCALING,
     weights: Sequence[float] = MUTATION_WEIGHTS,
+    known: AbstractSet[str] = frozenset(),
 ) -> list[_Offspring]:
     """Elitism over the Pareto front, then tournament selection with mutation/crossover.
 
@@ -3513,24 +3571,41 @@ def _next_generation(
     (:func:`_inherited_values`). For a crossover the parent named is the one whose tree was
     grafted onto, not the donor of the subtree: the child is a modification of that tree, so
     it is the one most of the inherited values will still belong to.
+
+    ``known`` is the caller's cache of already-evaluated canonical forms (typically
+    ``_Evaluator.cache``). A bred child matching one of them is retried, up to
+    :data:`PROPOSE_RETRY_CAP` times, before the slot is spent on the duplicate anyway -- the
+    elite carried over above are deliberately exempt (re-proposing them is the free cache hit
+    :class:`_Evaluator` is built to expect, not the accidental collision this guards against).
     """
     front = pareto_front(alive, criterion)
     elite = front[: max(2, population // 6)]
     trees: list[_Offspring] = [(candidate.circuit.root, candidate) for candidate in elite]
 
+    seen = set(known)
     while len(trees) < population:
-        parent = _tournament(
-            alive, rng, criterion=criterion, frequencies=frequencies, parsimony=parsimony
-        )
-        if rng.random() < 0.3 and len(alive) > 1:
-            other = _tournament(
+        child = parent = None
+        for _ in range(PROPOSE_RETRY_CAP):
+            parent = _tournament(
                 alive, rng, criterion=criterion, frequencies=frequencies, parsimony=parsimony
             )
-            child = crossover(parent.circuit.root, other.circuit.root, rng)
-        else:
-            child = parent.circuit.root
-        child = mutate(child, rng, pool, max_elements, weights=weights)
-        if count_elements(child) <= max_elements:
+            if rng.random() < 0.3 and len(alive) > 1:
+                other = _tournament(
+                    alive, rng, criterion=criterion, frequencies=frequencies, parsimony=parsimony
+                )
+                child = crossover(parent.circuit.root, other.circuit.root, rng)
+            else:
+                child = parent.circuit.root
+            child = mutate(child, rng, pool, max_elements, weights=weights)
+            if count_elements(child) > max_elements:
+                child = None
+                continue
+            key = _breeding_key(child)
+            if key is None or key not in seen:
+                if key is not None:
+                    seen.add(key)
+                break
+        if child is not None:
             trees.append((child, parent))
     return trees
 

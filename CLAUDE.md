@@ -517,7 +517,7 @@ static-site Web UI running the same core via WASM (Pyodide).
 17. `docs/SEARCH_TIME_PLAN.md` — where the topology search spends its time, and the levers on
    it. **§3.1 implemented and shipped, §3.2 measured and its fix rejected, §4.2 measured and
    its flag rejected, §4.1 measured and its own decision rule keeps it a lever rather than a
-   default, the rest is still plan only.** It is deliberately *not* about the 13x F2
+   default, §4.3 implemented and shipped, the rest is still plan only.** It is deliberately *not* about the 13x F2
    gap `SEARCH_ALGORITHM_SCREENING.md`
    measured: it collects the F1 and F3 levers the earlier rounds set aside — the per-topology
    setup that is 23–33% of a screen and mostly per-*dataset* work recomputed 2,976 times, a
@@ -572,6 +572,21 @@ static-site Web UI running the same core via WASM (Pyodide).
    contain a mis-screen for a second seed to repair. `screen_restarts=2` stays an available
    lever, not the shipped default — the fourth item in this section to be measured and not
    ship, after §3.2 and §4.2's rejections and alongside §3.1's more qualified acceptance.
+   **§4.3 is the fifth measurement in this section and the second to ship**: `_evolve`'s
+   generation loop now proposes children until `population` distinct canonical forms are in
+   hand (a duplicate previously spent a slot for nothing, `EVOLVE_SEARCH_PLAN.md` §1.3's 15/40 →
+   22/40 cache-hit finding), and its two sequential `executor.map` calls (polish, then a full
+   barrier, then search) are merged into one worker function per candidate, because the accept
+   decision under `warm_accept = inf` needs only `best_cost` at that complexity — known
+   before dispatch, not after. Both halves of gate T4 passed: frozen-landscape hit rate is
+   unchanged at 480 seeds on two arenas (McNemar p = 0.63, p = 0.50), and real-fit throughput at
+   300 s / `workers = 8` rose far past X6's own 380/413 baseline — `par6` to 1366, `ser6` to
+   1095. One thing was measured and recorded rather than smoothed away: at `workers = 1`,
+   `ser6`'s `reported` flag flipped `true` → `false` between baseline and post-change despite
+   evaluating 2.6x more topologies, which is not part of T4's decision rule and is not a quality
+   regression — `recommended` was `false` on that cell both before and after — but is exactly
+   the same single-draw RNG sensitivity `TOPOLOGY_6PLUS_PLAN.md`'s basin-lottery finding already
+   names for tier-1 screening, now seen once in the fallback's own stream.
 
 Update these when decisions change.
 

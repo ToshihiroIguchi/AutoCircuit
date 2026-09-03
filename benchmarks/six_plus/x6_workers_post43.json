@@ -1,0 +1,50 @@
+[
+  {
+    "truth": "par6",
+    "workers": 1,
+    "seconds": 369.6,
+    "generations": 132,
+    "n_evaluated": 1126,
+    "reported": true,
+    "on_front": true,
+    "recommended": true,
+    "recommended_circuit": "p(p(R1,C1)-C2,R2-C3,R3)",
+    "best_relative_error": 0.012448094845232361
+  },
+  {
+    "truth": "par6",
+    "workers": 8,
+    "seconds": 355.2,
+    "generations": 210,
+    "n_evaluated": 1366,
+    "reported": true,
+    "on_front": true,
+    "recommended": true,
+    "recommended_circuit": "p(p(R1,C1)-C2,R2-C3,R3)",
+    "best_relative_error": 0.012448094845232361
+  },
+  {
+    "truth": "ser6",
+    "workers": 1,
+    "seconds": 456.0,
+    "generations": 83,
+    "n_evaluated": 948,
+    "reported": false,
+    "on_front": false,
+    "recommended": false,
+    "recommended_circuit": "p(C1-L1,R1-C2)-R2",
+    "best_relative_error": 0.012219263849324728
+  },
+  {
+    "truth": "ser6",
+    "workers": 8,
+    "seconds": 399.8,
+    "generations": 112,
+    "n_evaluated": 1095,
+    "reported": true,
+    "on_front": false,
+    "recommended": false,
+    "recommended_circuit": "p(C1-L1,R1-C2)-R2",
+    "best_relative_error": 0.012190366063574062
+  }
+]

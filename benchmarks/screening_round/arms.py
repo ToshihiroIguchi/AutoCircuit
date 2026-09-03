@@ -181,7 +181,8 @@ def arm_current(table: Table, rng: np.random.Generator, pool: tuple[str, ...],
 def arm_ga_bounded(table: Table, rng: np.random.Generator, pool: tuple[str, ...],
                    max_elements: int, population: int, *, pool_bound: int | None = None,
                    parsimony: float = 0.0,
-                   weights: Sequence[float] = MUTATION_WEIGHTS) -> Trace:
+                   weights: Sequence[float] = MUTATION_WEIGHTS,
+                   dedup: bool = False) -> Trace:
     """Step 4's minimal half: the same search, but the breeding pool stops growing.
 
     `_evolve` breeds from the entire history, so `_tournament` draws 3 of N with N rising every
@@ -203,6 +204,11 @@ def arm_ga_bounded(table: Table, rng: np.random.Generator, pool: tuple[str, ...]
     report's shortlist is drawn from, and the pool provably contains the whole history's front
     and top `population` anyway), and equal scores break on the canonical form rather than on
     insertion order. The re-measured number is in `docs/SEARCH_ALGORITHM_SCREENING.md`.
+
+    ``dedup`` threads `_next_generation`'s ``known`` parameter through -- `table.cache` is keyed
+    by canonical form exactly as `_Evaluator.cache` is, so this arm exercises
+    `docs/SEARCH_TIME_PLAN.md` section 4.3(a)'s propose-until-unique change with no
+    reimplementation, the same discipline as `pool_bound` and `weights` above.
     """
     trees: list[tuple[Node, Ind | None]] = [
         (random_topology(rng, pool, int(rng.integers(2, max_elements + 1))), None)
@@ -239,6 +245,7 @@ def arm_ga_bounded(table: Table, rng: np.random.Generator, pool: tuple[str, ...]
             frequencies=_complexity_frequencies(alive_all) if parsimony else None,
             parsimony=parsimony,
             weights=weights,
+            known=table.cache.keys() if dedup else frozenset(),
         )
         generation += 1
     return Trace(table.hit_at, table.fits, table.best, pressure, table.sizes)
@@ -703,6 +710,10 @@ ARMS: dict[str, Callable[..., Trace]] = {
     "ga_tight3": lambda *a, **k: arm_ga_bounded(*a, pool_bound=3, **k),
     "ga_tight1": lambda *a, **k: arm_ga_bounded(*a, pool_bound=1, **k),
     "ga_front": lambda *a, **k: arm_ga_bounded(*a, pool_bound=0, **k),
+    # `docs/SEARCH_TIME_PLAN.md` section 4.3(a) / gate T4: `ga_front` with propose-until-unique
+    # turned on, nothing else different -- the control for the dedup change now shipped in
+    # `discover._evolve`.
+    "ga_front_dedup": lambda *a, **k: arm_ga_bounded(*a, pool_bound=0, dedup=True, **k),
     "islands2_front": lambda *a, **k: arm_islands(*a, islands=2, migration=0.5,
                                                   pool_bound=0, **k),
     "islands4_front": lambda *a, **k: arm_islands(*a, islands=4, migration=0.5,

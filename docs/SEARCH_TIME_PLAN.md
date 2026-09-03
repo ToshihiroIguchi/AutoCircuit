@@ -3,11 +3,11 @@
 Status: **§3.1 implemented and shipped (gate T1 passed on revised numbers); §3.2 measured and
 its fix rejected (gate T2 run, not passed, nothing shipped); §4.2 measured and its flag rejected
 (gate T3 run, not passed, nothing shipped); §4.1 run and its own decision rule says it does not
-ship either (gate T6 run, changed nothing on the nine truths); everything else is still plan
-only.** Written 2026-09-02. Every number outside §3.1/§3.2/§4.1/§4.2 and §6's T1/T2/T3/T6
-entries is quoted from a document that measured it before this plan existed; the rest of the
-gates in section 6 are what this plan would still have to pass, and none of the rest has been
-run.
+ship either (gate T6 run, changed nothing on the nine truths); §4.3 implemented and shipped
+(gate T4 passed on both halves); everything else is still plan only.** Written 2026-09-02. Every
+number outside §3.1/§3.2/§4.1/§4.2/§4.3 and §6's T1/T2/T3/T6/T4 entries is quoted from a
+document that measured it before this plan existed; the rest of the gates in section 6 are what
+this plan would still have to pass, and none of the rest has been run.
 
 ## 0. What this plan is and is not
 
@@ -377,7 +377,7 @@ problem (mean ratio 37.7–41.4x at one seed down to 1.06–1.16x at two, §5.7.
 between *independent* draws of the same topology, not between one topology's draw and a
 different (smaller) topology's draw. It stands alone; T4.1/T6, below, is still unrun.
 
-### 4.3 `_evolve`: propose until unique, and merge the two dispatch barriers
+### 4.3 `_evolve`: propose until unique, and merge the two dispatch barriers [implemented, measured, 2026-09-03 — T4 passed]
 
 Two things in the fallback's generation loop are visible in the code and match X6's
 unmeasured hypothesis for why eight workers buy so little.
@@ -410,6 +410,66 @@ and O(front²) per generation. At 1.33 s per fit it is almost certainly negligib
 listed so that it is measured once (a `perf_counter` around the non-fit part of a
 generation) and then either fixed in an afternoon or closed with the number.
 
+**Both halves were measured and both passed.** `_next_generation` now proposes until
+`population` distinct canonical forms are in hand (`PROPOSE_RETRY_CAP = 20` retries before
+accepting a duplicate anyway, so a converged front cannot spin forever), threaded through
+`_breeding_key` — the same `Circuit(simplify(...)).canonical_form()` `_Evaluator.evaluate`
+already uses, not a second identity notion. `evaluate_all`'s parallel path was rewritten from
+two sequential `executor.map` calls (polish, barrier, search) to one: `_evolve_polish_then_search_worker`
+does the warm polish and, if `close_enough` is false, the reduced-budget search, inside the same
+worker call, because `close_enough` only needs `best_cost` at that complexity — known before
+dispatch, unchanged by anything else in the batch.
+
+*Search-quality half, `benchmarks/screening_round/arms.py`'s new `ga_front_dedup` arm against
+`ga_front` at 480 seeds (the count that resolved the closest prior comparison,
+`EVOLVE_SEARCH_PLAN.md` §3.4.4), at the same unsaturated budgets `SEARCH_ALGORITHM_SCREENING.md`
+calibrated for these arenas:*
+
+| arena | budget | `ga_front` | `ga_front_dedup` | McNemar p |
+|---|---:|---:|---:|---:|
+| `land_rcl6.json` | 150→60 (recalibrated, see below) | 249/480 | 244/480 | 0.6305 |
+| `land_series_rcl6.json` | 40 | 287/480 | 285/480 | 0.5000 |
+
+Neither difference is significant; hit rate does not fall. (`land_rcl6` needed recalibrating
+down from the README's usual 150 to 60 for this comparison — 150 clears both arms near-fully at
+this budget with dedup switched on, which is the README's own trap, "a budget everything clears
+is a budget that ranks nothing"; 60 sits in the discriminating range both arms actually separate
+on.)
+
+*Throughput half, `benchmarks/six_plus/x6_workers.py` re-run into `x6_workers_post43.json`, same
+truths, same seed, same 300 s / `workers = 8`, against X6's own 380/413 baseline:*
+
+| truth | workers | baseline `n_evaluated` | post-change `n_evaluated` |
+|---|---:|---:|---:|
+| `par6` | 8 | 380 | **1366** |
+| `ser6` | 8 | 413 | **1095** |
+
+Both exceed the baseline by a wide margin — the dedup loop stops wasting fit budget on
+already-cached topologies (a converged late generation was previously proposing the same
+canonical form repeatedly), and the merged barrier removes the idle between the two
+`executor.map` calls, so more distinct topologies are actually fitted per second. Note that
+*generations* fell (`par6` 275→210, `ser6` 152→112 at `workers = 8`): each generation now does
+more work (retrying until `population` unique children are found) rather than dispatching a
+`population`-sized batch that included duplicates, so fewer, more productive generations fit
+inside the same 300 s.
+
+One incidental change is recorded rather than smoothed over: at `workers = 1`, `ser6`'s
+`reported` flag (a truth-equivalent anywhere in the candidate list, `recovery.py`'s `Referee`)
+flipped from `true` (baseline) to `false` (post-change), despite `n_evaluated` rising from 365 to
+948. This is not part of T4's decision rule, which only asks about frozen-landscape hit rate and
+`workers = 8` throughput, and it is not a regression on the number that matters most — 
+`recommended` was `false` on `ser6` at both `workers = 1` and `workers = 8`, before and after,
+unchanged. The mechanism is RNG consumption, not search quality: the retry loop draws extra
+random numbers whenever a duplicate is proposed, so at `workers = 1` (fully deterministic, no
+thread races) the run's entire trajectory after the first retry diverges from the pre-change
+run, and this particular divergent trajectory happens not to visit `ser6`'s equivalence class
+even though it visits far more topologies overall. `par6` at `workers = 1` was unaffected
+(`reported`/`on_front`/`recommended` all `true`, both before and after). This is the same kind of
+single-draw sensitivity `TOPOLOGY_6PLUS_PLAN.md`'s basin-lottery finding already documents for
+tier-1 screening, now seen in the fallback's own RNG stream, and it is why `SEARCH_TIME_PLAN.md`
+and `recovery.py` never read a single `reported` flag at face value where a formal gate is
+concerned.
+
 ## 5. What the ceiling is, stated before anything is built
 
 | lever | bucket it targets | best plausible effect on the total | changes numbers? |
@@ -419,7 +479,7 @@ generation) and then either fixed in an afternoon or closed with the number.
 | §3.3 kernel micro-opt | 36–47% of a screen | screen ≤ 1.2–1.3x | last-place bits (digit gate) |
 | §4.1 second seed | F3 | **[measured, not shipped]** 0/18 -> 0/18 on the X4 large truths, no cell moved -- stays a lever | yes, deliberately (unused) |
 | §4.2 selective flag | F3 | **[measured, rejected]** catches 100% of >100x mis-screens but flags 70.6–78.7% of everything -- not selective, nothing shipped | -- |
-| §4.3 evolve dispatch | fallback throughput | more distinct topologies per second at 8 workers | evolve only |
+| §4.3 evolve dispatch | fallback throughput | **[implemented, measured, shipped]** `n_evaluated` at `workers=8`, 300 s: `par6` 380→1366, `ser6` 413→1095; frozen-landscape hit rate unchanged (McNemar p=0.63, p=0.50) | evolve only (confirmed: RNG stream, not the exhaustive path) |
 
 Stacked, §3.1–§3.3 might make one screen 1.5–2x cheaper. That is real and it is not the 13x
 that `SEARCH_ALGORITHM_SCREENING.md` §4.6 measured — that gap is F2 and is addressed
@@ -467,11 +527,18 @@ number is reported as a pair, rested and loaded, per `WEB_UI_PLAN.md`'s W3 prece
   `seed0 / sub_best` ratios (1.20x–8.17x) overlap the ordinary-noise rows' ratios (up to
   5.8x–8.2x) completely, because the flag compares one single-seed draw against another. Nothing
   shipped from this section.
-- **T4 (evolve dispatch).** Frozen-landscape arena at an unsaturated budget (150 fits, the
-  budget §3.4.4 of `EVOLVE_SEARCH_PLAN.md` used to separate arms): hit rate not lower than
-  the control by McNemar at the seed count that resolved the last comparison (480). At 300 s
-  and `workers = 8`: distinct topologies evaluated on `par6` and `ser6` exceed X6's 380 and
-  413. Both halves; a win on one and a loss on the other is a loss.
+- **T4 (evolve dispatch). [implemented and run, 2026-09-03; passed on both halves.]**
+  Frozen-landscape arena at an unsaturated, recalibrated budget: hit rate not lower than the
+  control by McNemar at 480 seeds — `land_rcl6.json` (budget 60) 249/480 vs 244/480, p = 0.6305;
+  `land_series_rcl6.json` (budget 40) 287/480 vs 285/480, p = 0.5000. Neither drop is
+  significant. At 300 s and `workers = 8`: distinct topologies evaluated rose well past X6's
+  380/413 baseline — `par6` to 1366, `ser6` to 1095. Both halves pass, so the change ships:
+  propose-until-unique in `_next_generation` and the merged single-barrier dispatch in
+  `_Evaluator.evaluate_all`. Full `pytest` suite re-run clean after the change (1023 passed, 19
+  skipped). One non-gated observation recorded in §4.3: `ser6` at `workers = 1` lost its
+  `reported` flag (true → false) between baseline and post-change despite evaluating 2.6x more
+  topologies, traced to RNG-stream divergence from the retry loop rather than a quality
+  regression — `recommended` was `false` on that cell both before and after.
 - **T5 (kernel micro-opt).** Every reported digit of the three references' `--json` reports
   equal before and after; the byte fingerprint difference is recorded in this document, not
   suppressed. Kernel bucket falls by at least a quarter, else the change is reverted.
@@ -493,9 +560,11 @@ number is reported as a pair, rested and loaded, per `WEB_UI_PLAN.md`'s W3 prece
 4. **[done, not shipped]** §4.1 / T6 — the deferred experiment, without a flag (step 3 closed
    with nothing to combine): `seeds2` changes 0 of 18 large-truth recovery cells against
    `base`, so its own decision rule keeps it a lever rather than the default.
-5. §4.3 and T4.
+5. **[done, shipped]** §4.3 and T4 — propose-until-unique plus the merged dispatch barrier,
+   both halves of the gate passed (frozen-landscape hit rate unchanged; `workers = 8`
+   throughput far above baseline on both truths).
 6. §3.3 and T5, last, because it is the only F1 item that changes bits.
 7. The one cheap count from §3.4 (class multiplicity in a landscape table), recorded either
    way.
 
-Steps 5–7 are not implemented yet.
+Steps 6–7 are not implemented yet.
