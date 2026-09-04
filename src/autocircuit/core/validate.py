@@ -51,8 +51,9 @@ from typing import Any, Literal
 import numpy as np
 from numpy.typing import NDArray
 
+from .noise import resolve_weights
 from .spectrum import Spectrum
-from .weighting import Weighting, weight_vectors
+from .weighting import Weighting
 from .wire import encode_array, encode_complex_array, encode_float
 
 Float = NDArray[np.float64]
@@ -387,7 +388,7 @@ def lin_kk(
     """
     omega = spectrum.omega
     z = spectrum.z
-    w_re, w_im = weight_vectors(z, weighting)
+    w_re, w_im = resolve_weights(spectrum, weighting)
 
     n_series = 1 + int(add_inductance) + int(add_capacitance)
     hard_cap = max(2 * len(spectrum) - n_series - 1, 3)

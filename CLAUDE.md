@@ -700,23 +700,36 @@ static-site Web UI running the same core via WASM (Pyodide).
    Discover screen's placeholder default, `METRICS_AND_UX_PLAN.md` §2.6, `README.md`).
 
 20. `docs/IMPACT_PLAN.md` — what would move the project most with effort disregarded, ranked
-   against the three purpose points. **Plan only; nothing in it is implemented.** Five items in
-   order of effect: **A** multi-condition joint fitting (a temperature or bias series fitted to
-   one circuit with a per-parameter-class Arrhenius/shared/free law chosen by BIC, never by the
-   user — the one instrument `CLAUDE.md` names as able to *break* an equivalence class, with a
-   negative-control gate A2 that must report "still equivalent" when the energies are equal);
-   **B** a noise model σ(f) estimated from the spectrum itself, so `--weighting` stops being a
-   knob the target user cannot set — the survey's one arithmetic finding is that `cov *
-   chi2_reduced` already self-calibrates the absolute scale, so what the weighting actually
-   decides is the *shape* across frequency and between real and imaginary parts, which is what
-   makes an ESR "resolved" or not; **C** a measured-data arena, because the repository contains
-   no real spectrum and every gate to date is on data generated from the vocabulary being
-   searched; **D** the genetic fallback running on the user's time budget instead of a trigger
-   measured twice not to fire, plus the §5.10 sentence fix; **E** profile/bootstrap intervals
-   for the three quantities the report decides on. Its §5 lists what was considered and left
-   out with the measured reason beside each, and its §8 gives the order D1 → B → A → C → E → D2.
-   One survey correction recorded there: activation energies are *in* scope (a ratio of rates
-   needs no length or area), whatever a quick reading of the geometry ban suggests.
+   against the three purpose points. Five items in order of effect, **D1 and B implemented, the
+   rest still plan only.** **A** multi-condition joint fitting (a temperature or bias series
+   fitted to one circuit with a per-parameter-class Arrhenius/shared/free law chosen by BIC,
+   never by the user — the one instrument `CLAUDE.md` names as able to *break* an equivalence
+   class, with a negative-control gate A2 that must report "still equivalent" when the energies
+   are equal); **B** — `weighting="auto"` (`core/noise.py`), a noise scale σ(f) estimated from
+   the spectrum itself so `--weighting` stops being a knob the target user cannot set. **Shipped
+   as an explicit opt-in only, on no path a default**: gate N1 passes (a GCV-selected local
+   quadratic recovers the injected noise to within 0.6–1.1x on all three `REFERENCES`), N4
+   passes (a resonance-bearing fit still lands on the truth despite σ being badly over-estimated
+   near the pole — the safe failure direction), but a 1-seed slice of gate N2 found the
+   recommended candidate changing on two of three references, which is the plan's own
+   two-regression bar for "stays a lever, not a default." §2.2 is the part worth reading before
+   touching `core/noise.py`'s constants: the estimator went through three designs in one
+   session, each replaced only after being measured wrong — a fixed-fraction window tuned until
+   the Maxwell-Wagner reference passed (withdrawn as a constant fitted to the test, not a
+   mechanism), then a per-spectrum leave-one-out cross-validated window (measured to
+   under-smooth the capacitor reference by about half, a documented property of plain LOOCV
+   bandwidth selection), then the shipped design: the same cross-validation with the
+   generalised (GCV) degrees-of-freedom correction `autocircuit.core.drt` already uses for its
+   own regularisation strength, which closed the capacitor gap without disturbing the other two
+   references; **C** a measured-data arena, because the repository contains no real spectrum and
+   every gate to date is on data generated from the vocabulary being searched; **D** — D1 (the
+   `recommended()` sentence naming `unresolved`/`inside_band`/`outside_band` instead of always
+   the first) is done; D2 (the genetic fallback running on the user's time budget instead of a
+   trigger measured twice not to fire) is not. **E** profile/bootstrap intervals for the three
+   quantities the report decides on, not started. §5 lists what was considered and left out with
+   the measured reason beside each, and §8 gives the order D1 → B → A → C → E → D2. One survey
+   correction recorded there: activation energies are *in* scope (a ratio of rates needs no
+   length or area), whatever a quick reading of the geometry ban suggests.
 
 Update these when decisions change.
 

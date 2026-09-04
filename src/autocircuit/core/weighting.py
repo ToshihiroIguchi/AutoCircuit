@@ -21,7 +21,12 @@ from numpy.typing import NDArray
 Float = NDArray[np.float64]
 Complex = NDArray[np.complex128]
 
-Weighting = Literal["unit", "modulus", "proportional", "sigma"]
+Weighting = Literal["unit", "modulus", "proportional", "sigma", "auto"]
+
+#: ``weight_vectors`` never sees ``"auto"``: it is resolved against a spectrum first, by
+#: :func:`autocircuit.core.noise.resolve_weights`, into a concrete ``sigma`` array. It is a
+#: member of this type rather than of a separate one so that a caller can write
+#: ``weighting: Weighting = "auto"`` in one place and have every accepted value in one type.
 
 
 def weight_vectors(
@@ -35,6 +40,9 @@ def weight_vectors(
     - ``proportional``: weight each component by its own magnitude; the classic CNLS choice
       when the instrument error is proportional to each measured component.
     - ``sigma``: user-supplied per-point standard deviations.
+    - ``auto``: **not accepted here.** It needs the whole spectrum, not just ``z``, to
+      estimate a noise scale from -- call :func:`autocircuit.core.noise.resolve_weights`
+      instead, which resolves it into ``sigma`` and only then calls this function.
     """
     mag = np.abs(z)
     if weighting == "unit":

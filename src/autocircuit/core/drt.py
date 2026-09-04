@@ -56,8 +56,9 @@ from scipy.optimize import nnls
 from scipy.signal import find_peaks
 
 from .enumerate import EndpointBehaviour
-from .fit import Weighting, weight_vectors
+from .noise import resolve_weights
 from .spectrum import Spectrum
+from .weighting import Weighting
 from .wire import encode_array, encode_complex_array, encode_float
 
 Float = NDArray[np.float64]
@@ -384,7 +385,7 @@ def drt(
     """
     omega = spectrum.omega
     z = spectrum.z
-    w_re, w_im = weight_vectors(z, weighting)
+    w_re, w_im = resolve_weights(spectrum, weighting)
 
     add_l, add_c = _series_terms(spectrum, series_inductance, series_capacitance)
     tau = _tau_grid(omega, points_per_decade, extension_decades)
@@ -420,7 +421,7 @@ def drt(
         prominence,
         significance,
         noise=lambda t: rms_residual * _magnitude_at(omega, magnitude, t),
-        reference=lambda t: _ideal_fwhm(t, omega, tau, add_l, add_c, chosen, weighting),
+        reference=lambda t: _ideal_fwhm(t, omega, tau, add_l, add_c, chosen, w_re, w_im),
     )
 
     return DRTResult(
@@ -763,16 +764,21 @@ def _ideal_fwhm(
     add_l: bool,
     add_c: bool,
     lam: float,
-    weighting: Weighting,
+    w_re: Float,
+    w_im: Float,
 ) -> float:
     """Width this same inversion gives a perfect Debye relaxation at ``tau_peak``.
 
-    Noise-free, unit strength, same frequencies, same grid, same lambda. Anything wider than
-    this in the real distribution is broadening the *data* carries, not broadening the method
-    added -- which is the only version of the question that has an answer.
+    Noise-free, unit strength, same frequencies, same grid, same lambda, and -- the reason this
+    takes weight *vectors* rather than a :data:`Weighting` to re-derive them from -- the same
+    weights the real inversion used. That distinction is not academic under ``"auto"``: this
+    curve is an exact, noise-free single Debye relaxation built only to measure the method's own
+    broadening, so estimating "its" noise from it would measure the inversion's own residual
+    floor instead of anything about the data, and the two calls would silently stop being the
+    same weighting. Every other scheme is a deterministic function of ``z`` alone and would not
+    have shown the difference -- which is exactly the kind of thing worth not re-deriving.
     """
     z: Complex = np.asarray(1.0 / (1.0 + 1j * omega * tau_peak), dtype=np.complex128)
-    w_re, w_im = weight_vectors(z, weighting)
     design = _design_matrix(omega, tau, add_l, add_c)
     a, b, scale = _weighted_system(design, z, w_re, w_im)
     penalty = _penalty_matrix(tau.size, a.shape[1], scale)

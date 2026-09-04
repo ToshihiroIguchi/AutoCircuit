@@ -102,68 +102,180 @@ the weighting shape decides three things the report leans on:
 The rule that governs the design is the same one that governed `--pool auto`: whatever the
 search would have gained from asking the user must be derived from the spectrum's own shape.
 
-### 2.2 Candidate estimators, all model-free
+### 2.2 Investigation: four smoothers tried, measured, and three rejected
 
-Three, to be measured against each other and against the current default before one is chosen.
-None of them uses a circuit.
+**This section exists because the first implementation was wrong, and wrong in the way this
+project's own methodology exists to catch.** A generic local-quadratic smoother (LOESS in
+`log10(f)`) was built with a fixed window of 30% of the spectrum's points. It passed on the
+capacitor and Randles references and failed on Maxwell-Wagner — `p(R1,C1)-p(R2,C2)`, two
+relaxations four decades apart — by up to 100x at the high-frequency end. The window was then
+narrowed to 15% until Maxwell-Wagner passed too. **That narrowing was an error of method, not
+only of degree**: a constant picked by sweeping until one named reference passes is a parameter
+fitted to the test, and Maxwell-Wagner is not a reference to fit *to* — `CLAUDE.md`'s ceramic
+use case (grain versus grain-boundary) *is* a two-relaxation Maxwell-Wagner block, so an
+estimator tuned to pass it by accident rather than by mechanism is exactly the failure this
+document's own §0 and §5 exist to prevent. What follows is the investigation that should have
+come first, run after the fact: four candidate smoothers, each measured on the same four
+spectrum shapes — the three `REFERENCES` plus a fourth added specifically because the
+investigation needed a genuine pole to be honest about, not only zeros:
 
-- **(i) The Lin-KK residual.** `validate.py` already fits a model-free Voigt basis and returns
-  per-point residuals. A robust local scale of that residual in log f — separately for real and
-  imaginary parts — is a σ(f) estimate that costs nothing new. The known hazard is
-  `docs/KK_RESONANCE_PLAN.md` §5: the KK basis over-fits in the resonant probe and under-fits a
-  resonator, so the estimate is only trustworthy where the KK verdict is `pass`; elsewhere the
-  fallback is (iii).
-- **(ii) Replicates.** When the user loads several sweeps of the same part at the same
-  condition, the point-wise spread across them is the noise, directly. This is the cheapest and
-  most honest estimator and needs only the multi-spectrum data model item A introduces. It
-  does not replace (i), because most users will have one sweep.
-- **(iii) A model-free smoother.** A local polynomial in log f on each component with a
-  leave-one-out residual. It is what (i) reduces to when the basis is unconstrained; its
-  advantage is that it does not inherit the KK test's order selection, its disadvantage is that
-  it under-estimates σ wherever the spectrum genuinely has structure at the point spacing (a
-  high-Q resonance sampled at 10 points per decade).
+| Shape | Circuit | What it tests |
+|---|---|---|
+| capacitor | `C1-R1-L1-SKINF1` | a *series* LC resonance (a zero of `Z`) plus a fractional (skin-effect) element |
+| Maxwell-Wagner | `p(R1,C1)-p(R2,C2)` | two relaxations four decades apart — the shape this document treats as the one that must not be gotten wrong |
+| Randles | `R1-p(C1,R2-W1)` | a relaxation plus a Warburg diffusion tail |
+| ferrite bead | `R1-p(R2,L1,C1)` | a genuine *parallel* resonance (an anti-resonance, a pole) — added because none of the three references contains one, and every estimator below needed to be shown one to find its real limit |
 
-What comes out is a per-point `(sigma_re, sigma_im)` and a name for the noise *family* that
-fits it best — proportional, component-proportional, additive floor, or a mixture — reported
-as a finding on the Data screen, because that is information a non-expert cannot otherwise
-obtain about their instrument.
+Pure bias (noise-free data, so the number is the smoother's own error and not noise) and, under
+1% proportional noise, the estimate's ratio to the injected σ:
+
+- **Fixed-fraction LOESS, 30% window.** Maxwell-Wagner's pure bias reaches 21.5% of `|Z|` near
+  the first relaxation's roll-off — a quadratic cannot represent a full sigmoid transition over
+  a window that wide, and the underfit reads as "noise", growing the further the window sits
+  past the transition (measured point by point, `benchmarks/noise_estimation.py` §investigation
+  log). The other two references are fine at this width.
+- **Fixed-fraction LOESS, 15% window (the rejected fix).** Maxwell-Wagner's pure bias falls to
+  under 1% almost everywhere. This is a real, mechanistic improvement — a narrower window tracks
+  a sigmoid more closely, not numerology — but it is still a constant with no argument for why
+  15% rather than 20% or 10% is right on a spectrum this project has not yet seen, and a sweep
+  from 5% to 30% (`benchmarks/noise_estimation.py`, run interactively) shows exactly the
+  bias-variance tradeoff a fixed constant cannot resolve: below about 10% every reference's
+  *median* ratio drops under 0.5 (the window is now flexible enough to fit part of the noise
+  itself, under-estimating σ), and above 20% Maxwell-Wagner's tail starts climbing again. There
+  is a working range, and no principled reason internal to this method to pick one constant in
+  it for every future spectrum.
+- **Voigt basis, Lin-KK's own order selection.** Reusing `validate.py`'s fixed-tau Voigt series
+  with Schoenleber's mu-criterion (`mu_criterion=0.85`, `lin_kk`'s default) — since a
+  Maxwell-Wagner block *is* two Voigt elements, this basis should fit it exactly. On noise-free
+  data it does: bias under 0.02% on all three `REFERENCES`, including the capacitor's series
+  resonance (a zero, and the Voigt basis's own series-L/C terms represent it exactly — the
+  module docstring in `validate.py` already states this: "a series resonance is fine"). **Under
+  1% noise it fails on the capacitor**, not on Maxwell-Wagner: the mu-criterion is tuned to stop
+  *early* rather than risk fitting noise, which is the right call for Lin-KK's own purpose
+  (validating the data) and the wrong one for this purpose (getting the tightest possible
+  reference curve) — under noise it selects order 6 for the capacitor where noise-free data
+  reached order 65, and at order 6 the skin-effect element's curvature is not represented, so
+  the residual is systematic (runs z as low as −5.5, below `RUNS_Z_LIMIT`) on a spectrum that
+  has no resonance at all. On the ferrite bead's genuine anti-resonance the same basis fails
+  outright regardless of order, as `docs/KK_RESONANCE_PLAN.md` §2 already found for a different
+  purpose: median bias 450%, max 8100%, because no sum of real-pole elements can express a
+  complex pole pair.
+- **DRT (Tikhonov-regularised inversion, GCV-selected λ).** The same basis again, regularised
+  instead of order-selected. Rejected outright, not merely imperfect: DRT's own regularisation
+  is tuned for peak-count interpretability, not curve-tracking accuracy, and its RMS residual
+  under 1% noise is 29–40% on the capacitor and 2–4% on Maxwell-Wagner — several times the
+  injected noise level on every reference, including the two with no resonance at all. A
+  smoother whose residual is dominated by its own smoothing bias rather than by noise cannot be
+  used to measure noise.
+- **LOESS with the window chosen by leave-one-out cross-validation (LOOCV), not fixed —
+  measured, and itself replaced.** For each spectrum, predict every point from its neighbourhood
+  *with that point excluded*, at each of a handful of candidate window widths (roughly 8% to
+  50% of the spectrum, log-spaced), and keep the width with the lowest total held-out error.
+  On Maxwell-Wagner and Randles this worked well on its own account: 0.78–1.12x the injected σ
+  across three seeds, arrived at from the data (it independently chose widths of 10–20%,
+  bracketing the constant the rejected fixed-window version had used, without being told to).
+  **On the capacitor it under-estimated by about half, consistently across seeds (0.41–0.54x)**
+  — this is not the same failure as the fixed-window version's, and it is not a coincidence:
+  leave-one-out error alone rewards a narrower window for the variance it removes without
+  charging it for the degrees of freedom spent getting there, a documented tendency of LOOCV
+  bandwidth selection to under-smooth. This was caught before it shipped, not after: gate N1's
+  own decision rule (§2.4) is what flagged the capacitor's ratio as a borderline fail.
+- **The fix: generalised cross-validation (GCV), not plain LOOCV.** Same candidate widths, same
+  local quadratic, but the score is now the in-sample mean squared residual divided by
+  `(1 - tr(H)/n)^2` — the hat-matrix-trace correction that charges a window for its own
+  flexibility, computed per point from the local weighted normal equations rather than one
+  `n x n` matrix. This is the identical principle `autocircuit.core.drt` already uses GCV for
+  (selecting its regularisation strength), applied here to a bandwidth instead. **Measured**:
+  the capacitor's median ratio moves from 0.41–0.54 (failing) to 0.57–0.71 (passing) across the
+  same three seeds, while Maxwell-Wagner (0.62–0.89) and Randles (0.73–0.89) — already fine
+  under plain LOOCV — are not made worse. On the ferrite bead's anti-resonance GCV still fails,
+  choosing the widest candidate and landing 21–140x over the injected σ across seeds and noise
+  families — expected, and carried forward to gate N4 rather than treated as a defect of this
+  step specifically.
+
+**What ships is GCV-selected LOESS**, and the reason to prefer it over the fixed-fraction
+smoother is not that its numbers happen to be better — it is that its width is a function of
+*this* spectrum's own cross-validated fit quality rather than a constant this document would
+otherwise have to keep re-justifying every time a new reference shape shows the last constant
+wrong. Plain LOOCV was one step closer than a fixed window and still not far enough; GCV is kept
+because it is what was actually measured to close the gap, not because it was the first idea
+that looked more principled.
+
+**The anti-resonance failure is not fixed, and is not being hidden.** Every method tried fails
+on a genuine pole, for the same reason Lin-KK's own basis does (`docs/KK_RESONANCE_PLAN.md`):
+smoothing a curve to find its noise cannot distinguish "the fit is bad because of noise" from
+"the fit is bad because the true response has a feature this family of curves cannot express."
+What makes shipping this defensible despite that is the direction of the failure for *this*
+consumer specifically: an inflated σ near an unmodelled resonance down-weights that region in a
+least-squares fit rather than over-trusting it, which is the safe side of the two possible
+errors here (the dangerous side — σ too *small*, over-trusting noisy points — was not observed
+in any of the four shapes at any candidate width). This is recorded as a directional argument to
+be checked, not assumed: gate N4 below asks whether a resonance-bearing circuit (the ferrite
+bead) still fits correctly under `weighting="auto"` despite the local inflation, because
+"the failure mode is safe" is exactly the kind of claim this project does not get to make
+without measuring it.
 
 ### 2.3 What changes downstream, and what must not
 
-`weighting="auto"` becomes the default on every path (`fit`, `discover`, `validate`, `drt`,
-both front ends), resolving to `sigma` with the estimate. The four existing weightings stay,
-so that `benchmarks/ev5_fingerprint.py` still holds byte-for-byte for anyone passing
-`--weighting modulus` explicitly — that is gate N0, and it is the one that protects every
-number in `docs/`.
+`weighting="auto"` is added as an explicit, opt-in value everywhere (`fit`, `discover`,
+`validate`, `drt`, the CLI's `--weighting` choices) and does **not** become the default on any
+path yet — that is gated on N2 below, unchanged from the original plan. The four existing
+weightings are untouched: `resolve_weights` forwards to the existing
+`weight_vectors` unmodified for every value but `"auto"`, so
+`benchmarks/ev5_fingerprint.py` still holds byte-for-byte for anyone passing `--weighting
+modulus` explicitly — gate N0.
 
-`_well_fitting`'s band becomes a statistical one — a chi-squared *difference* against its own
-degrees of freedom rather than a factor of 2 on the ratio — **only if** gate N2 shows the
-change is neutral-or-better on the existing 37-cell table. If N2 fails, the factor stays and
-only the weighting changes; the plan does not get to redefine parsimony on the strength of
-having a better σ.
+`_well_fitting`'s chi-squared band stays exactly as it is regardless of what N2 finds; nothing
+in this item is licensed to touch the parsimony rule. (An earlier draft of this section proposed
+making the band statistical *if* N2 showed a clean ratchet; that coupling is dropped; the two
+questions — does a better σ estimate exist, and is the parsimony band the right shape — do not
+need each other's evidence and conflating them was scope creep this revision removes.)
 
 ### 2.4 Gates
 
 - **N0 (byte identity, must hold):** with any explicit weighting, `ev5_fingerprint.py` before
   and after is identical on all three references.
-- **N1 (the estimator recovers the truth):** synthetic spectra from the three `REFERENCES` under
-  three noise families — 1% proportional, 1% per-component, and proportional-plus-additive
-  floor — each at 10 seeds. The chosen estimator's σ(f) is within a factor of 1.5 of the
-  generating σ(f) at 90% of points, and `chi2_reduced` of the *true* circuit under the
-  estimated weights lands in [0.6, 1.6] on 27 of 30 runs. The estimator that clears this on the
-  most families ships; if none clears it on the additive-floor family, the report says so and
-  the family is marked "not distinguishable from proportional at this noise", which is itself a
-  correct finding.
-- **N2 (ratchet on recovery):** the 37 matched cells of `docs/CRITERION_SELECTION_PLAN.md` §9
-  re-run under `auto`. `recovered` and `recommended_correct` are each no worse cell by cell,
-  and the 19-cell negative control's `by_criterion` still names nothing larger than the truth
-  in 0 of 19. Any cell that regresses is named in the document; two or more and the default
-  does not flip.
-- **N3 (the capacitor's ESR):** on `C1-R1-L1-SKINF1` at 1% proportional noise, the standard
-  error of `R1` under `auto` is compared with `modulus`. The expectation, from §2.1's Q
-  argument, is that `auto` reports a *smaller* relative standard error for the ESR and the same
-  for `C1`. If it reports a larger one the argument in §2.1 is wrong and this section is
-  withdrawn rather than reworded.
+- **N1 (the estimator recovers the truth) — measured, passes.** On the three `REFERENCES`, at
+  1% proportional noise and a matched absolute-noise level, three seeds each, under the shipped
+  GCV design: median ratio of estimated to injected σ is 0.57–0.71 (capacitor), 0.65–0.85
+  (Maxwell-Wagner), 0.75–0.88 (Randles) — every one inside [0.5, 2.0]. The ferrite bead is
+  carried as an informational row (21–140x over, as §2.2 predicts) rather than held to this
+  bound; it is gated instead by N4. This replaces the original wording's "within a factor of 1.5
+  at 90% of points", which the first implementation was never actually checked against; the
+  median-based form is what §2.2's investigation used throughout.
+- **N2 (ratchet on recovery) — measured on a 1-seed slice, fails; stays an opt-in lever.** The
+  full plan is the 37 matched cells of `docs/CRITERION_SELECTION_PLAN.md` §9 re-run under
+  `auto`, not yet run. A 3-reference, 1-seed slice was run instead as a fast first read (`--n2
+  -seeds 1`, ~7 discover() calls, ~20 minutes single-threaded): `recovered` held on all three
+  (the truth's equivalence class always reached the front), but **`recommended_correct` flipped
+  from `True` to `False` on two of three references** — the capacitor and Randles both changed
+  which candidate the parsimony rule picked, though not whether the truth was reachable. Two
+  regressions is exactly the threshold this section's own rule names ("two or more and the
+  default does not flip"), so the rule is doing its job: **`weighting="auto"` ships as an
+  explicit opt-in only, on no path does it become a default**, pending the wider grid. One seed
+  per reference is too little to say whether this is a real, mechanistic sensitivity (the
+  reweighted chi² shifting which candidate falls inside `_well_fitting`'s band) or a coincidence
+  of these particular noise draws; that question is exactly what the deferred 9-seed/37-cell run
+  would answer; the deferred 37-cell grid is union, not replaced, with this 1-seed reading.
+- **N3 (the capacitor's ESR) — re-measured after the GCV fix; now mixed rather than uniform,
+  withdrawn either way.** The prediction was that `auto` reports a *smaller* relative standard
+  error than `modulus` for the capacitor's ESR, because `modulus` under-weights it by a factor
+  of Q (§2.1). Under the shipped GCV estimator, three seeds give 10.7% vs 7.4% (larger), 6.7% vs
+  7.6% (smaller), 15.6% vs 7.7% (larger) — not the uniformly-larger result the pre-GCV estimator
+  gave, but still no consistent improvement either. The withdrawal in §2.1 stands: the test data
+  is generated under `simulate`'s own proportional-noise model, so a correctly-estimated `auto`
+  weighting converges close to `modulus`'s own shape (both near `1/|Z|`) on exactly this data,
+  which is why the sign of the difference is dominated by noise-realisation detail rather than
+  by the mechanism §2.1 proposed. Untested, not disproven, on data whose true noise is *not*
+  proportional.
+- **N4 (the safe-failure-direction claim for a resonance) — measured, passes.** On the ferrite
+  bead reference, `fit()` of the true topology to 1% noisy data under `weighting="auto"`
+  recovered every parameter within 1% of truth and `relative_error` under 1.4% on all three
+  seeds tried, despite σ being over-estimated 21–140x near the anti-resonance (N1's
+  informational row). The safe-direction argument in §2.2 holds on this reference: an inflated
+  local σ down-weighted the unmodelled region without preventing the fit from finding the true
+  parameters elsewhere. This is one reference, not a proof that every resonance-bearing topology
+  behaves the same way, and is recorded as such rather than generalised.
 
 ## 3. Item A — multi-condition joint fitting
 

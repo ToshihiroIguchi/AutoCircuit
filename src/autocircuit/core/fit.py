@@ -31,9 +31,10 @@ from scipy.optimize import OptimizeResult, differential_evolution, least_squares
 
 from .circuit import Circuit
 from .elements import BoundsContext
+from .noise import resolve_weights
 from .spectrum import Spectrum
 from .stats import Statistics, compute_statistics
-from .weighting import Weighting, weight_vectors
+from .weighting import Weighting, weight_vectors  # noqa: F401 -- re-exported, see below
 from .wire import (
     decode_array,
     decode_complex_array,
@@ -67,7 +68,9 @@ WIRE_VERSION = 3
 # so that every existing `from autocircuit.core.fit import ...` still works. They live in
 # `weighting.py` because they are pure numpy and `validate.py` needs them: importing the fitter
 # for two weight vectors drags `scipy.optimize` into the browser's data path, which loads before
-# scipy does (`docs/STARTUP_AND_EDITING_PLAN.md` section 3.2).
+# scipy does (`docs/STARTUP_AND_EDITING_PLAN.md` section 3.2). This module's own residual weights
+# come from `resolve_weights` (`noise.py`) instead, which resolves `weighting="auto"` against the
+# spectrum before falling back to `weight_vectors` for every other value -- see that module.
 
 
 def search_space(
@@ -437,7 +440,7 @@ class FitContext:
         sigma: Float | None,
         margin_decades: float = 3.0,
     ) -> FitContext:
-        w_re, w_im = weight_vectors(spectrum.z, weighting, sigma)
+        w_re, w_im = resolve_weights(spectrum, weighting, sigma)
         bounds = BoundsContext.from_data(spectrum.omega, spectrum.z, margin_decades)
         return cls(w_re=w_re, w_im=w_im, bounds=bounds)
 
@@ -464,7 +467,7 @@ class _Problem:
         if context is not None:
             self.w_re, self.w_im = context.w_re, context.w_im
         else:
-            self.w_re, self.w_im = weight_vectors(spectrum.z, weighting, sigma)
+            self.w_re, self.w_im = resolve_weights(spectrum, weighting, sigma)
 
         names = circuit.param_names
         unknown = set(fixed) - set(names)

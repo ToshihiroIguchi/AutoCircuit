@@ -626,8 +626,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_fit.add_argument(
         "-w", "--weighting", default="modulus",
-        choices=["modulus", "unit", "proportional"],
-        help="residual weighting (default modulus, i.e. relative error)",
+        choices=["modulus", "unit", "proportional", "auto"],
+        help="residual weighting (default modulus, i.e. relative error; 'auto' estimates a"
+        " noise scale from the spectrum itself, see docs/IMPACT_PLAN.md item B)",
     )
     p_fit.add_argument("--fix", action="append", metavar="NAME=VALUE", help="hold a parameter")
     p_fit.add_argument(
@@ -725,7 +726,8 @@ def build_parser() -> argparse.ArgumentParser:
         "of it",
     )
     p_disc.add_argument(
-        "-w", "--weighting", default="modulus", choices=["modulus", "unit", "proportional"]
+        "-w", "--weighting", default="modulus",
+        choices=["modulus", "unit", "proportional", "auto"],
     )
     p_disc.add_argument(
         "--seed-circuit", action="append", metavar="CIRCUIT",
