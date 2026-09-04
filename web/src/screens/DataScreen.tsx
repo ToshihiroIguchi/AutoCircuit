@@ -3,6 +3,7 @@
 // now rather than the page, and the spectra it works on live in `App` because the Fit screen
 // needs the selected one too.
 
+import { useEffect, useRef } from "react";
 import type { LoadedSpectrum } from "../core/types";
 import { DropZone } from "../components/DropZone";
 import { KKPanel } from "../components/KKPanel";
@@ -49,6 +50,20 @@ export interface DataScreenProps {
 }
 
 export function DataScreen(props: DataScreenProps) {
+  // A file loaded from a drop, a picker or the Example data panel lands in the table below the
+  // fold on most screens -- the panel above it (drop zone, then a wall of example blurbs) is
+  // taller than the viewport. Without this, the only feedback a click gets is a button that
+  // reads "Loading..." for well under a second and then reverts, which is what "pressed the
+  // button, nothing happened" was actually about: something did happen, off screen.
+  const resultsRef = useRef<HTMLElement>(null);
+  const previousCount = useRef(props.spectra.length);
+  useEffect(() => {
+    if (props.spectra.length > previousCount.current) {
+      resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+    previousCount.current = props.spectra.length;
+  }, [props.spectra.length]);
+
   return (
     <>
       <DropZone
@@ -94,7 +109,7 @@ export function DataScreen(props: DataScreenProps) {
         </ul>
       )}
 
-      <main className="app-main">
+      <main className="app-main" ref={resultsRef}>
         <section className="app-left">
           <h2 className="panel-title">Loaded spectra</h2>
           <SpectraTable

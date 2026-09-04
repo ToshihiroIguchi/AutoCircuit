@@ -441,6 +441,12 @@ body {
   cursor: default;
 }
 
+.sample-panel__load--done {
+  background: var(--status-good-bg);
+  border-color: var(--status-good);
+  color: var(--status-good);
+}
+
 .sample-panel__label {
   font-size: 12px;
   font-weight: 600;
@@ -1676,6 +1682,24 @@ body {
   margin: 10px 0 0;
   font-size: 11px;
   color: var(--text-muted);
+}
+
+.search-panel__advanced {
+  margin: 10px 0 0;
+}
+
+.search-panel__advanced > summary {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.search-panel__advanced > label {
+  display: block;
+  margin: 8px 0 0;
 }
 
 .search-panel__hint--criterion strong {

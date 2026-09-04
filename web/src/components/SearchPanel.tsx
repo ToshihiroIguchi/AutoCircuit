@@ -86,17 +86,6 @@ export function SearchPanel(props: SearchPanelProps) {
           />
         </label>
         <label>
-          Workers
-          <input
-            type="number"
-            min={1}
-            max={MAX_WORKERS}
-            value={props.workers}
-            disabled={locked}
-            onChange={(event) => props.onWorkers(Number(event.target.value))}
-          />
-        </label>
-        <label>
           Weighting
           <select
             value={props.weighting}
@@ -149,6 +138,30 @@ export function SearchPanel(props: SearchPanelProps) {
           </button>
         )}
       </div>
+
+      {/* `workers` only sizes how many Web Worker instances fan a screen out across -- it never
+          changes which topology wins, only how long finding out takes, and it already defaults
+          to a measured-sensible value (`defaultPoolSize()`, capped at `MAX_WORKERS`). A control
+          that cannot change the answer does not belong beside ones that do, so it is tucked away
+          rather than sitting in the primary row a first-time analyst has to read past. */}
+      <details className="search-panel__advanced">
+        <summary>Advanced</summary>
+        <label>
+          Workers
+          <input
+            type="number"
+            min={1}
+            max={MAX_WORKERS}
+            value={props.workers}
+            disabled={locked}
+            onChange={(event) => props.onWorkers(Number(event.target.value))}
+          />
+        </label>
+        <p className="search-panel__hint">
+          How many worker threads fan a screen out across, from 1 to {MAX_WORKERS} (measured to
+          saturate around there). Only changes wall-clock time, never the result.
+        </p>
+      </details>
 
       {/* The CLI's `--pool` already takes a comma list of arbitrary codes (`main.py`); this is
           that same freedom on the web side, since a named pool is an assertion about the part

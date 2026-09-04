@@ -1665,6 +1665,7 @@ def discover(
     feasibility_budget: int = DEFAULT_DEGENERACY_BUDGET,
     workers: int = 1,
     on_progress: Callable[[int, int, str | None], None] | None = None,
+    on_stage: Callable[[str, str], None] | None = None,
     generations: int = 30,
     population: int = 40,
     max_elements: int = 7,
@@ -1739,6 +1740,14 @@ def discover(
         workers: Processes for the tier-1 screen. Keep at 1 under Pyodide.
         on_progress: Called as ``on_progress(done, total, best)`` during the screen, where
             ``best`` is the DSL string of the best-scoring topology so far.
+        on_stage: Called as ``on_stage(name, message)`` exactly once at each point the search
+            escalates beyond the plain exhaustive stage -- ``"widen_pool"`` when the default
+            pool's own completed fit left a systematic residual and the search is re-screening
+            a wider one, and ``"evolve"`` when the exhaustive stage's own completeness could
+            not reach ``max_elements`` and the search is falling back to the genetic search.
+            Never called on a plain exhaustive run that needed neither. This exists only to let
+            a caller announce the transition -- it changes no number ``discover`` returns, the
+            same reporting-layer-only role ``on_progress`` has.
         generations: Evolutionary generations (genetic search only).
         population: Topologies per generation (genetic search only).
         max_elements: Cap on elements per topology, for both the genetic search and the growth
@@ -1895,6 +1904,12 @@ def discover(
         if pool_choice.added and (remaining is None or remaining > 0.0):
             base_complete_up_to = complete_up_to
             codes = pool_choice.pool
+            if on_stage is not None:
+                on_stage(
+                    "widen_pool",
+                    f"The default pool's own completed fit left a systematic residual; "
+                    f"widening the pool to {', '.join(codes)} and re-screening.",
+                )
             widened, complete_up_to, n_widened, grown_to = _exhaustive(
                 spectrum,
                 pool=codes,
@@ -1936,6 +1951,15 @@ def discover(
     ):
         remaining = None if time_limit is None else time_limit - (time.perf_counter() - started)
         if remaining is None or remaining > 0.0:
+            if on_stage is not None:
+                on_stage(
+                    "evolve",
+                    f"Exhaustive search is complete to {complete_up_to or 0} element(s) and "
+                    f"the best fit still shows a systematic residual; falling back to a "
+                    f"genetic search up to {max_elements} elements ({generations} generations, "
+                    f"population {population}). The 'screening N/M' line below now counts "
+                    f"genetic-search candidates, not an exhaustive enumeration.",
+                )
             evolved = _evolve(
                 spectrum,
                 pool=codes,

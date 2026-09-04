@@ -51,6 +51,11 @@ export function SamplePanel({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
+  // The fetch itself is a few kB from the same origin and is usually done before "Loading..."
+  // ever paints, so a button that just reverts to "Load" is indistinguishable from a click that
+  // did nothing. This holds a visible "Loaded" a beat past the fetch so the click has a result
+  // to look at, on the button that was actually pressed rather than only in the table below.
+  const [justLoaded, setJustLoaded] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -71,6 +76,8 @@ export function SamplePanel({
     setError(null);
     try {
       onFile(await fetchSample(sample));
+      setJustLoaded(sample.id);
+      setTimeout(() => setJustLoaded((current) => (current === sample.id ? null : current)), 2000);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -113,11 +120,20 @@ export function SamplePanel({
                 <div className="sample-panel__row">
                   <button
                     type="button"
-                    className="sample-panel__load"
+                    className={
+                      "sample-panel__load" +
+                      (justLoaded === sample.id ? " sample-panel__load--done" : "")
+                    }
                     disabled={busy !== null}
                     onClick={() => void load(sample)}
                   >
-                    {busy === sample.id ? "Loading…" : dataReady ? "Load" : "Queue"}
+                    {busy === sample.id
+                      ? "Loading…"
+                      : justLoaded === sample.id
+                        ? "Loaded ✓"
+                        : dataReady
+                          ? "Load"
+                          : "Queue"}
                   </button>
                   <span className="sample-panel__label">{sample.label}</span>
                   <code className="sample-panel__circuit">{sample.circuit}</code>

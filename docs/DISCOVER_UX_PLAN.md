@@ -1,15 +1,17 @@
-# DISCOVER_UX_PLAN.md — four usability fixes on the Discover path
+# DISCOVER_UX_PLAN.md — usability fixes on the Discover path
 
-**Status: implemented, all four items (A-D).** Verified by `npm run check` (type-check, the
-schematic geometry gate, and the samples-manifest cross-check against `benchmarks/`, all passing)
-and `tests/test_cli.py` (24 passed) after the change to item A. There is no quantitative gate here
-the way the numbered plans above it have one -- these are usability fixes, not measurements of a
-search property -- so "implemented" means the checks each item's own **Verification** section
-lists were run and passed, not that a benchmark number moved. This document exists so a
-session that gets cleared can pick every item back up without re-deriving it. It was written from
-a user review of the Discover workflow (CLI `--workers`, the model-selection criterion, the
-Discover screen's Pool control, and the Discover -> Fit hand-off) plus the Data screen's Example
-Data panel. Two items that came out of the same review are **not** here:
+**Status: implemented, items A-G.** Verified by `npm run check` (type-check, the schematic
+geometry gate, and the samples-manifest cross-check against `benchmarks/`, all passing),
+`npm run smoke` (the full Pyodide path, headless, all checks passing), `tests/test_cli.py` (24
+passed), `tests/test_discover.py` (31 passed) and the full `pytest` suite (992 passed, 19 skipped)
+after E-G. There is no quantitative gate here the way the numbered plans above it have one --
+these are usability fixes, not measurements of a search property -- so "implemented" means the
+checks each item's own **Verification** section lists were run and passed, not that a benchmark
+number moved. This document exists so a session that gets cleared can pick every item back up
+without re-deriving it. It was written from a user review of the Discover workflow (CLI
+`--workers`, the model-selection criterion, the Discover screen's Pool control, and the Discover
+-> Fit hand-off) plus the Data screen's Example Data panel. Two items that came out of the same
+review are **not** here:
 
 * Which `criterion` should default — that question needs an experiment before it needs code, and
   has its own document, `docs/CRITERION_SELECTION_PLAN.md`.
@@ -345,3 +347,145 @@ auto-fit more than once, or firing it on an unrelated navigation. Guard conditio
    fit fires automatically — only the existing preview-curve recompute (`FitScreen.tsx:238-240`-ish)
    should react to hand edits.
 4. Manual: Discover -> Fit -> Report -> back to Fit, confirm no second automatic fit fires.
+
+---
+
+## A second review round: the genetic-search switch, its display, Example data feedback,
+## the Workers control, and startup loading
+
+A second user review raised five points. Two of them turned out, on investigation, not to be code
+problems on the paths they were raised against; the other three shipped. Investigating before
+writing code is the point of this section — three of the five would have been the wrong fix if
+built on the first reading.
+
+### E. Example data: no feedback that a click did anything
+
+**Finding [browser, Playwright].** Confirmed against the running dev build, not assumed. The
+group-collapse from item B above was already live and working — only the first group (`Shapes`)
+is open on load, `Devices` starts collapsed — so "Example Data is all shown at once" was not the
+actual defect. What was: `SamplePanel`'s button reads `busy === sample.id ? "Loading…" : ...`, and
+the fetch is a same-origin CSV a few kB in size, so the whole `Loading…` state is typically over
+in well under 100 ms — the button reverts to plain `Load` before a human eye registers the change.
+Meanwhile the visible result of the click — a new row in the "Loaded spectra" table, KK verdict,
+and plots — renders inside `<main className="app-main">`, which sits *below* the drop zone, the
+entire Example Data panel (five blurbed shape rows, a collapsed device group, the "Show the
+commands" toggle) in `DataScreen.tsx`'s render order. At a typical viewport height that table is
+below the fold. Net effect, measured by loading `capacitor.csv` in a real browser and reading the
+accessibility snapshot before/after: the click has a real, correct effect and the click produces
+*zero visible change* in the viewport the user is looking at.
+
+**Change (implemented).**
+1. `web/src/components/SamplePanel.tsx` — added `justLoaded` state: on a successful fetch, hold
+   `"Loaded ✓"` on the clicked button (styled with the same `--status-good` tokens `KKBadge` uses
+   for PASS) for 2 s before it reverts to `Load`, so the click that already worked has something to
+   show for itself at the point of contact rather than only in a table the user has not scrolled to
+   yet.
+2. `web/src/screens/DataScreen.tsx` — added a `ref` on `<main className="app-main">` and a
+   `useEffect` keyed on `spectra.length`: whenever the spectra count increases (a drop, a picker
+   choice, or an Example data click — the fix is general because the underlying gap was general),
+   `scrollIntoView({ behavior: "smooth", block: "start" })` brings the result into view
+   automatically. Does not fire on removal, on trim, or on re-selection, only on a net increase in
+   loaded spectra.
+
+**Verification.** `npm run check`; manual in a real browser (Playwright): clicking Load on a
+collapsed-page load now scrolls the "Loaded spectra" table into the viewport without the user
+touching the scrollbar, confirmed via a before/after accessibility-tree diff and a screenshot.
+
+### F. Workers: auto-fill already shipped; what was missing was hiding it
+
+**Finding.** Investigated before changing anything, because the request had two halves and one of
+them was already done. `defaultPoolSize()` (`web/src/worker/pool.ts:20-23`) already initializes the
+Discover screen's `workers` setting from `navigator.hardwareConcurrency`, capped at
+`MAX_WORKERS = 4` — a measured ceiling (`benchmarks/pyodide`: speed-up saturates around four; eight
+workers measured slower than six, each worker costing ~1.5 s of its own Pyodide start-up plus a
+private copy of numpy and scipy). There was no unset-or-1 default to fix. What remained was the
+second half of the request: the control sat in `SearchPanel.tsx`'s primary row, a visual peer of
+Pool, Element limit, Weighting and Criterion — controls that all change *which topology wins*.
+Workers changes only wall-clock time (it sizes a pure task-fan-out pool; results return in task
+order regardless of worker count), so it does not belong at that altitude, and no document had
+ever argued an ordinary analyst needs to see it at all.
+
+**Change (implemented).** Moved the `Workers` label/input out of `SearchPanel.tsx`'s primary
+controls row into a `<details className="search-panel__advanced">` block, closed by default, with
+a one-line note that it "only changes wall-clock time, never the result." The value itself, and its
+`defaultPoolSize()` initialization, are unchanged — this is a placement change only.
+
+**Verification.** `npm run check`; manual in a real browser: Discover screen's primary row now
+reads Pool / Element limit / Weighting / Criterion / Seed / Discover, with a collapsed "▷ Advanced"
+underneath; expanding it shows Workers pre-filled to the measured default (4 on the test machine).
+
+### G. The genetic-search fallback is invisible while it runs — CLI only, not the browser
+
+**Finding, and where the request did not apply.** `SearchPanel.tsx:213-215`'s own comment states it
+plainly and `web/scripts/smoke.mjs` asserts it (`"the search is exhaustive; the browser has no
+genetic fallback"`, `docs/WEB_UI_PLAN.md` section 7): **the browser never runs the genetic search.**
+`mode="auto"`'s fallback (`discover.py`'s `_evolve`) is reached only through the CLI and through
+`discover()` called directly as a library; the browser's driver (`web/src/core/search.ts`) talks to
+`autocircuit.web.job` through per-batch RPCs (`discoverScreen`/`discoverRefit`) that never invoke
+`discover()` and never touch `_evolve`. So "make the switch to GA clearer on screen" had no browser
+defect to fix — the Discover screen's own hint text already tells the user the search is exhaustive
+-only and explains what that means for anything above the element limit.
+
+What *is* true, confirmed by reading `discover.py`, is that the switch itself is already more than
+a raw element-count threshold: `enumerate_candidates` abandons a whole enumeration level once
+`len(texts) + len(level) > max_candidates` (default 20,000), so a wider pool — more element *types*
+— hits that ceiling at a *smaller* element count, and `complete_up_to` (the value the fallback
+trigger actually reads, at `discover.py:1935`, `max_elements > (complete_up_to or 0)`) already
+reflects that. The switch is pool-size-sensitive as an emergent property of the enumeration budget,
+not by an explicit two-axis design — no prior document had measured or stated this, and turning it
+into a deliberately calibrated two-axis rule (rather than an emergent one) is exactly the kind of
+change this project does not ship without a benchmark round in the shape of
+`docs/EVOLVE_SEARCH_PLAN.md` or `docs/TOPOLOGY_6PLUS_PLAN.md` — several hours of arena-building per
+those documents' own accounting — which is out of scope here and not attempted. What shipped
+instead is limited to making the *existing* mechanism, and the moment it fires, visible where it
+already runs: the CLI.
+
+**Change (implemented).** Purely additive, no search behaviour touched:
+1. `core/discover.py` — added an optional `on_stage: Callable[[str, str], None] | None = None`
+   parameter to `discover()`, called at most once at each of the two points the search escalates
+   beyond a plain exhaustive run: `on_stage("widen_pool", ...)` right before the pool-widened
+   re-screen, and `on_stage("evolve", ...)` right before the genetic fallback, each with a sentence
+   naming what triggered it and what changes in the progress line that follows. Never called on a
+   plain exhaustive run. Same reporting-layer-only role as the existing `on_progress` — it changes
+   no number `discover()` returns, and the browser's `web/job.py` never passes it (it does not call
+   `discover()`), so this cannot touch gate O1's invariant or the smoke test's byte-for-byte web
+   path.
+2. `cli/main.py` — added `_stage_reporter()`, wired to `discover(..., on_stage=...)` under the same
+   `--progress` flag that already gates `_progress_reporter()`. It writes the announcement as its
+   own newline-terminated line to stderr, ahead of the self-overwriting `\r` progress line, so it is
+   not immediately clobbered.
+
+Manually exercised end to end (`autocircuit discover web/public/samples/li-ion-cell.csv
+--exhaustive-limit 2 --progress`) and confirmed both announcements print exactly once, in order:
+
+```
+  screening 14/14  best so far: L1-CPE1
+
+  The default pool's own completed fit left a systematic residual; widening the pool to R, C, L, CPE, Ws, Wo, G and re-screening.
+  screening 32/32  best so far: L1-CPE1
+
+  Exhaustive search is complete to 2 element(s) and the best fit still shows a systematic residual; falling back to a genetic search up to 7 elements (30 generations, population 40). The 'screening N/M' line below now counts genetic-search candidates, not an exhaustive enumeration.
+```
+
+**Verification.** `mypy --strict` and `ruff check` on both changed files (clean); `tests/test_cli.py`
+(24 passed) and `tests/test_discover.py` (31 passed); manual CLI run above.
+
+### Not changed: startup library loading
+
+**Finding.** The fifth point — "multiple libraries load from the start and it takes too long;
+consider a custom implementation" — was investigated and not acted on, because the two obvious
+next steps are already-closed questions in this repository, not open ones. The load is already
+staged exactly the way the request asks for: `web/src/worker/bridge.worker.ts` brings up the
+interpreter and numpy first (stage A — the Data screen's read/trim/validate path, `dataReady`),
+and fetches and installs scipy in the background afterward (stage B, `ready`) —
+`docs/STARTUP_AND_EDITING_PLAN.md` section 3, `docs/METRICS_AND_UX_PLAN.md` section 1.5. Both
+plausible further optimizations were already tried and measured to fail: a document-level preload
+of the scipy wheel does not get reused by the Web Worker's own fetch (17 MB downloaded twice), and
+starting the fetch from inside the worker before `loadPyodide()` resolves cut that one stage 3-4x
+while making the *total* time worse, because the load is bandwidth-bound rather than
+sequencing-bound. A from-scratch replacement for scipy is a different scale of project than
+anything else in this section — `docs/POOL_FROM_SPECTRUM_PLAN.md` section 1 already establishes
+that `scipy.optimize`, `scipy.special` and `scipy.interpolate` are load-bearing in the fitter's hot
+path, not incidental — and is not attempted here without the user asking for that scope
+specifically, given `CLAUDE.md`'s hard rule that numpy and scipy are the only runtime dependencies
+and the measured cost of every cheaper alternative tried so far.

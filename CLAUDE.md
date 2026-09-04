@@ -632,24 +632,46 @@ static-site Web UI running the same core via WASM (Pyodide).
    same-size breakdown shows is not the whole story — genuine same-size duplication is large on
    its own. All seven steps of section 7's order of work are done.
 
-18. `docs/DISCOVER_UX_PLAN.md` — four usability fixes on the Discover path, raised in a user
-   review of the CLI and web front ends. **Implemented, all four items; verified by `npm run
-   check` and `tests/test_cli.py` (no quantitative gate — these are usability fixes, not a search
-   property to measure).** The CLI's `--workers` now defaults to `cpu_count - 1` on the desktop
-   path (`main.py`'s argparse default only); the library's own `workers: int = 1` defaults are
-   unchanged, so the Pyodide-safety contract `_worker_pool` documents still holds for anything
-   importing `autocircuit.core.discover` directly. The Data screen's Example Data panel now
-   collapses each manifest group into a `<details>`, open only for the first group, with a count
-   in every closed heading. The Discover screen's Pool control is now Auto/Custom only; the named
-   presets (`"component"`, `"electrochemical"`) moved into the custom panel as quick-fill buttons
-   that replace the checkbox selection rather than a dropdown entry sitting next to `auto` — which
-   is the point, since a named pool is the same "what kind of part is this" assertion this project
-   otherwise only allows as an opt-in narrowing — and the checkboxes now show the same
-   `SymbolPreview` the Fit screen's `ElementPalette.tsx` already draws. And the Discover -> Fit
-   hand-off now auto-runs the fit once on arrival, via a one-shot `autoFitToken` counter bumped
-   only by `App.fitCircuit`; the fitted *values* still do not travel (`SCREEN_STATE_PLAN.md`
-   section 3, unchanged) — only a request to refit does, so the Fit screen still computes its own
-   number rather than displaying the search's.
+18. `docs/DISCOVER_UX_PLAN.md` — usability fixes on the Discover path, from two rounds of user
+   review of the CLI and web front ends. **Implemented, items A-G; verified by `npm run check`,
+   `npm run smoke`, `tests/test_cli.py`, `tests/test_discover.py` and the full `pytest` suite (no
+   quantitative gate — these are usability fixes, not a search property to measure).** The CLI's
+   `--workers` now defaults to `cpu_count - 1` on the desktop path (`main.py`'s argparse default
+   only); the library's own `workers: int = 1` defaults are unchanged, so the Pyodide-safety
+   contract `_worker_pool` documents still holds for anything importing `autocircuit.core.discover`
+   directly. The Data screen's Example Data panel now collapses each manifest group into a
+   `<details>`, open only for the first group, with a count in every closed heading. The Discover
+   screen's Pool control is now Auto/Custom only; the named presets (`"component"`,
+   `"electrochemical"`) moved into the custom panel as quick-fill buttons that replace the checkbox
+   selection rather than a dropdown entry sitting next to `auto` — which is the point, since a named
+   pool is the same "what kind of part is this" assertion this project otherwise only allows as an
+   opt-in narrowing — and the checkboxes now show the same `SymbolPreview` the Fit screen's
+   `ElementPalette.tsx` already draws. And the Discover -> Fit hand-off now auto-runs the fit once
+   on arrival, via a one-shot `autoFitToken` counter bumped only by `App.fitCircuit`; the fitted
+   *values* still do not travel (`SCREEN_STATE_PLAN.md` section 3, unchanged) — only a request to
+   refit does, so the Fit screen still computes its own number rather than displaying the search's.
+   **A second review (§ "second review round") raised five more points, and investigating them
+   before writing code changed the answer for three of the five.** Loading an Example dataset now
+   holds "Loaded ✓" on the clicked button for 2 s and auto-scrolls the loaded-spectra table into
+   view — [browser, Playwright] confirmed the group-collapse above was already live, so the actual
+   defect was that a successful, correctly-working click produced zero visible change in the
+   viewport, not that the panel was showing too much. The Discover screen's Workers control is now
+   tucked inside a collapsed "Advanced" `<details>` rather than sitting beside controls that change
+   the search's answer — its auto-fill from `navigator.hardwareConcurrency` (`defaultPoolSize()`)
+   was already shipped, so only its visual prominence needed fixing. The CLI's `--progress` output
+   now announces, once each, the two points a search escalates beyond a plain exhaustive run —
+   pool-widening and the genetic fallback — via a new `discover(..., on_stage=...)` parameter that,
+   like `on_progress`, is reporting-layer-only and changes no number the search returns; **this
+   request did not apply to the browser**, which the code and the smoke test already assert never
+   runs the genetic fallback at all (`SearchPanel.tsx`, `smoke.mjs`). The other two points were
+   investigated and left alone: the switch to the genetic fallback is already pool-size-sensitive
+   as an emergent property of the exhaustive stage's `max_candidates` enumeration ceiling rather
+   than a raw element-count threshold, but turning that into a deliberately calibrated two-axis
+   rule is an `EVOLVE_SEARCH_PLAN.md`-scale benchmark project and was not attempted; and the
+   startup library-loading concern is two already-closed questions —
+   `STARTUP_AND_EDITING_PLAN.md` §3's staging and `METRICS_AND_UX_PLAN.md` §1.5's rejected
+   prefetch — plus a scipy replacement, which is a different scale of project than anything else
+   in this document and was not attempted without being asked for specifically.
 
 19. `docs/CRITERION_SELECTION_PLAN.md` — whether `DEFAULT_CRITERION` (`stats.py:39`) was the
    right default against BIC, CAIC, HQC or AICc, which no document had measured before this.

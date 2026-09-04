@@ -210,6 +210,22 @@ def _objective_of(args: argparse.Namespace) -> Objective:
     return cast("Objective", args.objective or DEFAULT_OBJECTIVE)
 
 
+def _stage_reporter() -> Callable[[str, str], None]:
+    """Build an ``on_stage`` callback that announces a search escalation on stderr.
+
+    Printed on its own line, ahead of whatever ``_progress_reporter`` is doing with
+    self-overwriting ``\\r`` lines, so the announcement is not immediately clobbered by the
+    next progress update -- and so a reader watching only the live line still sees why its
+    denominator just changed or reset.
+    """
+
+    def on_stage(_name: str, message: str) -> None:
+        sys.stderr.write(f"\n  {message}\n")
+        sys.stderr.flush()
+
+    return on_stage
+
+
 def _progress_reporter() -> Callable[[int, int, str | None], None]:
     """Build an ``on_progress`` callback that writes a self-overwriting line to stderr.
 
@@ -318,6 +334,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
         feasibility_filter=not args.no_feasibility_filter,
         criterion=args.criterion,
         on_progress=_progress_reporter() if args.progress else None,
+        on_stage=_stage_reporter() if args.progress else None,
         generations=args.generations,
         population=args.population,
         max_elements=args.max_elements,
