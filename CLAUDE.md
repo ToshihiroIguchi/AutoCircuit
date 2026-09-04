@@ -697,6 +697,25 @@ static-site Web UI running the same core via WASM (Pyodide).
    numbers and exactly what shipped (`stats.py`, a `tests/test_web_light.py` assertion, the
    Discover screen's placeholder default, `METRICS_AND_UX_PLAN.md` §2.6, `README.md`).
 
+20. `docs/IMPACT_PLAN.md` — what would move the project most with effort disregarded, ranked
+   against the three purpose points. **Plan only; nothing in it is implemented.** Five items in
+   order of effect: **A** multi-condition joint fitting (a temperature or bias series fitted to
+   one circuit with a per-parameter-class Arrhenius/shared/free law chosen by BIC, never by the
+   user — the one instrument `CLAUDE.md` names as able to *break* an equivalence class, with a
+   negative-control gate A2 that must report "still equivalent" when the energies are equal);
+   **B** a noise model σ(f) estimated from the spectrum itself, so `--weighting` stops being a
+   knob the target user cannot set — the survey's one arithmetic finding is that `cov *
+   chi2_reduced` already self-calibrates the absolute scale, so what the weighting actually
+   decides is the *shape* across frequency and between real and imaginary parts, which is what
+   makes an ESR "resolved" or not; **C** a measured-data arena, because the repository contains
+   no real spectrum and every gate to date is on data generated from the vocabulary being
+   searched; **D** the genetic fallback running on the user's time budget instead of a trigger
+   measured twice not to fire, plus the §5.10 sentence fix; **E** profile/bootstrap intervals
+   for the three quantities the report decides on. Its §5 lists what was considered and left
+   out with the measured reason beside each, and its §8 gives the order D1 → B → A → C → E → D2.
+   One survey correction recorded there: activation energies are *in* scope (a ratio of rates
+   needs no length or area), whatever a quick reading of the geometry ban suggests.
+
 Update these when decisions change.
 
 ## Stack and conventions
