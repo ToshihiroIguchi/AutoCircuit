@@ -29,6 +29,7 @@ from autocircuit.core import discover as discover_module
 from autocircuit.core.circuit import Circuit, count_elements, simplify
 from autocircuit.core.discover import (
     Candidate,
+    DiscoveryResult,
     _breeding_pool,
     _Evaluator,
     _fit_cost,
@@ -42,9 +43,10 @@ from autocircuit.core.discover import (
     pareto_front,
     random_topology,
 )
-from autocircuit.core.fit import fit
+from autocircuit.core.fit import FitResult, fit
 from autocircuit.core.simulate import log_frequencies, simulate
 from autocircuit.core.spectrum import Spectrum
+from autocircuit.core.stats import Statistics
 
 FAST = {
     "generations": 8,
@@ -299,6 +301,119 @@ def test_recommendation_prefers_parsimony_over_raw_score() -> None:
     # ...while still fitting essentially as well.
     best_chi2 = min(c.result.chi2_reduced for c in result.candidates)
     assert recommended.result.chi2_reduced <= best_chi2 * 2.0
+
+
+def _candidate(
+    circuit_str: str,
+    *,
+    chi2_reduced: float,
+    aicc: float,
+    bic: float,
+    unresolved_index: int | None = None,
+) -> Candidate:
+    """A candidate with hand-picked scores, built rather than fitted.
+
+    Driving a real search into the exact chi-squared-band tie-break of
+    docs/TOPOLOGY_6PLUS_PLAN.md section 5.10 costs minutes for something these three numbers
+    already determine. Every parameter gets a 10% standard error, well inside
+    :data:`~autocircuit.core.stats.UNRESOLVED_STDERR`, so ``n_unresolved`` is 0 unless
+    ``unresolved_index`` names one parameter to blow up past its own value instead.
+    """
+    circuit = Circuit.parse(circuit_str)
+    n = circuit.n_params
+    values = np.linspace(10.0, 10.0 * n, n)
+    stderr = 0.1 * values
+    if unresolved_index is not None:
+        stderr[unresolved_index] = abs(values[unresolved_index]) * 2.0
+    stats = Statistics(
+        n_data=2 * n + 10,
+        n_params=n,
+        ssr=1.0,
+        chi2_reduced=chi2_reduced,
+        stderr=stderr,
+        correlation=np.eye(n),
+        aic=aicc,
+        aicc=aicc,
+        bic=bic,
+    )
+    result = FitResult(
+        circuit=circuit,
+        values=values,
+        z_model=np.zeros(n + 5, dtype=complex),
+        residuals=np.zeros(2 * n + 10),
+        statistics=stats,
+        weighting="modulus",
+        success=True,
+        message="ok",
+        n_restarts=1,
+        relative_error=0.01,
+    )
+    return Candidate(circuit, result, 0)
+
+
+def test_by_criterion_decline_reason_distinguishes_unresolved_from_inside_band() -> None:
+    """docs/TOPOLOGY_6PLUS_PLAN.md section 5.10: the printed reason must match the real one.
+
+    The report used to print "the extra elements are not supported by the data" whenever
+    :attr:`DiscoveryResult.by_criterion` was declined, regardless of *why*. This builds the
+    measured case -- the criterion's pick has every parameter resolved and is declined only for
+    being more complex, inside the same chi-squared band as the simpler recommendation -- and
+    checks that both the machine-readable reason and the printed sentence say so rather than
+    naming an unresolved parameter that does not exist.
+    """
+    recommended = _candidate("R1-p(R2,C1)", chi2_reduced=1.0, aicc=-30.0, bic=-25.0)
+    chosen = _candidate("R1-p(R2,C1)-p(R3,C2)", chi2_reduced=1.5, aicc=-60.0, bic=-50.0)
+    assert chosen.n_unresolved == 0
+    assert recommended.complexity < chosen.complexity
+
+    result = DiscoveryResult(
+        candidates=[chosen, recommended],
+        pareto=[recommended, chosen],
+        n_evaluated=2,
+        generations=0,
+        elapsed_s=1.0,
+        pool=("R", "C"),
+        mode="exhaustive",
+        complete_up_to=5,
+        criterion="aicc",
+    )
+
+    assert result.best is chosen
+    assert result.by_criterion is chosen
+    assert result.recommended is recommended
+    assert result._decline_reason(chosen) == "inside_band"
+    assert result.by_criterion_decline_reason == "inside_band"
+
+    summary = result.summary()
+    assert "not supported by the data" not in summary
+    assert "all resolved" in summary
+    assert "the same band" in summary
+
+
+def test_by_criterion_decline_reason_is_unresolved_when_it_really_is() -> None:
+    """The other branch: an unresolved parameter still gets the original sentence, unchanged."""
+    recommended = _candidate("R1-p(R2,C1)", chi2_reduced=1.0, aicc=-30.0, bic=-25.0)
+    chosen = _candidate(
+        "R1-p(R2,C1)-p(R3,C2)", chi2_reduced=1.5, aicc=-60.0, bic=-50.0, unresolved_index=-1
+    )
+    assert chosen.n_unresolved == 1
+
+    result = DiscoveryResult(
+        candidates=[chosen, recommended],
+        pareto=[recommended, chosen],
+        n_evaluated=2,
+        generations=0,
+        elapsed_s=1.0,
+        pool=("R", "C"),
+        mode="exhaustive",
+        complete_up_to=5,
+        criterion="aicc",
+    )
+
+    assert result.by_criterion is chosen
+    assert result.recommended is recommended
+    assert result.by_criterion_decline_reason == "unresolved"
+    assert "the extra elements are not supported by the data" in result.summary()
 
 
 def test_recommendation_is_on_the_pareto_front() -> None:

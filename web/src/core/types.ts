@@ -505,6 +505,18 @@ export interface ReportWire {
    * a circuit with a parameter whose standard error exceeds its own value. Both are marked.
    */
   by_criterion: string | null;
+  /**
+   * Why `by_criterion` differs from `recommended`, or null when they agree (or there is
+   * nothing to compare -- no candidates, or the criterion is the F-test, which is a nesting
+   * test rather than a chi-squared-band comparison). `"unresolved"` is the common case: the
+   * criterion's pick has a parameter whose standard error exceeds its own value.
+   * `"inside_band"` is the case that looks the same in a table and is not: every parameter of
+   * the criterion's pick is resolved, and `recommended` was preferred only for being simpler
+   * within the same statistical band. `"outside_band"` is the least common: the criterion
+   * preferred a fit that is not even inside that band. Not yet surfaced in the UI; carried on
+   * the wire so a reader of the raw report is not told the wrong one of these three reasons.
+   */
+  by_criterion_decline_reason: "unresolved" | "inside_band" | "outside_band" | null;
   candidates: CandidateRowWire[];
   pareto: CandidateRowWire[];
   recommended: string | null;

@@ -94,6 +94,11 @@ from .validate import RUNS_Z_LIMIT, _runs_z
 
 Mode = Literal["auto", "exhaustive", "evolve"]
 
+#: Why :attr:`DiscoveryResult.by_criterion` differs from :attr:`DiscoveryResult.recommended`,
+#: for the criteria where that comparison means anything (everything but ``ftest``; see
+#: :meth:`DiscoveryResult._decline_reason`).
+DeclineReason = Literal["unresolved", "inside_band", "outside_band"]
+
 #: Tier-1 screening budget. Enough to rank thousands of topologies, nowhere near enough to
 #: publish: every number that reaches the user comes from the tier-2 refit.
 SCREEN_POPSIZE = 8
@@ -591,6 +596,41 @@ class DiscoveryResult:
         threshold = min(c.result.chi2_reduced for c in self.candidates) * PARSIMONY_CHI2_FACTOR
         return [c for c in self.pareto if c.result.chi2_reduced <= threshold]
 
+    def _decline_reason(self, chosen: Candidate) -> DeclineReason:
+        """Why :attr:`recommended` is not ``chosen``, for a ``chosen`` that is not it.
+
+        [measured, docs/TOPOLOGY_6PLUS_PLAN.md section 5.10] These three reasons are not
+        interchangeable, and the report used to print the same sentence -- "the extra elements
+        are not supported by the data" -- for all of them. That sentence is true of
+        ``unresolved``: :attr:`Candidate.n_unresolved` counts a standard error larger than its
+        own value, which is what "not supported" means. It is false of ``inside_band``: every
+        parameter of ``chosen`` is resolved, and it was passed over only because
+        :attr:`recommended` fits within the same :data:`PARSIMONY_CHI2_FACTOR` band at lower
+        complexity -- the measured case, an AICc 29-34 points better with ``n_unresolved = 0``.
+        ``outside_band`` is the remaining case, kept distinct because it says something
+        different again: the criterion's parameter penalty preferred ``chosen`` without its fit
+        actually landing inside the band the recommendation's does.
+        """
+        if chosen.n_unresolved > 0:
+            return "unresolved"
+        threshold = min(c.result.chi2_reduced for c in self.candidates) * PARSIMONY_CHI2_FACTOR
+        return "inside_band" if chosen.result.chi2_reduced <= threshold else "outside_band"
+
+    @property
+    def by_criterion_decline_reason(self) -> DeclineReason | None:
+        """Machine-readable form of the sentence :meth:`summary` prints for :attr:`by_criterion`.
+
+        ``None`` when there is nothing to explain: no candidates, ``criterion`` is ``ftest``
+        (a nesting test, not a chi-squared-band comparison, so this reason does not apply to
+        it), or the criterion's own pick already is :attr:`recommended`.
+        """
+        chosen, recommended = self.by_criterion, self.recommended
+        if chosen is None or recommended is None or chosen is recommended:
+            return None
+        if self.criterion == "ftest":
+            return None
+        return self._decline_reason(chosen)
+
     @property
     def unresolved_everywhere(self) -> bool:
         """True when *every* candidate that fits the data leaves parameters it cannot resolve.
@@ -924,12 +964,33 @@ class DiscoveryResult:
                         "  not as a p-value you could publish.",
                     ]
                 else:
-                    lines.append(
-                        f"Lowest {self.score_label:<8}: {chosen.circuit.to_string()} "
-                        f"({chosen.circuit.n_params} parameters, "
-                        f"{chosen.n_unresolved} of them unresolved) -- better numerically, but "
-                        "the extra elements are not supported by the data."
-                    )
+                    reason = self._decline_reason(chosen)
+                    if reason == "unresolved":
+                        lines.append(
+                            f"Lowest {self.score_label:<8}: {chosen.circuit.to_string()} "
+                            f"({chosen.circuit.n_params} parameters, "
+                            f"{chosen.n_unresolved} of them unresolved) -- better numerically, "
+                            "but the extra elements are not supported by the data."
+                        )
+                    elif reason == "inside_band":
+                        best_chi2 = min(c.result.chi2_reduced for c in self.candidates)
+                        ratio = chosen.result.chi2_reduced / best_chi2
+                        lines.append(
+                            f"Lowest {self.score_label:<8}: {chosen.circuit.to_string()} "
+                            f"({chosen.circuit.n_params} parameters, all resolved) -- scores "
+                            f"better, and its chi2_reduced is only {ratio:.2g}x the best "
+                            f"found, the same band {recommended.circuit.to_string()} is in. "
+                            "The simpler model is preferred there; this is not a case of an "
+                            "unsupported extra element."
+                        )
+                    else:
+                        lines.append(
+                            f"Lowest {self.score_label:<8}: {chosen.circuit.to_string()} "
+                            f"({chosen.circuit.n_params} parameters, all resolved) -- scores "
+                            "better under this criterion, but its chi2_reduced sits outside "
+                            "the band the recommended model's does, so the gain is not a "
+                            "meaningfully better fit either."
+                        )
         if recommended is not None:
             lines += ["", "Recommended model:", recommended.result.summary()]
         lines += [
@@ -961,6 +1022,7 @@ class DiscoveryResult:
             "by_criterion": (
                 None if self.by_criterion is None else self.by_criterion.circuit.to_string()
             ),
+            "by_criterion_decline_reason": self.by_criterion_decline_reason,
             "skeleton": self.skeleton,
             "complete_up_to": self.complete_up_to,
             "base_complete_up_to": self.base_complete_up_to,

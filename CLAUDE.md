@@ -473,8 +473,10 @@ static-site Web UI running the same core via WASM (Pyodide).
    sit within that band of the best chi², so `recommended`'s `(complexity, aicc)` tie-break picks
    the simpler one regardless of the AICc gap, and the report's own printed sentence — "better
    numerically, but the extra elements are not supported by the data" next to "0 of them
-   unresolved" in the same line — says the wrong reason out loud. Fixing that sentence is future
-   work; the rate and size of the cost are what X7 asked for and both are now answered.
+   unresolved" in the same line — used to say the wrong reason out loud. **Fixed**
+   (`docs/IMPACT_PLAN.md` item D1): `DiscoveryResult` now names the real reason
+   (`unresolved`/`inside_band`/`outside_band`) and prints a sentence that matches it, with no
+   number changed. The rate and size of the cost are what X7 asked for and both are answered.
    **X6 [measured, §5.11]** gave `_evolve` the `workers` parameter `_exhaustive` already had —
    `--workers` under `--mode evolve` silently did nothing before this. With `generations` set
    high enough that `time_limit` binds instead of the iteration cap, eight cores bought 39-48%

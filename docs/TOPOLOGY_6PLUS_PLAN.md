@@ -782,6 +782,18 @@ same shape §5.9 already flagged as the one growth does not recover — consiste
 independent evidence for, that section's reading that this shape sits closer to a genuine
 five-versus-six-element ambiguity than the other five.
 
+**The sentence is fixed** (`docs/IMPACT_PLAN.md` item D1, `discover.py`'s `_decline_reason`).
+`DiscoveryResult.summary()` and `.to_dict()` now distinguish the three reasons `by_criterion`
+can differ from `recommended` — `unresolved` (the common case this sentence was written for),
+`inside_band` (this section's case: every parameter resolved, declined only on the
+`(complexity, aicc)` tie-break), and `outside_band` — instead of printing the `unresolved`
+wording for all three. The two `ser6`/`grow` seeds above are exactly the fixture
+`tests/test_discover.py::test_by_criterion_decline_reason_distinguishes_unresolved_from_inside_band`
+was built to reproduce (by hand-picked scores rather than a live search, since driving one into
+this exact tie-break costs minutes for something three numbers already determine). No number
+changed — `benchmarks/ev5_fingerprint.py` before/after this fix is identical apart from the new
+`by_criterion_decline_reason` key itself.
+
 ### 5.11 X6 — the fallback's missing parallelism, wired and measured [measured]
 
 Section 4.4's note (commit `1db16a2`) is a finding made in passing while measuring something

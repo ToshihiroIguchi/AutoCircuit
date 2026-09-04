@@ -352,16 +352,22 @@ schedules.
 
 ## 6. Item D — the fallback runs on the budget, and `recommended()` tells the truth
 
-### 6.1 D1: the sentence (small, first)
+### 6.1 D1: the sentence (small, first) — **done**
 
 `docs/TOPOLOGY_6PLUS_PLAN.md` §5.10 measured the case: a truth-equivalent reaches the front
 with `n_unresolved = 0` and an AICc 29–34 points better, and is declined because it sits
 inside `PARSIMONY_CHI2_FACTOR`'s band and loses the `(complexity, aicc)` tie-break — while the
 report prints "the extra elements are not supported by the data" beside "0 of them
-unresolved". The fix is a reason enum on the decision (`unresolved`, `inside_band`,
-`outside_band`) that the sentence is rendered from, and a test that constructs the §5.10 case
-and asserts the printed reason is `inside_band` with the chi-squared ratio stated. No number
-changes; `ev5_fingerprint.py` is the gate.
+unresolved". **Implemented**: `DiscoveryResult._decline_reason` names which of `unresolved`,
+`inside_band` or `outside_band` applies, `summary()` renders a matching sentence for each, and
+`by_criterion_decline_reason` carries the same value on the wire (`to_dict()`, and
+`web/src/core/types.ts` for the browser, though nothing in the UI reads it yet).
+`tests/test_discover.py::test_by_criterion_decline_reason_distinguishes_unresolved_from_inside_band`
+constructs the §5.10 case directly (hand-picked scores, not a live search) and checks the
+reason is `inside_band`; a second test checks the original `unresolved` sentence is untouched
+when the reason really is that. **Gate held**: `benchmarks/ev5_fingerprint.py` before/after is
+identical except for the new `by_criterion_decline_reason` key itself — no existing number
+moved. See `docs/TOPOLOGY_6PLUS_PLAN.md` §5.10's added note.
 
 ### 6.2 D2: growth on the budget
 
