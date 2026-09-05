@@ -104,7 +104,14 @@ print(json.dumps(ask({"op": "version"})))
     result = answer["result"]
     assert isinstance(result, dict)
     assert result["bridge"] == BRIDGE_VERSION
-    assert result["formats"] == ["generic_csv", "keysight", "touchstone", "zview"]
+    assert result["formats"] == [
+        "biologic",
+        "gamry",
+        "generic_csv",
+        "keysight",
+        "touchstone",
+        "zview",
+    ]
     assert [c["name"] for c in result["criteria"]] == [
         "aic",
         "aicc",

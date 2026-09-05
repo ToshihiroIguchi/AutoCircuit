@@ -712,8 +712,8 @@ static-site Web UI running the same core via WASM (Pyodide).
    Discover screen's placeholder default, `METRICS_AND_UX_PLAN.md` §2.6, `README.md`).
 
 20. `docs/IMPACT_PLAN.md` — what would move the project most with effort disregarded, ranked
-   against the three purpose points. Five items in order of effect, **D1 and B implemented, A
-   built and then withdrawn, the rest still plan only.** **A** multi-condition joint fitting (a
+   against the three purpose points. Five items in order of effect, **D1, B and C implemented, A
+   built and then withdrawn, E and D2 still plan only.** **A** multi-condition joint fitting (a
    temperature or bias series fitted to one circuit with a per-parameter-class
    Arrhenius/shared/free law chosen by BIC) was fully implemented and its gates A1-A4 measured
    passing (`core/multicondition.py`, since removed) before being **withdrawn on a scope
@@ -737,8 +737,25 @@ static-site Web UI running the same core via WASM (Pyodide).
    bandwidth selection), then the shipped design: the same cross-validation with the
    generalised (GCV) degrees-of-freedom correction `autocircuit.core.drt` already uses for its
    own regularisation strength, which closed the capacitor gap without disturbing the other two
-   references; **C** a measured-data arena, because the repository contains no real spectrum and
-   every gate to date is on data generated from the vocabulary being searched; **D** — D1 (the
+   references. **C** — a measured-data arena (`benchmarks/measured/`), because the repository
+   had no real spectrum and every gate to date was on data generated from the vocabulary being
+   searched. **Implemented at 7 real, licensed datasets** (impedance.py's bundled examples plus
+   two Zenodo battery cells and a reference-electrode benchmark; zero from the ceramic
+   literature despite that being this project's named use case — none were found publicly
+   available with an embedded frequency axis and a clear licence, recorded as a gap rather than
+   filled with a reconstructed one). New `io/gamry.py` and `io/biologic.py` readers, verified
+   against the real vendor files rather than only hand-built fixtures. **Gate R2 is the result
+   that matters most**: `relative_error` (weighting-independent) is a normal 0.16-12.5% on every
+   dataset, so the fits themselves are fine, but `chi2_reduced` is unusable under either
+   weighting this project has — three to six orders of magnitude too *large* under
+   `weighting="auto"` (item B's noise estimator, gated only on synthetic data, fails badly on a
+   43-72 point real sweep) and three to six orders of magnitude too *small* under
+   `weighting="modulus"` (whose near-1 chi2 on synthetic references was always a coincidence of
+   `simulate()`'s own noise model, not a real calibration). Split-half stability (R3) passed on
+   1 of 7 datasets under the strict literal-topology check used, against an 80% bar. See
+   `docs/IMPACT_PLAN.md` §4 for the full dataset table and the reasoning; §2's item B section
+   now cross-references this, since it is the reason N1-N4's synthetic-only scope is load-
+   bearing rather than a formality. **D** — D1 (the
    `recommended()` sentence naming `unresolved`/`inside_band`/`outside_band` instead of always
    the first) is done; D2 (the genetic fallback running on the user's time budget instead of a
    trigger measured twice not to fire) is not. **E** profile/bootstrap intervals for the three

@@ -93,12 +93,14 @@ export function SamplePanel({
     <section className="sample-panel">
       <h2 className="panel-title">Example data</h2>
       <p className="sample-panel__intro">
-        Synthetic spectra, each generated from a known circuit with proportional noise — every one
-        of them a case this project measures itself against, in{" "}
-        <code>benchmarks/discovery_v2.py</code> or <code>benchmarks/fitting.py</code>. They are
-        here to try the program on, not to stand in for a measurement. <em>Shapes</em> are chosen
-        for a feature of the impedance; <em>devices</em> are the circuits actually used to fit a
-        named real part.
+        <em>Shapes</em> and <em>devices</em> are synthetic spectra, each generated from a known
+        circuit with proportional noise — every one of them a case this project measures itself
+        against, in <code>benchmarks/discovery_v2.py</code> or <code>benchmarks/fitting.py</code>.
+        They are here to try the program on, not to stand in for a measurement. <em>Shapes</em>{" "}
+        are chosen for a feature of the impedance; <em>devices</em> are the circuits actually used
+        to fit a named real part. <em>Measured</em> rows are different: real instrument files,
+        with no known circuit and no noise level to disclose, licensed and cited beside each one
+        (<code>benchmarks/measured/datasets.py</code>).
       </p>
       {!dataReady && (
         <p className="drop-zone__waiting">
@@ -136,17 +138,41 @@ export function SamplePanel({
                           : "Queue"}
                   </button>
                   <span className="sample-panel__label">{sample.label}</span>
-                  <code className="sample-panel__circuit">{sample.circuit}</code>
-                  <span className="sample-panel__meta">
-                    {formatSiRange(sample.fMin, sample.fMax, "Hz")} ·{" "}
-                    {formatPercent(sample.noise, 0)} noise
-                  </span>
+                  {sample.measured === true ? (
+                    <span className="sample-panel__measured-badge">measured</span>
+                  ) : (
+                    <>
+                      <code className="sample-panel__circuit">{sample.circuit}</code>
+                      <span className="sample-panel__meta">
+                        {formatSiRange(sample.fMin ?? 0, sample.fMax ?? 0, "Hz")} ·{" "}
+                        {formatPercent(sample.noise ?? 0, 0)} noise
+                      </span>
+                    </>
+                  )}
                 </div>
-                <p className="sample-panel__blurb">{sample.blurb}</p>
-                {expanded && (
-                  <p className="sample-panel__command">
-                    <code>{sample.command}</code>
+                {sample.blurb !== undefined && (
+                  <p className="sample-panel__blurb">{sample.blurb}</p>
+                )}
+                {sample.measured === true ? (
+                  <p className="sample-panel__citation">
+                    {sample.system} Licence: {sample.license}.{" "}
+                    <a href={sample.sourceUrl} target="_blank" rel="noopener noreferrer">
+                      Source
+                    </a>
+                    {sample.publishedCircuit !== null && sample.publishedCircuit !== undefined && (
+                      <>
+                        {" "}
+                        The source itself fitted <code>{sample.publishedCircuit}</code> (
+                        {sample.publishedCircuitNote}).
+                      </>
+                    )}
                   </p>
+                ) : (
+                  expanded && (
+                    <p className="sample-panel__command">
+                      <code>{sample.command}</code>
+                    </p>
+                  )
                 )}
               </li>
             ))}

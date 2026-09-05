@@ -27,7 +27,8 @@ data always gives the same answer. It can also search for the circuit *topology*
 - **Export to SPICE** — including constant-phase, Warburg and skin-effect elements, which have
   no SPICE primitive and are synthesised as passive RC/RL ladders valid over the measured band.
 - **Read the common instrument formats** — generic CSV, ZView/ZPlot `.z`, Touchstone
-  `.s1p`/`.s2p` (series-thru and shunt-thru), Keysight/Agilent impedance-analyser CSV.
+  `.s1p`/`.s2p` (series-thru and shunt-thru), Keysight/Agilent impedance-analyser CSV, Gamry
+  `.DTA`, and BioLogic EC-Lab `.mpt`.
 
 Designed for capacitor characterisation (C, ESR, ESL, skin effect), sintered ceramics
 (Maxwell-Wagner / brick-layer), and passive components generally.

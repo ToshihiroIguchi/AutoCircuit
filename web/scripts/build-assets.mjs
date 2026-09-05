@@ -30,10 +30,12 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { precompile } from "./precompile.mjs";
 import { SAMPLES } from "./samples.mjs";
+import { loadMeasuredSamples } from "./measured-samples.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const WEB = resolve(HERE, "..");
 const REPO = resolve(WEB, "..");
+const MEASURED_DATA_DIR = join(REPO, "benchmarks", "measured", "data");
 const PUBLIC = join(WEB, "public");
 // Not in public/: this is precompile.mjs's input, and its output is the archive of the same
 // package that the browser fetches. One path for both would make the step's own product decide
@@ -166,8 +168,38 @@ async function buildSamples() {
     index.push({ ...sample, file, command });
     console.log(`sample ${sample.id} -> ${out}`);
   }
+  await appendMeasuredSamples(index);
   await writeFile(join(SAMPLES_OUT, "index.json"), JSON.stringify(index, null, 2), "utf8");
   console.log(`samples index -> ${join(SAMPLES_OUT, "index.json")} (${index.length} entries)`);
+}
+
+// Copies the curated real files from `benchmarks/measured/data/` (docs/IMPACT_PLAN.md item C)
+// into public/samples/measured/ and appends their manifest rows -- unlike buildSamples() above,
+// nothing here is generated: these are files someone else's instrument wrote, so there is no
+// command to run and no circuit to name. See measured-samples.mjs for where the metadata comes
+// from and why only three of the arena's datasets are chosen.
+async function appendMeasuredSamples(index) {
+  const measuredOut = join(SAMPLES_OUT, "measured");
+  await mkdir(measuredOut, { recursive: true });
+  for (const entry of loadMeasuredSamples()) {
+    const file = `samples/measured/${entry.file}`;
+    await copyFile(join(MEASURED_DATA_DIR, entry.file), join(PUBLIC, file));
+    index.push({
+      id: entry.id,
+      source: `measured:${entry.id}`,
+      group: "Measured",
+      label: entry.label,
+      measured: true,
+      system: entry.system,
+      sourceUrl: entry.source_url,
+      license: entry.license,
+      artefact: entry.artefact,
+      publishedCircuit: entry.published_circuit,
+      publishedCircuitNote: entry.published_circuit_note,
+      file,
+    });
+    console.log(`measured sample ${entry.id} -> ${join(PUBLIC, file)}`);
+  }
 }
 
 await mkdir(PUBLIC, { recursive: true });

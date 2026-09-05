@@ -3,10 +3,12 @@
 Status: written 2026-09-04 after a survey of every document in `docs/`, the core modules, the
 benchmarks and the web front end (the survey was delegated to three read-only subagents; what
 they reported is summarised in section 1, with one correction, itself later superseded — see
-§3). **D1 and B are implemented (§6.1, §2.4). A was implemented, its gates A1-A4 measured
+§3). **D1, B and C are implemented (§6.1, §2.4, §4). A was implemented, its gates A1-A4 measured
 passing, and then withdrawn on a scope decision (§3) — not reworded, not deleted, kept as the
-clearest record in this repository of a feature that worked and was still ruled out.** C, E and
-D2 remain plan only.
+clearest record in this repository of a feature that worked and was still ruled out. C's own
+gates found something neither C nor B anticipated: item B's noise model, gated only on
+synthetic data, does not survive contact with a real spectrum (§4.3) — recorded there rather
+than smoothed into a passing number.** E and D2 remain plan only.
 
 The question this plan answers is not "what is cheap" but "what would change the answer a
 non-expert gets". Every item below is ranked against `CLAUDE.md`'s three purpose sentences
@@ -23,13 +25,15 @@ Five items, in order of effect:
 |---|------|-------------------------|---------|
 | A | ~~**Multi-condition joint fitting**~~ — **built, gates A1-A4 measured passing, then withdrawn on a scope decision (§3)**, not a technical failure | 2 — the only instrument that can *break* an equivalence class | §3 |
 | B | **A noise model estimated from the spectrum**, replacing the weighting knob's status as a user decision | 3 — a knob the target user cannot set correctly | §2 |
-| C | **A measured-data arena** — the repository has no real spectrum in it, so every gate to date is on data generated from the model family being searched | 3 — "the same answer" has only ever been shown on synthetic data | §4 |
+| C | **A measured-data arena** — **implemented, 7 real datasets; gate R2 found that neither weighting this project has gives a real spectrum's chi2_reduced a usable meaning (§4.3)** | 3 — "the same answer" has only ever been shown on synthetic data | §4 |
 | D | **The genetic fallback runs on the user's budget, not on a trigger that never fires**, and `recommended()`'s sentence says its real reason | 1 and honest reporting | §6 |
 | E | **Uncertainty beyond the linearised standard error** for the quantities the report leans on: `n_unresolved` and τ | honest reporting | §7 |
 
 Order of work is D1 → B → C → E → D2 (section 8); **A was built, gated and withdrawn** (§3) so
 it no longer occupies a slot in that sequence, and dropping it removes the one thing that made
 B a hard prerequisite rather than merely a good idea — B stands on its own purpose-3 argument.
+**C is done** (§4); it did not close a question so much as open one back up in B, which §4.3
+records rather than schedules a fix for.
 
 ## 1. What the survey found
 
@@ -283,6 +287,16 @@ need each other's evidence and conflating them was scope creep this revision rem
   parameters elsewhere. This is one reference, not a proof that every resonance-bearing topology
   behaves the same way, and is recorded as such rather than generalised.
 
+**N1-N4 above are, and were always, scoped to `simulate()`'s synthetic references — item C's
+gate R2 gives that scope a measured reason rather than a caveat nobody had tested.** On seven
+real spectra (43-72 points, not the denser synthetic sweeps N1 used), `weighting="auto"`'s
+`chi2_reduced` is `1.6` to `3.1e4` -- six of seven land 1000x to 30000x above the [0.5, 3] band
+N2's own decision rule assumed -- while `relative_error` stays a normal 0.16-12.5% throughout,
+meaning the *fits* are fine and the *sigma estimate* is not. See §4.3 for the full measurement
+and why `weighting="modulus"` fails the same check in the opposite direction. Nothing here
+changes what N1-N4 measured; it changes what a reader is licensed to conclude from them about
+real data, which was never demonstrated either way until §4.3 ran.
+
 ## 3. Item A — multi-condition joint fitting (built, gated, withdrawn)
 
 **This section is kept in full rather than deleted, because the reason it is not shipped is not
@@ -460,49 +474,144 @@ before its search sees it. That number came from real-shaped data; this project 
 found out what its own pipeline does to such data, and it has no reader that has been run
 against a real `.DTA` or `.mpt` file.
 
-### 4.2 Design
+### 4.2 Design (as built)
 
-Collect a set of publicly available measured spectra with licence and citation recorded
-beside each — the candidates to verify are the example data shipped with `impedance.py`,
-DearEIS and pyimpspec, Zenodo battery EIS releases, and the vendor sample files Gamry and
-BioLogic publish for their formats. Each dataset carries: the instrument and its format, the
-published circuit *if the source fitted one* (as a reference, never as a truth), and the reason
-it is in the arena (which of §4.1's artefacts it exhibits). Ten to twenty datasets, and at
-least two from the ceramic literature because
-that is the use case named in `CLAUDE.md`.
+**Implemented at 7 datasets, not the ten-to-twenty planned, and with zero from the ceramic
+literature despite that being the use case `CLAUDE.md` names — both recorded as shortfalls,
+not rounded away.** The candidate sources named above were searched (two rounds, one for
+Gamry/BioLogic format specs and real sample files, one for open-licence real spectra more
+broadly: impedance.py, pyimpspec, DearEIS, Zenodo). What survived a real check on the licence
+and on whether the file is actually a *measurement* rather than a synthetic test fixture:
 
-Because there is no truth, the gates are stability gates, and each is written so it can fail:
+| id | system | licence | source |
+|---|---|---|---|
+| `impedancepy-generic` | unnamed cell (impedance.py's own tutorial fit target) | MIT | impedance.py |
+| `impedancepy-gamry` | unnamed cell, REF3000 potentiostat, -50 mV bias | MIT | impedance.py |
+| `impedancepy-biologic` | LSC thin film near OCV, SP-150 potentiostat | MIT | impedance.py |
+| `impedancepy-zplot` | unnamed cell, ZPlot 3.2c sweep | MIT | impedance.py |
+| `zenodo-21700-id15` | 21700 NMC811 Li-ion cell, 30% SoC | CC-BY-4.0 | Zenodo 15422339 |
+| `zenodo-21700-id34` | a second, nominally identical 21700 cell | CC-BY-4.0 | Zenodo 15422339 |
+| `zenodo-kendall-electrode` | Kendall Ag/AgCl reference electrode | CC-BY-4.0 | Zenodo 17691812 |
 
-- **R1 (the readers):** every file is read by its format's reader with the same point count the
-  vendor's own software shows. This closes `docs/HANDOFF.md` §6 item 4 with the real files it
-  was waiting on.
-- **R2 (the pipeline finishes and its numbers mean something):** on every dataset, Lin-KK
-  produces a verdict, `--pool auto --weighting auto` produces a front, and the recommended
-  model's `chi2_reduced` under item B's σ(f) lies in [0.5, 3]. Outside that band the pipeline
-  is over- or under-claiming and the dataset becomes a named open item.
-- **R3 (split-half stability):** the recommended *class* on the odd-indexed frequency points is
-  the same class as on the even-indexed points, on at least 80% of datasets. This is the
-  nearest thing to "the same answer" that is measurable without a truth.
-- **R4 (agreement with the literature, reported, not scored):** for each dataset with a
-  published circuit, whether that circuit or an exact equivalent is on the front, is
-  recommended, or is absent — as a table, with no pass fraction, because the published circuit
-  was chosen by the expert this project is trying to replace and may itself be wrong.
-- **R5 (the site):** at least three measured datasets join the example panel, marked
-  "measured" and carrying their citation, so that the first spectrum a visitor tries can be a
-  real one.
+`benchmarks/measured/datasets.py` carries this table plus each dataset's `artefact` (which of
+§4.1's real-instrument effects it was chosen to show) and, for `impedancepy-generic` alone,
+`published_circuit` (impedance.py's own tutorial fit, `R_0-p(R_1,C_1)-p(R_2,C_2)-Wo_1` — a
+notebook demonstration, not a peer-reviewed source, kept as exactly that kind of citation).
+Two more real, real-licenced datasets were found and are **not** in the arena: a Mg-alloy
+corrosion series (CC0) and a PEO-KTFSI solid electrolyte temperature series (CC-BY), both
+excluded because their frequency axis is not in the file — it would have to be *reconstructed*
+from a stated sweep recipe (points-per-decade, start/end frequency), which is exactly the
+generated-not-measured character this arena exists to get away from. A vendor Autolab export
+and a spatially-resolved PEM fuel-cell file were also found and set aside for parsing reasons
+specific to their own text layout, not for anything to do with licence or authenticity.
 
-### 4.3 What R2 is likely to find, and what to do about it
+New readers were required and are shared, general-purpose code, not arena-only glue:
+`io/gamry.py` and `io/biologic.py`, closing `docs/HANDOFF.md` §6 item 4. Both are verified
+against the real vendor files above, not only hand-built fixtures — the Gamry reader is
+exercised against a file whose `ZCURVE` impedance table sits *after* an unrelated `OCVCURVE`
+table, and the BioLogic reader against both sign conventions its format uses for the imaginary
+column (`-Im(Z)/Ohm`, negated, and the less common already-signed `Im(Z)/Ohm`).
 
-The expectation, stated so it can be contradicted, is that R2 fails first on lead inductance
-and on drift: a real capacitor sweep carries a fixture's inductance that the exhaustive stage
-will spend an element on, and a real low-frequency electrochemical sweep drifts in a way
-Lin-KK will flag and the search will then fit with a spurious element. Neither is a search
-problem. The first is a *reporting* one — an L in series at the terminals is a fact about the
-measurement and the report can say so once it can compare the fitted ESL against what the
-frequency window can resolve. The second is a data-screen one — the trim panel exists, and the
-Lin-KK residual per point can tell the user *which* points fail rather than that the sweep
-fails. Both are listed here as the follow-ups R2 would generate, not as work this plan
-schedules.
+Because there is no truth, the gates are stability gates, each written so it can fail --
+`benchmarks/measured/measured.py`:
+
+- **R1 (the readers) — [measured] PASS, 7/7.** Every file is read by its format's reader
+  without error; `f`, `|Z|` range and point count are reported. There is no vendor software on
+  this machine to compare the point count against — recorded as a real limitation of the check
+  rather than silently worked around — so what R1 actually confirms is narrower than planned:
+  every reader terminates and produces a spectrum shaped like the file, not that the vendor's
+  own tool would report the same count.
+- **R2 (the pipeline finishes and its numbers mean something) — [measured] FAIL, 1/7, and the
+  reason is the more important result than the count.** See §4.3.
+- **R3 (split-half stability) — [measured] FAIL, 1/7 (14%), bar was 80%.** The recommended
+  candidate's canonical topology on the odd-indexed points matched the even-indexed points'
+  exactly once, on `impedancepy-zplot` (the dataset with the smallest chi2 divergence in R2).
+  This check is deliberately the strict, literal-string version — it does not know two runs'
+  exact reparameterisations are the same model, unlike `DiscoveryResult.equivalents_of` within
+  one run — so 14% is a *ceiling* on how often a genuinely equivalence-class-aware version would
+  pass, not a measurement of it; that weaker, harder check was not built (§4.4).
+- **R4 (agreement with the literature, reported, not scored) — [measured], the one dataset that
+  qualifies.** `impedancepy-generic`'s tutorial-fitted `R1-p(R2,C1)-p(R3,C2)-Wo1` is **absent**
+  from this project's own candidate list for that spectrum entirely -- not on the front, not
+  evaluated as an exact equivalent, not present under any canonical form. Exactly one data
+  point, reported as the table format promises: no pass fraction, because the published circuit
+  was chosen by the expert this project exists to replace and may itself be wrong, and this
+  project's own search may just as easily be the one missing something on real, drifting data.
+- **R5 (the site) — done.** Three of the seven join the Data screen's example panel
+  (`impedancepy-generic`, `impedancepy-biologic`, `impedancepy-gamry`), marked "measured" with
+  their citation and licence rendered in place of a circuit/noise line, and no "show the
+  command" row, because nothing generated them. [measured, in Chrome via a Playwright session]
+  loading `impedancepy-gamry` end to end -- 72 points, 15.9 mHz .. 200 kHz, matching the CLI's
+  own `read()` exactly -- runs Lin-KK (FAIL, systematic, runs z = -6.76) and draws all four
+  plots with no console error. The other four arena datasets are not on the site: two need a
+  `reader_hints` positional-column override the browser's upload path has no way to carry (only
+  a filename crosses into Pyodide's filesystem, per `bridge.worker.ts`'s `upload()`), so they
+  stay Python-only rather than being force-fit through sniffing that would guess wrong.
+
+### 4.3 What R2 actually found, and it is not what §4.1 predicted
+
+The prediction on record before this ran was that R2 would fail on lead inductance and drift.
+Both effects are visible -- two of seven datasets fail Lin-KK outright, one with a systematic
+runs z of -6.76 -- but they are not why R2 fails. **What actually happens is that
+`chi2_reduced` has no usable meaning on real data under either weighting this project has, in
+opposite directions, while the fit quality underneath is fine:**
+
+[measured] on `impedancepy-generic` (a 3-element fit, `R1-CPE1-p(R2,CPE2)`) and
+`zenodo-21700-id15` (`CPE1-L1-p(C1,R1)`), `relative_error` -- the weighting-independent,
+percent-scale number -- is essentially unchanged between weightings (12.22% vs 12.46%; 2.35%
+vs 2.58%), while `chi2_reduced` moves by **six to eight orders of magnitude**:
+
+| weighting | `impedancepy-generic` chi2_reduced | `zenodo-21700-id15` chi2_reduced |
+|---|---|---|
+| `modulus` | 0.0078 | 0.00029 |
+| `auto` | 30690 | 16010 |
+
+Run across the whole arena, the pattern is total and consistent, not a property of those two
+picks: under `weighting="auto"` every one of the seven real datasets' `chi2_reduced` is
+`1.6` to `3.1e4` (six lie between 1242 and 30690; only `impedancepy-biologic` at 1.56 falls
+inside the planned [0.5, 3] band), while `relative_error` stays a normal-looking 0.16% to
+12.5% throughout. Under `weighting="modulus"` every single one of the seven instead lands
+between `1.3e-6` and `9.8e-4` -- three to six orders of magnitude *below* 0.5, the opposite
+failure direction, on every dataset with no exception.
+
+That symmetry is the finding. `weighting="auto"`'s GCV-LOESS sigma(f) estimator (item B) was
+gated only against `simulate()`'s synthetic proportional-noise spectra (§2.4's N1-N4), which
+have far more points per decade and a noise process the estimator's cross-validated bandwidth
+was built around; on a 43-72 point real sweep it is not merely imprecise, it is wrong by many
+orders of magnitude, driving `chi2_reduced` far *above* any usable band. `weighting="modulus"`
+was never fit to an absolute noise scale at all -- its apparent chi2_reduced near 1 on this
+project's *synthetic* references was always a coincidence of `simulate()`'s injected noise
+level lining up with `1/|Z|`'s shape, not a property that says anything about a real
+instrument's noise floor, and on real data that coincidence does not hold, so chi2_reduced
+collapses far *below* any usable band instead. **Neither weighting this project has gives R2's
+originally-specified [0.5, 3] chi2 criterion a number worth reading on measured data.** This is
+not a search failure and not evidence the recommended topologies are wrong -- `relative_error`
+says the curves track the data about as well under either weighting -- it is evidence that an
+absolute goodness-of-fit threshold calibrated on synthetic noise does not transfer to an
+instrument, which is exactly the kind of thing this arena exists to find and was never visible
+in any gate run before it.
+
+**What follows, recorded rather than fixed here:** item B's own N1-N4 gates are unaffected --
+they were always scoped to the synthetic `REFERENCES`, and that scope now has a concrete,
+measured reason to stay explicit rather than be read as "how the estimator behaves." A revised
+R2 would have to either drop the chi2-band criterion in favour of `relative_error` plus the
+Lin-KK verdict (both of which behave sensibly here), or estimate sigma(f) from something a
+43-72 point real sweep can actually support -- neither is attempted here, both are named as
+what a future pass at item B or at this arena would need to try. §4.2's R2 row above reports
+FAIL because the plan's own criterion was FAIL as written; softening the number after seeing it
+would be exactly the failure mode this document's own culture exists to catch.
+
+### 4.4 Two things this round did not build
+
+The lead-inductance and drift follow-ups §4.1 anticipated are still real, still visible in two
+of seven Lin-KK verdicts, and still not attempted: an L in series at the terminals is a
+*reporting* question once the fitted ESL can be compared against what the frequency window can
+resolve, and the Lin-KK per-point residual already exists to tell a user *which* points in a
+drifting sweep fail rather than that the whole sweep does. Separately, R3's 14% is measured
+under the strict literal-topology comparison stated in §4.2 on purpose; an equivalence-class-
+aware version -- checking whether the *even*-half recommendation, refit to the *odd* half's
+data, reaches the same score as the odd half's own recommendation -- would answer the sharper
+question and was not built for this round.
 
 ## 5. Considered and not included, with the reason
 
@@ -603,6 +712,8 @@ interval covers 90–98% on the same draws and `recommended` on the 37-cell tabl
 3. ~~**A**~~ — built and gated (§3), then withdrawn on a scope decision (§3.5); no longer part
    of this sequence.
 4. **C**, so the readers have real files and the pipeline has a spectrum it did not generate.
+   **Done** (§4) — 7 real, licensed datasets, new Gamry/BioLogic readers, and a gate (R2) that
+   found item B's noise model does not generalise past the synthetic data it was gated on.
 5. **E**, uncertainty beyond the linearised standard error for `n_unresolved` and τ.
 6. **D2**, last, because its one new measurement needs B and its budget semantics are
    independent of everything else.
@@ -617,7 +728,7 @@ rather than reworded.
 |------|-------|
 | Noise model (B) | `core/weighting.py` (new `"auto"`), a new `core/noise.py`, `core/validate.py` (expose per-point KK residual), `core/spectrum.py` (`sigma_re`, `sigma_im` fields), `cli/main.py`, `web/bridge.py`, the Data screen's `KKPanel.tsx` |
 | Multi-condition (A) | **Withdrawn (§3.5); nothing to touch.** Was `core/spectrum.py` (`SpectrumSet`) and a new `core/multicondition.py`, both built, gated and removed by `git revert` -- see §3.3's note on where the trace of that work now lives. |
-| Measured arena (C) | `benchmarks/measured/` (new), `io/gamry.py`, `io/biologic.py` (new), `web/public/samples/` |
+| Measured arena (C) | **Done.** `benchmarks/measured/` (`datasets.py`, `measured.py`, `data/`), `io/gamry.py`, `io/biologic.py` (new readers, registered in `io/__init__.py`), `web/scripts/measured-samples.mjs` (new), `web/scripts/build-assets.mjs`, `web/src/core/samples.ts`, `web/src/components/SamplePanel.tsx` |
 | Fallback and sentence (D) | `core/discover.py` (`recommended`, `_evolve` budget), `core/objective.py`, `SearchPanel.tsx` |
 | Uncertainty (E) | `core/stats.py`, `core/interpret.py`, `benchmarks/fitting.py` |
 

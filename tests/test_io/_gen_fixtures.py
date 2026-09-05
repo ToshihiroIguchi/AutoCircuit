@@ -203,4 +203,77 @@ write(
     + "\n",
 )
 
+# ---------------------------------------------------------------------------------------
+# gamry fixtures
+# ---------------------------------------------------------------------------------------
+
+gm_re = [12.5, 8.3, 5.1]
+gm_im = [-150.2, -15.0, -1.6]  # Gamry's Zimag is already signed Im(Z); capacitive negative
+
+zcurve_rows = "\n".join(
+    f"\t{n}\t{n * 2 + 1}\t{f:.6g}\t{r:.6g}\t{i:.6g}\t0.01\t{abs(complex(r, i)):.6g}\t"
+    f"{math.degrees(math.atan2(i, r)):.6g}\t1e-6\t0.1\t1"
+    for n, (f, r, i) in enumerate(zip(freqs, gm_re, gm_im, strict=True))
+)
+write(
+    "gamry_sample.DTA",
+    "EXPLAIN\n"
+    "TAG\tEISPOT\n"
+    "TITLE\tLABEL\tTest EIS\tTitle\n"
+    "DATE\tLABEL\t1/1/2020\tDate\n"
+    "AREA\tQUANT\t1.00000E+000\tArea (cm^2)\n"
+    "OCVCURVE\tTABLE\t2\n"
+    "\tPt\tT\tVf\n"
+    "\t#\ts\tV\n"
+    "\t0\t0\t0.1\n"
+    "\t1\t1\t0.1\n"
+    "ZCURVE\tTABLE\n"
+    "\tPt\tTime\tFreq\tZreal\tZimag\tZsig\tZmod\tZphz\tIdc\tVdc\tIERange\n"
+    "\t#\ts\tHz\tohm\tohm\tV\tohm\tdeg\tA\tV\t#\n" + zcurve_rows + "\n",
+)
+
+# ---------------------------------------------------------------------------------------
+# biologic fixtures
+# ---------------------------------------------------------------------------------------
+
+bl_re = [12.5, 8.3, 5.1]
+bl_im = [-150.2, -15.0, -1.6]  # true (signed) Im(Z); the "-Im(Z)/Ohm" column stores -this
+
+bl_header = (
+    "EC-Lab ASCII FILE\n"
+    "Nb header lines : 5\n"
+    "Device : Test SP-150\n"
+    "Electrode surface area : 1.000 cm2\n"
+    "freq/Hz\tRe(Z)/Ohm\t-Im(Z)/Ohm\tcycle number\n"
+)
+bl_rows = "\n".join(
+    f"{f:.6g}\t{r:.6g}\t{-i:.6g}\t0" for f, r, i in zip(freqs, bl_re, bl_im, strict=True)
+)
+write("biologic_sample.mpt", bl_header + bl_rows + "\n")
+
+# Same data with the alternate "Im(Z)/Ohm" (already-signed) column instead of "-Im(Z)/Ohm".
+bl_header_noneg = (
+    "EC-Lab ASCII FILE\n"
+    "Nb header lines : 5\n"
+    "Device : Test SP-150\n"
+    "Electrode surface area : 1.000 cm2\n"
+    "freq/Hz\tRe(Z)/Ohm\tIm(Z)/Ohm\tcycle number\n"
+)
+bl_rows_noneg = "\n".join(
+    f"{f:.6g}\t{r:.6g}\t{i:.6g}\t0" for f, r, i in zip(freqs, bl_re, bl_im, strict=True)
+)
+write("biologic_noneg.mpt", bl_header_noneg + bl_rows_noneg + "\n")
+
+# Two sweeps concatenated, distinguished by "cycle number", for read_many.
+bl_rows_cycle0 = "\n".join(
+    f"{f:.6g}\t{r:.6g}\t{-i:.6g}\t0" for f, r, i in zip(freqs, bl_re, bl_im, strict=True)
+)
+bl_rows_cycle1 = "\n".join(
+    f"{f:.6g}\t{r + 100.0:.6g}\t{-i:.6g}\t1" for f, r, i in zip(freqs, bl_re, bl_im, strict=True)
+)
+write(
+    "biologic_multi.mpt",
+    bl_header + bl_rows_cycle0 + "\n" + bl_rows_cycle1 + "\n",
+)
+
 print("Fixtures written to", DATA)

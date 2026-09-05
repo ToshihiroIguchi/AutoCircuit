@@ -1,0 +1,11 @@
+EC-Lab ASCII FILE
+Nb header lines : 5
+Device : Test SP-150
+Electrode surface area : 1.000 cm2
+freq/Hz	Re(Z)/Ohm	-Im(Z)/Ohm	cycle number
+1000	12.5	150.2	0
+10000	8.3	15	0
+100000	5.1	1.6	0
+1000	112.5	150.2	1
+10000	108.3	15	1
+100000	105.1	1.6	1

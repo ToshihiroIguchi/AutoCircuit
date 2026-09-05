@@ -467,10 +467,32 @@ body {
   color: var(--text-muted);
 }
 
+.sample-panel__measured-badge {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--series-2, var(--text-muted));
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+
 .sample-panel__blurb {
   margin: 3px 0 0 86px;
   font-size: 11px;
   color: var(--text-secondary);
+}
+
+.sample-panel__citation {
+  margin: 4px 0 0 86px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.sample-panel__citation code {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
 }
 
 .sample-panel__command {

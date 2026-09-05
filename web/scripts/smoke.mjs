@@ -108,9 +108,9 @@ check(
 );
 check("and names its default, which the page adopts", version.result?.default_criterion === "bic");
 check(
-  "all four readers are present",
+  "all six readers are present",
   JSON.stringify(version.result?.formats) ===
-    JSON.stringify(["generic_csv", "keysight", "touchstone", "zview"]),
+    JSON.stringify(["biologic", "gamry", "generic_csv", "keysight", "touchstone", "zview"]),
   JSON.stringify(version.result?.formats),
 );
 check(

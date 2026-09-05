@@ -457,7 +457,13 @@ every decision about what the report may claim stayed on the expensive model.
    compares ngspice against the suite's own nodal engine, not against the model.** Comparing
    against the model would leave the ladder-synthesis error at ~1e-2 in front of a dialect fault
    three orders of magnitude smaller.
-4. Gamry `.DTA` and BioLogic `.mpt` readers, once real files exist to test against.
+4. ~~Gamry `.DTA` and BioLogic `.mpt` readers, once real files exist to test against.~~ **Done**
+   — `io/gamry.py` and `io/biologic.py`, registered in `io/__init__.py`'s sniffing table.
+   Verified against real vendor files (`impedance.py`'s bundled `exampleDataGamry.DTA` and
+   `exampleDataBioLogic.mpt`), not only hand-built fixtures: a Gamry file's `ZCURVE TABLE` is
+   found even when an `OCVCURVE TABLE` precedes it, and BioLogic's `-Im(Z)/Ohm` column is
+   negated to this project's sign convention while a plain `Im(Z)/Ohm` column is left alone.
+   See `docs/IMPACT_PLAN.md` §4 (item C) for the measured-data arena these readers feed.
 5. ~~Pyodide performance measurement~~ — **done**, `benchmarks/pyodide/`. WASM costs 1.3–1.8×
    on the numerical work, not the order of magnitude the plan feared, so no reduced web budget
    and no Rust port are needed. What it does settle: `exhaustive_limit=4` is the browser

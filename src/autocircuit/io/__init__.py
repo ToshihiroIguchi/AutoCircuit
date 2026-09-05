@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from autocircuit.core.spectrum import Spectrum
-from autocircuit.io import generic_csv, keysight, touchstone, zview
+from autocircuit.io import biologic, gamry, generic_csv, keysight, touchstone, zview
 from autocircuit.io.errors import UnsupportedFormatError
 from autocircuit.io.writers import write_csv, write_zview
 
@@ -38,6 +38,8 @@ REGISTRY: dict[str, Any] = {
     "zview": zview,
     "touchstone": touchstone,
     "keysight": keysight,
+    "gamry": gamry,
+    "biologic": biologic,
 }
 
 _TOUCHSTONE_EXT_RE = re.compile(r"\.[syz]\d+p$", re.IGNORECASE)
@@ -70,6 +72,10 @@ def _sniff_candidates(path: Path) -> list[str]:
         add("touchstone")
     if ext == ".z":
         add("zview")
+    if ext == ".dta":
+        add("gamry")
+    if ext == ".mpt":
+        add("biologic")
 
     head = _read_head(path)
     lower_no_space = head.lower().replace(" ", "")
@@ -80,6 +86,10 @@ def _sniff_candidates(path: Path) -> list[str]:
         add("zview")
     if re.search(r'^"?(title|date|trace\s*\d+)"?\s*[,:]', head, re.IGNORECASE | re.MULTILINE):
         add("keysight")
+    if head.lstrip().startswith("EXPLAIN") or "ZCURVE\tTABLE" in head:
+        add("gamry")
+    if head.startswith("EC-Lab ASCII FILE"):
+        add("biologic")
     add("generic_csv")  # always the last-resort, most permissive candidate
     return candidates
 

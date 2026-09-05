@@ -11,7 +11,14 @@ DATA = Path(__file__).parent / "data"
 
 
 def test_registry_lists_all_formats() -> None:
-    assert set(REGISTRY) == {"generic_csv", "zview", "touchstone", "keysight"}
+    assert set(REGISTRY) == {
+        "generic_csv",
+        "zview",
+        "touchstone",
+        "keysight",
+        "gamry",
+        "biologic",
+    }
 
 
 def test_unmappable_columns_raise_column_mapping_error_directly() -> None:
