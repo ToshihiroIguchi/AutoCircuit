@@ -140,11 +140,23 @@ interface is exactly that difference in form, and the spectrum does not contain 
 what the objective legitimately changes is **how loudly the report says the data cannot decide** —
 loudest under `interpret`, where a non-expert is most likely to read a topology as a mechanism.
 
-**One extension belongs to `interpret` alone**, and it stays inside the frequency-and-impedance
-rule because it only adds more spectra: several sweeps at different temperatures or DC bias, fitted
-to one circuit simultaneously. It yields activation energies, and it is the only instrument
-available here that can actually *break* a degeneracy, since two forms that are indistinguishable
-at one condition often depend on temperature differently. It buys `model` nothing.
+**Multi-condition (temperature- or bias-series) joint fitting is out of scope, by decision.**
+An earlier draft of this file argued that several sweeps at different temperatures or bias
+points, fitted to one circuit simultaneously with an Arrhenius law across conditions, is the
+only instrument available here that can *break* an equivalence class (`R1-p(R2,C1)` versus
+`p(R1,C1-R2)`), and stays inside the frequency-and-impedance rule because it only adds more
+spectra. **That argument is withdrawn, not because it does not work — a full implementation was
+built and measured to work (`docs/IMPACT_PLAN.md` §3, gates A1-A4 passing) — but on
+reconsideration of where the boundary of this software sits.** A temperature or a bias point is
+an experimental condition, not a property of `Z(f)`, and deciding *what physical law* the part's
+parameters follow across those conditions (Arrhenius, as opposed to Vogel-Tammann-Fulcher, a
+power law, or none) is squarely the analyst's own physics judgement to make outside this
+software, not a narrowing this software should offer even as an opt-in candidate — unlike
+`pool` and `skeleton`, which narrow *which circuit elements* may appear and leave every physical
+interpretation of the fitted numbers to the analyst. This software's job stops at producing the
+per-condition circuit and its parameters; relating those parameters across conditions is out of
+scope the same way permittivity and geometry are. See `docs/IMPACT_PLAN.md` §3 for what was
+built and why it was withdrawn rather than shipped or reworded.
 
 ### Modes
 
@@ -700,12 +712,16 @@ static-site Web UI running the same core via WASM (Pyodide).
    Discover screen's placeholder default, `METRICS_AND_UX_PLAN.md` §2.6, `README.md`).
 
 20. `docs/IMPACT_PLAN.md` — what would move the project most with effort disregarded, ranked
-   against the three purpose points. Five items in order of effect, **D1 and B implemented, the
-   rest still plan only.** **A** multi-condition joint fitting (a temperature or bias series
-   fitted to one circuit with a per-parameter-class Arrhenius/shared/free law chosen by BIC,
-   never by the user — the one instrument `CLAUDE.md` names as able to *break* an equivalence
-   class, with a negative-control gate A2 that must report "still equivalent" when the energies
-   are equal); **B** — `weighting="auto"` (`core/noise.py`), a noise scale σ(f) estimated from
+   against the three purpose points. Five items in order of effect, **D1 and B implemented, A
+   built and then withdrawn, the rest still plan only.** **A** multi-condition joint fitting (a
+   temperature or bias series fitted to one circuit with a per-parameter-class
+   Arrhenius/shared/free law chosen by BIC) was fully implemented and its gates A1-A4 measured
+   passing (`core/multicondition.py`, since removed) before being **withdrawn on a scope
+   decision, not a technical failure**: relating parameters across experimental conditions via a
+   named physical law is the analyst's own physics judgement, not something even an opt-in
+   candidate this software offers should decide — see the "Objectives" section above and
+   `docs/IMPACT_PLAN.md` §3 for the full reasoning and what was measured before the withdrawal.
+   **B** — `weighting="auto"` (`core/noise.py`), a noise scale σ(f) estimated from
    the spectrum itself so `--weighting` stops being a knob the target user cannot set. **Shipped
    as an explicit opt-in only, on no path a default**: gate N1 passes (a GCV-selected local
    quadratic recovers the injected noise to within 0.6–1.1x on all three `REFERENCES`), N4
@@ -727,9 +743,11 @@ static-site Web UI running the same core via WASM (Pyodide).
    the first) is done; D2 (the genetic fallback running on the user's time budget instead of a
    trigger measured twice not to fire) is not. **E** profile/bootstrap intervals for the three
    quantities the report decides on, not started. §5 lists what was considered and left out with
-   the measured reason beside each, and §8 gives the order D1 → B → A → C → E → D2. One survey
-   correction recorded there: activation energies are *in* scope (a ratio of rates needs no
-   length or area), whatever a quick reading of the geometry ban suggests.
+   the measured reason beside each, §8 gives the order D1 → B → (A, withdrawn) → C → E → D2, and
+   §3 records the reversal of an earlier survey correction that had called activation energies
+   in scope on geometry grounds alone — true as far as it went, but superseded by the scope
+   decision above that relating parameters *across conditions* is not this software's job
+   regardless of whether the resulting number needs a geometry.
 
 Update these when decisions change.
 

@@ -163,5 +163,8 @@ No console errors, and switching does not re-run the search.
   (`--spice`, and the browser's download), and a report that carries a synthesised ladder would
   duplicate that with an error target nobody chose.
 * The multi-condition fit — several sweeps at different temperature or DC bias fitted to one
-  circuit — is still the one instrument that could *break* a degeneracy, and it belongs to
-  `interpret` alone. Not started; see `docs/HANDOFF.md` §6.
+  circuit — was built and its gates measured passing (`docs/IMPACT_PLAN.md` §3), then
+  **withdrawn on a scope decision**: relating parameters across experimental conditions via a
+  named physical law is the analyst's own judgement, not a narrowing this software should offer
+  even as an opt-in candidate. See `docs/IMPACT_PLAN.md` §3 and `CLAUDE.md`'s "Objectives"
+  section for the full reasoning; not planned to be revisited without a new decision.

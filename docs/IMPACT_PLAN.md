@@ -1,9 +1,12 @@
 # Impact plan: what would move the project most, effort disregarded
 
-Status: **plan only; nothing in this document is implemented.** Written 2026-09-04 after a
-survey of every document in `docs/`, the core modules, the benchmarks and the web front end
-(the survey was delegated to three read-only subagents; what they reported is summarised in
-section 1, with one correction).
+Status: written 2026-09-04 after a survey of every document in `docs/`, the core modules, the
+benchmarks and the web front end (the survey was delegated to three read-only subagents; what
+they reported is summarised in section 1, with one correction, itself later superseded — see
+§3). **D1 and B are implemented (§6.1, §2.4). A was implemented, its gates A1-A4 measured
+passing, and then withdrawn on a scope decision (§3) — not reworded, not deleted, kept as the
+clearest record in this repository of a feature that worked and was still ruled out.** C, E and
+D2 remain plan only.
 
 The question this plan answers is not "what is cheap" but "what would change the answer a
 non-expert gets". Every item below is ranked against `CLAUDE.md`'s three purpose sentences
@@ -18,23 +21,23 @@ Five items, in order of effect:
 
 | | Item | Purpose point it serves | Section |
 |---|------|-------------------------|---------|
-| A | **Multi-condition joint fitting** (temperature or bias series fitted to one circuit, with a parametric law across conditions) | 2 — the only instrument that can *break* an equivalence class | §3 |
-| B | **A noise model estimated from the spectrum**, replacing the weighting knob's status as a user decision | 3 — a knob the target user cannot set correctly; and it is the prerequisite for A and C | §2 |
+| A | ~~**Multi-condition joint fitting**~~ — **built, gates A1-A4 measured passing, then withdrawn on a scope decision (§3)**, not a technical failure | 2 — the only instrument that can *break* an equivalence class | §3 |
+| B | **A noise model estimated from the spectrum**, replacing the weighting knob's status as a user decision | 3 — a knob the target user cannot set correctly | §2 |
 | C | **A measured-data arena** — the repository has no real spectrum in it, so every gate to date is on data generated from the model family being searched | 3 — "the same answer" has only ever been shown on synthetic data | §4 |
 | D | **The genetic fallback runs on the user's budget, not on a trigger that never fires**, and `recommended()`'s sentence says its real reason | 1 and honest reporting | §6 |
-| E | **Uncertainty beyond the linearised standard error** for the quantities the report leans on: `n_unresolved`, τ, and A's activation energies | honest reporting | §7 |
+| E | **Uncertainty beyond the linearised standard error** for the quantities the report leans on: `n_unresolved` and τ | honest reporting | §7 |
 
-Order of work is D1 → B → A → C → E → D2 (section 8). B goes before A because A compares
-chi-squared across spectra measured under different conditions, which is meaningless unless
-each spectrum's noise is on a common footing; C goes after A because C's datasets include
-temperature series, and A is what makes those worth having.
+Order of work is D1 → B → C → E → D2 (section 8); **A was built, gated and withdrawn** (§3) so
+it no longer occupies a slot in that sequence, and dropping it removes the one thing that made
+B a hard prerequisite rather than merely a good idea — B stands on its own purpose-3 argument.
 
 ## 1. What the survey found
 
 Three subagents surveyed the repository read-only. What matters from their reports:
 
-**Open items on record** (`docs/`): multi-condition fitting is named in `CLAUDE.md` and
-`docs/OBJECTIVE_PLAN.md` §8 as the one `interpret`-only extension, and is not started. The
+**Open items on record** (`docs/`): multi-condition fitting was named in `CLAUDE.md` and
+`docs/OBJECTIVE_PLAN.md` §8 as the one `interpret`-only extension; §3 below records that it was
+then built, gated and withdrawn, and both of those documents have been corrected to match. The
 Lin-KK test cannot validate a resonator and a pure-noise spectrum still passes
 (`docs/KK_RESONANCE_PLAN.md` §5). The genetic fallback's trigger, a runs test at
 `RUNS_Z_LIMIT`, was measured never to fire on forty runs (`docs/AUTOEIS_COMPARISON.md` §2.2:
@@ -58,11 +61,14 @@ decision; no multi-spectrum fit of any kind (`fit()` and `screen()` take one `Sp
 `fit.py:569`, `fit.py:713`); `Spectrum.metadata` is a free-form dict with no condition field
 (`spectrum.py:61`).
 
-**One correction to the survey.** The core-audit subagent reported activation energies as
-"out of scope per the geometry rule". That is wrong, and the plan depends on it being wrong:
-`CLAUDE.md` puts activation energies *inside* scope, because a temperature series adds only
-more spectra and an activation energy is a ratio of rates that needs no length or area. The
-geometry ban removes permittivity, conductivity and thickness; it does not remove E_a.
+**One correction to the survey, itself later superseded.** The core-audit subagent reported
+activation energies as "out of scope per the geometry rule". At the time that was called wrong,
+on the reasoning that a temperature series adds only more spectra and an activation energy is a
+ratio of rates that needs no length or area. §3.5 supersedes this a second time: the geometry
+ban is indeed not why activation energies are out of scope, but they are out of scope anyway,
+because computing one requires relating parameters *across* experimental conditions via a named
+physical law, which §3.5 argues is the analyst's judgement regardless of what the geometry rule
+says about the number itself.
 
 **Measurement infrastructure that can be reused**: `benchmarks/discovery_v2.py`'s three
 `REFERENCES` and three `LARGE_REFERENCES`, `benchmarks/six_plus/truths.py`'s nine R/C/L truths
@@ -277,9 +283,14 @@ need each other's evidence and conflating them was scope creep this revision rem
   parameters elsewhere. This is one reference, not a proof that every resonance-bearing topology
   behaves the same way, and is recorded as such rather than generalised.
 
-## 3. Item A — multi-condition joint fitting
+## 3. Item A — multi-condition joint fitting (built, gated, withdrawn)
 
-### 3.1 Why this is the highest-effect item
+**This section is kept in full rather than deleted, because the reason it is not shipped is not
+that it failed.** Every gate below was measured and passed. §3.5 is why it was withdrawn anyway,
+and it is the part worth reading before anyone reopens this question: the objection is not to
+any number here, it is to what kind of judgement this software should be making at all.
+
+### 3.1 Why this looked like the highest-effect item
 
 `CLAUDE.md` says it in one sentence: several sweeps at different temperatures or DC bias,
 fitted to one circuit simultaneously, is "the only instrument available here that can actually
@@ -300,76 +311,134 @@ its equivalent, and a temperature series decides between them. If the two energi
 both forms remain Arrhenius and the class stays unbroken — which is the negative control, and
 the report must say "still indistinguishable" in that case rather than pick.
 
-### 3.2 Design
+### 3.2 Design (as built)
 
 **Data model.** A `SpectrumSet`: an ordered collection of `Spectrum` with, per spectrum, a
 `condition` (float) and a `condition_kind` (`"temperature_K"`, `"bias_V"`, `"replicate"` or
 `"index"`). The condition is a *label the user measured alongside the sweep*; it is not
 knowledge about the part, and a run with `condition_kind="index"` is legitimate and yields
-level 1 below. Readers gain an optional condition column and the CLI an optional
-`--condition` list; the Data screen already loads several spectra and gains one column.
+level 1 below.
 
-**Level 1 — shared topology, free parameters.** `discover()` on a `SpectrumSet` searches one
-topology whose parameters are fitted independently per condition, ranked by the *summed*
-weighted chi-squared and a parameter count of `k × n_conditions`. This does not break
-degeneracy — fitting each spectrum alone and intersecting would give the same class — but it
-pools evidence for the topology: a block that carries 2% of the polarisation at one
-temperature and 20% at another (`docs/HANDOFF.md` §21 item 5 is the 2% case that is not
-recoverable alone) is recoverable from the pair. Screening cost is `n_conditions` times a
-single screen; `screen_plan()`'s batches simply carry several spectra.
+**Level 1 — shared topology, free parameters.** One topology fitted independently per
+condition, ranked by the *summed* weighted chi-squared and a parameter count of
+`k × n_conditions`. This does not break degeneracy — fitting each spectrum alone and
+intersecting would give the same class — but it pools evidence for the topology: a block whose
+share of the response is too small to see in one spectrum can still show up once a second
+condition where it carries more weight is fitted alongside it.
 
-**Level 2 — parametric laws across conditions.** Each parameter is assigned one of three
-statuses: *shared* (one value across conditions), *free* (one per condition), or *lawful*
-(`x(T) = x0 · exp(E_a / k_B T)` for temperature; a polynomial in V for bias, degree chosen the
-same way). The assignment is **not asked of the user**: for each topology on the front, the
-assignment is chosen by BIC over a lattice that is small because it is per parameter *class*
-rather than per parameter — all R-type parameters take one status, all C/L-type another, CPE
-exponents a third — which is 3³ = 27 assignments per topology, each a joint fit. That is the
-"expensive by design" part of this plan, and it is confined to the tier-2 shortlist, never
-tier 1.
+**Level 2 — parametric laws across conditions.** Each parameter *class* — resistive, reactive,
+or everything else — is assigned one of three statuses: *shared* (one value across
+conditions), *free* (one per condition), or *lawful* (an Arrhenius law across temperature). The
+assignment is chosen by BIC over a lattice that is per parameter *class* rather than per
+parameter (at most `3³ = 27` assignments per topology), each a genuine joint least-squares fit.
 
-**What it reports.** Under `interpret`: per lawful parameter, `E_a` with a standard error
-propagated through `log_covariance` the way `tau` already is; which equivalence-class members
-the series *separated* and by how many BIC points; which remain indistinguishable; and an
-Arrhenius table (ln x against 1/T) for the DRT-side peaks, which are invariant. Under `model`:
-one subcircuit per condition and nothing about energies, because it buys `model` nothing.
+**What it would have reported**, had this shipped: under `interpret`, per lawful parameter an
+activation energy with a standard error, which equivalence-class members a temperature series
+*separated* and by how many BIC points, and which remain indistinguishable. This report was
+never built (§3.5 explains it does not need to be, now).
 
-**The invariant it must not break.** The objective still never reaches a number. The joint fit
-is triggered by the *data* having several conditions, not by the objective; both objectives on
-the same `SpectrumSet` produce a byte-identical `DiscoveryResult`, and `benchmarks/o1_objective.py`
-extends to a `SpectrumSet` input to say so.
+### 3.3 Gates — all measured, all passing
 
-### 3.3 Gates
+Implemented as `core/spectrum.py`'s `SpectrumSet` and a new `core/multicondition.py`
+(`discover_set` for level 1, `fit_joint`/`select_level2` for level 2), both since removed along
+with their tests and benchmark (`git revert` of the commit that added them; the revert is the
+only trace left in the repository's history, this section is the trace kept in its documentation).
 
-- **A1 (the degeneracy breaks when it should):** `R1-p(R2,C1)` simulated at five temperatures
-  between 300 K and 400 K with `E_a(R1) = 0.3 eV`, `E_a(R2) = 0.8 eV`, C1 shared, 1% noise, ten
-  seeds. Level 2 on the pair of forms must rank the true form ahead of its equivalent by more
-  than 10 BIC points on 9 of 10 seeds, and the report's class line must say which form the
-  series selected.
-- **A2 (and does not when it should not):** the same with `E_a(R1) = E_a(R2)`. The two forms
-  must be reported as **still equivalent** — same score to within the class tolerance — on 10
-  of 10 seeds. A plan that passes A1 and fails A2 has built a machine that picks a form the
-  data cannot support, which is worse than what exists now, and ships nothing.
-- **A3 (energies are recovered):** on A1's data, `E_a` for each resistance within 3 standard
-  errors of the generating value on 9 of 10 seeds, and the standard error itself within a
-  factor of 2 of the seed-to-seed scatter (the calibration item E measures more generally).
-- **A4 (level 1 pools evidence):** `p(R1,C1)-p(R2,C2)` at the 100/5000 Ω split that
-  `docs/HANDOFF.md` §21 records as unrecoverable from one spectrum, simulated at two
-  temperatures chosen so the small block's share rises to 20% at the second. Level 1 must
-  report the two-block truth on the front where single-spectrum discovery on either sweep alone
-  does not. If a two-temperature pair does not do it, the gate records the number of
-  temperatures that does, and if none under ten does, the section's level 1 claim is withdrawn.
-- **A5 (O1 still holds):** byte-identical `DiscoveryResult` under both objectives on a
-  `SpectrumSet`, structural half included — `discover()` and `fit()` still import nothing from
-  the reporting layer.
+- **A1 (the degeneracy breaks when it should) — PASS, 10/10 seeds.** `R1-p(R2,C1)` simulated at
+  five temperatures 300-400 K with `Ea(R1) = 0.3 eV`, `Ea(R2) = 0.8 eV`, C1 shared, 1% noise.
+  Level 2 ranked the true form ahead of its exact equivalent `p(R1,C1-R2)` by 43.1-61.3 BIC
+  points on all ten seeds (bar: > 10), always via the assignment
+  `{"resistive": "lawful", "reactive": "shared"}` against the equivalent's best-available
+  `{"resistive": "free", "reactive": "free"}` — the equivalent's transformed resistances
+  (`R1' = R1+R2`, `R2' = R1(R1+R2)/R2`) are sums of two exponentials and cannot be fitted by a
+  single Arrhenius law when the two source energies differ.
+- **A2 (and does not when it should not) — PASS, 10/10 seeds.** The same scenario with
+  `Ea(R1) = Ea(R2) = 0.3 eV`. `|BIC gap|` stayed under 1.4 points on all ten seeds
+  (0.000-1.327), far inside the 10-point band A1 uses to call a separation real.
+- **A3 (energies are recovered) — PASS, 10/10 seeds.** On A1's data, both `Ea` estimates landed
+  within 3 standard errors of truth on every seed (`Ea(R1)` to 0.2998-0.3003, stderr ~0.0001;
+  `Ea(R2)` to 0.7987-0.8012, stderr ~0.0010-0.0011), and the calibration check held: seed-to-seed
+  scatter over the ten runs was 1.47x the mean reported stderr for `Ea(R1)` and 0.87x for
+  `Ea(R2)`, both inside the factor-of-2 band set in advance.
+- **A4 (level 1 pools evidence) — PASS at 2 conditions, on a recalibrated scenario.** The plan's
+  first design (a 100 Ω / 5000 Ω split, share 2% to 20%) turned out to be a trivial pass once
+  investigated: 20% share alone was already enough for single-spectrum discovery to recommend
+  the truth's equivalence class, so pooling with the 2% spectrum was shown to hurt nothing but
+  not shown to help — and the naive "is the truth's own topology string on the front" check
+  first read `False` even at 20% share, because an exact equivalence-class tie under a
+  *different* topology string (`p(p(R1,C1)-R2,C2)`) occupied the literal slot, the same
+  literal-string-match trap `docs/HANDOFF.md` warns about. Both were fixed: the check was
+  rewritten to use the search's own `equivalents_of()`, and the scenario was rebuilt around two
+  shares (2%, 5%) that both fail *individually* (single-spectrum `discover()` recommends the
+  reduced 2-element `p(R1,C1)` model at either alone) so that the pooled result — the exact
+  4-element truth, recommended once both spectra are fitted together — is attributable to
+  pooling rather than to one condition already being sufficient.
+- **A5 (O1 still holds) — not run.** No `SpectrumSet`-aware objective report was ever built
+  (nothing to fingerprint for byte-identity); the structural half of the invariant (no
+  `Objective` parameter anywhere in the module) held by inspection.
 
-### 3.4 What this does not claim
+### 3.4 What this would not have claimed, even had it shipped
 
-It does not break a degeneracy that temperature does not touch: two forms whose parameters all
-share one energy stay a class, and the report says so. It does not identify *which* mechanism
-an energy belongs to — 0.8 eV is reported as a number, not as "grain boundary", because that
-step is the expert judgement `CLAUDE.md` point 3 exists to remove and this software does not
-know what kind of part it has.
+It would not have broken a degeneracy that temperature does not touch: two forms whose
+parameters all share one energy stay a class. It would not have identified *which* mechanism an
+energy belongs to — 0.8 eV is a number, not "grain boundary" — because naming the mechanism is
+exactly the expert judgement `CLAUDE.md` point 3 exists to remove.
+
+### 3.5 Why this was withdrawn despite passing every gate
+
+**Passing A1-A4 answers "does the mechanism work", not "should this software be the one doing
+it".** On review, the answer to the second question is no, for a reason distinct from every
+other rejection in this document (§5's rejections are all "it does not work" or "it is not
+worth the cost"; this one is "it works, and it is still the wrong thing to build"):
+
+A temperature or a bias voltage is an experimental condition, not a value `Z(f)` contains —
+unlike `pool` and `skeleton`, which narrow *which circuit elements* a search may use while
+leaving every physical reading of the result to the analyst, level 2's `"lawful"` status asks
+the software to decide *which law of nature* governs how the part's parameters move with that
+condition (Arrhenius, here, chosen because `CLAUDE.md` named it — never Vogel-Tammann-Fulcher,
+a power law, or "none, because the two conditions probe different physics"). Offering that
+choice as a BIC-selected candidate rather than forcing it does not remove the judgement, it only
+launders it: a non-expert reading a report that says "Ea(R1) = 0.3 eV, lawful" has been handed a
+physical interpretation this software chose to test in the first place, on the analyst's data,
+without being asked whether Arrhenius was ever the right family to test. That is a narrower
+version of exactly the thing `CLAUDE.md`'s consequence "the software must not ask what kind of
+part this is" already rules out for topology — extended here to *temperature response*, which
+the original design of this item did not recognise as the same kind of question.
+
+The corollary is where this software's job actually stops: producing the per-condition circuit
+and its parameters (which `fit()`/`discover()` already do, one call per spectrum, with no
+change needed) is in scope: relating those parameters *across* conditions via a named physical
+mechanism is not, the same way permittivity and conductivity are out of scope even though they
+would be a one-line calculation from a fitted capacitance if geometry were supplied. An analyst
+who wants the Arrhenius plot can already get everything they need from this software's existing
+per-spectrum output; drawing the conclusion is theirs to do, in whatever tool and with whatever
+physical law they judge appropriate for their part.
+
+**What survives, and what would need to be true before this is reopened.** The technical
+result — a joint least-squares engine with a correct Arrhenius reparameterisation, a
+parameter-class lattice selected by BIC, and level 1's evidence-pooling argument for *topology*
+alone (§3.3, A4) — is not itself in question, and §3.6 records the one real numerical bug it
+surfaced so it is not rediscovered by a future attempt. What would need to change is not a
+number: it would be a reason this software should make a physical-law judgement it does not
+make anywhere else, which nothing in this session's discussion supplied.
+
+### 3.6 A numerical bug the gates caught before any of them passed
+
+The first working version of the Arrhenius law used the textbook form,
+`x(T) = x0 · exp(Ea/(kB·T))`, with `x0` bounded the same way a `"shared"`/`"free"` parameter is
+(the data-derived per-parameter interval already used elsewhere). On A3's own scenario
+(`Ea(R2) = 0.8 eV`) this put the true `x0` at ~1.06e-10 Ω — because `exp(0.8/(kB·300 K)) ~
+2.8e13` while the *observed* R2 is a few thousand ohms, so the `T -> infinity` prefactor is many
+orders of magnitude smaller — which sits below the resistor element's own hard lower bound of
+1e-9 Ω. The optimizer could not reach it at any starting point: a direct comparison on one seed
+gave `chi2_reduced ~ 1244` for `"lawful"` against `~1.28` for `"free"` on identical data, and the
+lattice search consequently never chose `"lawful"` even though the data was generated by exactly
+that law. The fix was a different parameterisation, not a wider bound (a wider bound only moves
+the same problem to a different activation energy): anchoring the law at the *first observed
+condition's own temperature* — `x(T) = x_ref · exp(Ea · (1/(kB·T) − 1/(kB·T_ref)))` — keeps the
+fitted reference value inside the bounds `"shared"`/`"free"` already use, because it *is* one of
+the values either status would report. The same seed then recovered `chi2_reduced ~ 1.27`
+(matching `"free"`) with `Ea` accurate to four decimal places.
 
 ## 4. Item C — a measured-data arena
 
@@ -397,10 +466,9 @@ Collect a set of publicly available measured spectra with licence and citation r
 beside each — the candidates to verify are the example data shipped with `impedance.py`,
 DearEIS and pyimpspec, Zenodo battery EIS releases, and the vendor sample files Gamry and
 BioLogic publish for their formats. Each dataset carries: the instrument and its format, the
-published circuit *if the source fitted one* (as a reference, never as a truth), the
-temperature or bias if it is a series, and the reason it is in the arena (which of §4.1's
-artefacts it exhibits). Ten to twenty datasets, at least three of them temperature series so
-that item A has something real to run on, and at least two from the ceramic literature because
+published circuit *if the source fitted one* (as a reference, never as a truth), and the reason
+it is in the arena (which of §4.1's artefacts it exhibits). Ten to twenty datasets, and at
+least two from the ceramic literature because
 that is the use case named in `CLAUDE.md`.
 
 Because there is no truth, the gates are stability gates, and each is written so it can fail:
@@ -456,11 +524,16 @@ schedules.
 - **Pyodide cold start, offline, `file://`.** Closed by measurement in
   `docs/STARTUP_AND_EDITING_PLAN.md` §8.3 and `docs/WEB_UI_PLAN.md` §2.8; not purpose items.
 - **Permittivity, conductivity, thickness, "what kind of part is this".** Out of scope by
-  decision, `CLAUDE.md`, and this plan adds nothing that needs them: a temperature is a label
-  on a sweep, not a property of the part.
+  decision, `CLAUDE.md`, and this plan adds nothing that needs them.
 - **A Maxwell-Wagner named template.** The topology falls out of the grammar and
-  `p(R1,C1)-p(R2,C2)` is already a reference; the dielectric-oriented readouts it would carry
-  are item A's E_a and `interpret.py`'s existing per-block quantities. Nothing separate to build.
+  `p(R1,C1)-p(R2,C2)` is already a reference; `interpret.py`'s existing per-block quantities
+  already read it. Nothing separate to build.
+- **Multi-condition joint fitting (activation energies across a temperature or bias series).**
+  Built and gated (§3, A1-A4 all passing), then withdrawn: relating parameters across
+  experimental conditions via a named physical law is the analyst's own judgement to make
+  outside this software, not a narrowing this software should offer even as an opt-in candidate
+  — see §3.5 for the full argument, which is the one rejection in this list based on what kind
+  of judgement the software should make rather than on a measurement of whether it works.
 
 ## 6. Item D — the fallback runs on the budget, and `recommended()` tells the truth
 
@@ -505,13 +578,13 @@ complete. Gate **D2b**: with no time limit, `ev5_fingerprint.py` is byte-identic
 ## 7. Item E — uncertainty the report can stand on
 
 The standard errors come from a linearised covariance at the optimum, scaled by
-`chi2_reduced`. Three quantities are reported to a non-expert on that basis and each is used
-to *decide* something: `n_unresolved` (which decides `recommended`), `tau` and its
-`sigma_tau` (the `interpret` headline), and, after item A, `E_a`. For a CPE exponent near its
-bound or a pair of strongly correlated parameters, a linearised interval is known to be wrong
-in the direction of over-confidence.
+`chi2_reduced`. Two quantities are reported to a non-expert on that basis and each is used
+to *decide* something: `n_unresolved` (which decides `recommended`) and `tau` with its
+`sigma_tau` (the `interpret` headline). (`E_a` would have been a third had item A shipped;
+it did not — see §3.5.) For a CPE exponent near its bound or a pair of strongly correlated
+parameters, a linearised interval is known to be wrong in the direction of over-confidence.
 
-Design: profile likelihood on the tier-2 shortlist for the parameters that feed those three
+Design: profile likelihood on the tier-2 shortlist for the parameters that feed those two
 quantities, and a parametric bootstrap — the one X3 already measured as calibrated to within
 one event of its 5% target — for the derived quantities. Both stay in the reporting layer;
 `recommended` reads `n_unresolved` from whichever interval the gate below picks.
@@ -524,12 +597,13 @@ interval covers 90–98% on the same draws and `recommended` on the 37-cell tabl
 
 ## 8. Order of work, and why
 
-1. **D1**, because it is a sentence that is wrong today and costs nothing to fix.
-2. **B**, because A and C both need a σ(f) that comes from the data, and because it is the
-   only item that changes what a single-spectrum user gets.
-3. **A**, the highest-effect item, on synthetic series first (A1–A5).
-4. **C**, so that A has real series to run on and the readers have real files.
-5. **E**, once A has added `E_a` to the list of numbers that need an interval.
+1. **D1**, because it is a sentence that is wrong today and costs nothing to fix. **Done.**
+2. **B**, because it is the item that changes what a single-spectrum user gets. **Done, opt-in
+   only.**
+3. ~~**A**~~ — built and gated (§3), then withdrawn on a scope decision (§3.5); no longer part
+   of this sequence.
+4. **C**, so the readers have real files and the pipeline has a spectrum it did not generate.
+5. **E**, uncertainty beyond the linearised standard error for `n_unresolved` and τ.
 6. **D2**, last, because its one new measurement needs B and its budget semantics are
    independent of everything else.
 
@@ -542,7 +616,7 @@ rather than reworded.
 | Area | Files |
 |------|-------|
 | Noise model (B) | `core/weighting.py` (new `"auto"`), a new `core/noise.py`, `core/validate.py` (expose per-point KK residual), `core/spectrum.py` (`sigma_re`, `sigma_im` fields), `cli/main.py`, `web/bridge.py`, the Data screen's `KKPanel.tsx` |
-| Multi-condition (A) | `core/spectrum.py` (`SpectrumSet`), `core/fit.py` (joint residual and Jacobian), `core/discover.py` (`screen_plan` over a set; level 2 lattice on the shortlist), `core/interpret.py` (`E_a`, series-separated class line), `core/objective.py`, readers in `io/`, `cli/main.py`, `web/bridge.py`, `DataScreen.tsx`, `ReportScreen.tsx` |
+| Multi-condition (A) | **Withdrawn (§3.5); nothing to touch.** Was `core/spectrum.py` (`SpectrumSet`) and a new `core/multicondition.py`, both built, gated and removed by `git revert` -- see §3.3's note on where the trace of that work now lives. |
 | Measured arena (C) | `benchmarks/measured/` (new), `io/gamry.py`, `io/biologic.py` (new), `web/public/samples/` |
 | Fallback and sentence (D) | `core/discover.py` (`recommended`, `_evolve` budget), `core/objective.py`, `SearchPanel.tsx` |
 | Uncertainty (E) | `core/stats.py`, `core/interpret.py`, `benchmarks/fitting.py` |
