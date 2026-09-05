@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -157,4 +157,57 @@ class Spectrum:
         return (
             f"Spectrum(n={self.n}, f={self.f[0]:.4g}..{self.f[-1]:.4g} Hz, "
             f"|Z|={np.abs(self.z).min():.4g}..{np.abs(self.z).max():.4g} ohm)"
+        )
+
+
+#: What a :class:`SpectrumSet`'s conditions are *of*. ``"index"`` is a legitimate choice, not a
+#: placeholder: a caller who fitted several sweeps with no known ordering label still gets
+#: level 1's pooled-evidence benefit (``CLAUDE.md``'s multi-condition extension), just not a
+#: parametric law across conditions, which only ``"temperature_K"`` supports today (see
+#: ``autocircuit.core.multicondition``).
+ConditionKind = Literal["temperature_K", "bias_V", "replicate", "index"]
+
+
+@dataclass(frozen=True)
+class SpectrumSet:
+    """Several spectra of the same part, each taken under a different labelled condition.
+
+    ``condition`` is a label the user measured *alongside* the sweep -- a temperature, a bias
+    voltage, a replicate index -- never a property of the part inferred from the data, which
+    would violate the spectrum-only rule ``CLAUDE.md`` states for a single :class:`Spectrum`.
+    Labelling one sweep is not knowledge about what is inside the part; it is what lets several
+    sweeps be fitted as one instrument instead of several independent ones
+    (``docs/IMPACT_PLAN.md`` section 3).
+    """
+
+    spectra: tuple[Spectrum, ...]
+    conditions: tuple[float, ...]
+    condition_kind: ConditionKind = "index"
+
+    def __post_init__(self) -> None:
+        spectra = tuple(self.spectra)
+        conditions = tuple(float(c) for c in self.conditions)
+        if len(spectra) == 0:
+            raise ValueError("a SpectrumSet needs at least one spectrum")
+        if len(spectra) != len(conditions):
+            raise ValueError(
+                f"{len(spectra)} spectra but {len(conditions)} conditions: must match 1:1"
+            )
+        if not all(math.isfinite(c) for c in conditions):
+            raise ValueError("conditions must be finite")
+        object.__setattr__(self, "spectra", spectra)
+        object.__setattr__(self, "conditions", conditions)
+
+    @property
+    def n_conditions(self) -> int:
+        return len(self.spectra)
+
+    def __len__(self) -> int:
+        return self.n_conditions
+
+    def __repr__(self) -> str:
+        return (
+            f"SpectrumSet(n_conditions={self.n_conditions}, "
+            f"condition_kind={self.condition_kind!r}, "
+            f"conditions={self.conditions})"
         )

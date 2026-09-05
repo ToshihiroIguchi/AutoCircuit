@@ -700,12 +700,34 @@ static-site Web UI running the same core via WASM (Pyodide).
    Discover screen's placeholder default, `METRICS_AND_UX_PLAN.md` §2.6, `README.md`).
 
 20. `docs/IMPACT_PLAN.md` — what would move the project most with effort disregarded, ranked
-   against the three purpose points. Five items in order of effect, **D1 and B implemented, the
-   rest still plan only.** **A** multi-condition joint fitting (a temperature or bias series
-   fitted to one circuit with a per-parameter-class Arrhenius/shared/free law chosen by BIC,
-   never by the user — the one instrument `CLAUDE.md` names as able to *break* an equivalence
-   class, with a negative-control gate A2 that must report "still equivalent" when the energies
-   are equal); **B** — `weighting="auto"` (`core/noise.py`), a noise scale σ(f) estimated from
+   against the three purpose points. Five items in order of effect, **D1, B and A's core
+   implemented; C, E and D2 still plan only.** **A** multi-condition joint fitting
+   (`core/spectrum.py`'s `SpectrumSet`, `core/multicondition.py`): one topology fitted
+   independently per condition and ranked by pooled evidence (level 1, `discover_set()`), and a
+   per-parameter-class Arrhenius/shared/free law chosen by BIC over a lattice never seen by the
+   user (level 2, `fit_joint()`/`select_level2()`) — the one instrument `CLAUDE.md` names as able
+   to *break* an equivalence class. **Gates A1-A4 measured and passing** (A1 separates
+   `R1-p(R2,C1)` from its exact equivalent `p(R1,C1-R2)` by 43-61 BIC points on 10/10 seeds when
+   the two resistances' activation energies genuinely differ; A2, the negative control, keeps
+   them one class within 1.4 BIC points on 10/10 seeds when the energies are equal; A3 recovers
+   both energies to four decimal places with a calibrated standard error; A4 shows level 1
+   recommending the true two-block topology from two spectra where single-spectrum discovery
+   recommends a simpler model from *either* alone). **A5 (the objective-invariance gate) is
+   deferred**, because no report renders a `SpectrumSet` result yet, so there is nothing to
+   fingerprint. §3.6 is the one bug worth not re-introducing: the first `fit_joint` used the
+   textbook `x(T) = x0·exp(Ea/kT)` law, and for an ordinary sub-1-eV activation energy that
+   `T→∞` prefactor lands orders of magnitude below the resistor's own hard bound — measured as a
+   joint fit landing 1000x worse than the equivalent all-free fit on identical data, and fixed by
+   anchoring the law at the first condition's own temperature instead. §3.7 is why gate A4's
+   scenario needed recalibrating twice: the plan's original 2%-to-20%-share design turned out to
+   already be recoverable from the 20% spectrum alone (a false "pooling helped" reading a
+   literal-canonical-form check nearly missed, because the actual competitor was an exact
+   equivalence-class tie under a different topology string — caught by switching the check to
+   the search's own `equivalents_of()`), so the shipped scenario uses two shares (2%, 5%) that
+   both fail alone. CLI/web wiring, `interpret.py`'s report of `Ea`, the bias-voltage polynomial
+   law, and wiring level 2 into `discover_set()`'s own front are all deferred with the reason
+   stated in §3.5, none of them blocking a gate. **B** — `weighting="auto"` (`core/noise.py`), a
+   noise scale σ(f) estimated from
    the spectrum itself so `--weighting` stops being a knob the target user cannot set. **Shipped
    as an explicit opt-in only, on no path a default**: gate N1 passes (a GCV-selected local
    quadratic recovers the injected noise to within 0.6–1.1x on all three `REFERENCES`), N4

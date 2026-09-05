@@ -279,6 +279,14 @@ need each other's evidence and conflating them was scope creep this revision rem
 
 ## 3. Item A — multi-condition joint fitting
 
+**Status: implemented in the core (`core/spectrum.py`'s `SpectrumSet`, `core/multicondition.py`);
+gates A1-A4 measured and passing. A5 is deferred** — there is no objective-consuming report for
+a `SpectrumSet` result yet (§3.5), so the invariant it would check has nothing to run against.
+CLI, web and `interpret.py` wiring are not started (§3.5 says exactly what is left and why
+none of it blocks the gates above). §3.6 records a numerical bug this section's own gates
+caught and fixed before any of the four passed, and §3.7 records why gate A4's scenario needed
+two rounds of recalibration before it measured what it claims to.
+
 ### 3.1 Why this is the highest-effect item
 
 `CLAUDE.md` says it in one sentence: several sweeps at different temperatures or DC bias,
@@ -293,6 +301,11 @@ The mechanism is arithmetic, not hope. The exact correspondence between those tw
 
     R1' = R1 + R2        R2' = R1(R1+R2)/R2        C1' = R2^2 C1 / (R1+R2)^2
 
+**[measured]** `benchmarks/multi_condition.py`'s `_verify_equivalence_transform` checks this
+numerically at every run (worst relative gap 2.0e-16 on a 25-point sweep from 1 Hz to 1 MHz)
+rather than only citing `docs/HANDOFF.md`, because gates A1-A3 below depend on the identity
+being exact, not merely close.
+
 If R1 and R2 are each Arrhenius in temperature with *different* activation energies, then R1'
 is a sum of two exponentials and is not Arrhenius, and neither is R2'. A model that says
 "every resistance follows one Arrhenius law" is therefore satisfiable by one form and not by
@@ -302,66 +315,115 @@ the report must say "still indistinguishable" in that case rather than pick.
 
 ### 3.2 Design
 
-**Data model.** A `SpectrumSet`: an ordered collection of `Spectrum` with, per spectrum, a
-`condition` (float) and a `condition_kind` (`"temperature_K"`, `"bias_V"`, `"replicate"` or
-`"index"`). The condition is a *label the user measured alongside the sweep*; it is not
-knowledge about the part, and a run with `condition_kind="index"` is legitimate and yields
-level 1 below. Readers gain an optional condition column and the CLI an optional
-`--condition` list; the Data screen already loads several spectra and gains one column.
+**Data model — implemented as designed.** `SpectrumSet` (`core/spectrum.py`): an ordered
+`tuple[Spectrum, ...]` with a matching `tuple[float, ...]` of conditions and one
+`condition_kind` (`"temperature_K"`, `"bias_V"`, `"replicate"` or `"index"`) for the whole set.
+The condition is a *label the user measured alongside the sweep*; it is not knowledge about the
+part, and `condition_kind="index"` is legitimate and yields level 1 below. **Not yet done**:
+readers gaining an optional condition column, the CLI's `--condition` list, and the Data
+screen's extra column — nothing in gates A1-A4 needs them, since the benchmark builds
+`SpectrumSet`s directly from simulated data.
 
-**Level 1 — shared topology, free parameters.** `discover()` on a `SpectrumSet` searches one
-topology whose parameters are fitted independently per condition, ranked by the *summed*
-weighted chi-squared and a parameter count of `k × n_conditions`. This does not break
-degeneracy — fitting each spectrum alone and intersecting would give the same class — but it
-pools evidence for the topology: a block that carries 2% of the polarisation at one
-temperature and 20% at another (`docs/HANDOFF.md` §21 item 5 is the 2% case that is not
-recoverable alone) is recoverable from the pair. Screening cost is `n_conditions` times a
-single screen; `screen_plan()`'s batches simply carry several spectra.
+**Level 1 — shared topology, free parameters — implemented as `discover_set()`
+(`core/multicondition.py`), gate A4 measured.** One topology, fitted *independently* to every
+condition, ranked by the *summed* weighted chi-squared and a parameter count of
+`k × n_conditions` via `information_criteria`. This does not break degeneracy — fitting each
+spectrum alone and intersecting would give the same class — but it pools evidence for the
+topology (§3.3, A4). Because a level 1 residual has no cross-condition coupling (a free
+parameter in one condition never appears in another condition's residual), the pooled fit is
+computed exactly from `n_conditions` independent single-spectrum `fit()`/`screen()` calls
+rather than through a genuine joint optimizer — level 2 below is where a joint problem is
+actually needed. **Narrower than the design's original wording**: `discover_set()` reuses
+`enumerate_candidates()` for the candidate list (so its feasibility filter and pool defaults
+are unchanged) but is exhaustive-only — no genetic fallback, no growth stage, no `--pool auto`
+widening from the spectrum's shape — because none of gates A1-A5 needs them and adding either
+is a project of `EVOLVE_SEARCH_PLAN.md`/`TOPOLOGY_6PLUS_PLAN.md` scale on its own. See §3.5.
 
-**Level 2 — parametric laws across conditions.** Each parameter is assigned one of three
-statuses: *shared* (one value across conditions), *free* (one per condition), or *lawful*
-(`x(T) = x0 · exp(E_a / k_B T)` for temperature; a polynomial in V for bias, degree chosen the
-same way). The assignment is **not asked of the user**: for each topology on the front, the
-assignment is chosen by BIC over a lattice that is small because it is per parameter *class*
-rather than per parameter — all R-type parameters take one status, all C/L-type another, CPE
-exponents a third — which is 3³ = 27 assignments per topology, each a joint fit. That is the
-"expensive by design" part of this plan, and it is confined to the tier-2 shortlist, never
-tier 1.
+**Level 2 — parametric laws across conditions — implemented as `fit_joint()` /
+`select_level2()`, gates A1-A3 measured.** Each parameter *class* present in a circuit —
+resistive (unit `ohm`), reactive (`F` or `H`), or everything else (CPE exponents, Warburg
+coefficients, ...; `CLAUDE.md`'s "all R-type... all C/L-type... CPE exponents" is generalised
+this way because the vocabulary has more than four elements) — is assigned one status: *shared*
+(one value for every condition), *free* (one per condition, level 1's own assumption), or
+*lawful*. `select_level2()` tries every assignment over the classes a topology actually has
+(so the lattice is `3^(number of classes present)`, at most 27, never per-parameter) and keeps
+the lowest BIC, via one real joint least-squares problem per assignment
+(`scipy.optimize.least_squares` on a residual that concatenates every condition, since a
+shared or lawful parameter appears in more than one condition's residual at once). This is
+confined to whatever calls `select_level2()` explicitly — **not yet wired into `discover_set()`
+itself** (running it on every Pareto row during discovery, which the original design
+implied, is deferred; see §3.5).
 
-**What it reports.** Under `interpret`: per lawful parameter, `E_a` with a standard error
-propagated through `log_covariance` the way `tau` already is; which equivalence-class members
-the series *separated* and by how many BIC points; which remain indistinguishable; and an
-Arrhenius table (ln x against 1/T) for the DRT-side peaks, which are invariant. Under `model`:
-one subcircuit per condition and nothing about energies, because it buys `model` nothing.
+The lawful law actually shipped is **`x(T) = x_ref · exp(Ea · (1/(kB·T) − 1/(kB·T_ref)))`**,
+anchored at the *first condition's own temperature* rather than the textbook
+`x(T) = x0 · exp(Ea/(kB·T))` this section originally specified. §3.6 is why: the textbook form's
+`x0` is a `T → ∞` extrapolation that, for an ordinary sub-1-eV activation energy, lands many
+orders of magnitude outside the element's own hard physical bound and makes the true value
+structurally unreachable — measured, not guessed, as a joint fit landing 1000x worse than the
+equivalent `"free"` fit on the same data. Anchoring at an observed condition instead keeps the
+fitted reference value inside the same bounds `"shared"`/`"free"` already use. One consequence
+worth stating because the original design assumed otherwise: **`Ea`'s standard error needs no
+propagation through `log_covariance`** the way `tau` does, because it is a first-class search
+variable in the joint parameterisation and `compute_statistics` differentiates through it
+directly, exactly as it does for every other fitted parameter.
 
-**The invariant it must not break.** The objective still never reaches a number. The joint fit
-is triggered by the *data* having several conditions, not by the objective; both objectives on
-the same `SpectrumSet` produce a byte-identical `DiscoveryResult`, and `benchmarks/o1_objective.py`
-extends to a `SpectrumSet` input to say so.
+**A polynomial-in-bias law for `condition_kind="bias_V"` is not implemented.** No gate in this
+plan exercises it, and `fit_joint`/`select_level2` raise `ValueError` naming the omission for
+any `"lawful"` status requested on a non-`"temperature_K"` set, rather than silently guessing a
+degree.
+
+**What it reports — not yet built.** `interpret.py` does not yet render `Ea`, the
+class-separation line, or an Arrhenius table for a `SpectrumSet` result; `JointFitResult` (the
+object `fit_joint`/`select_level2` return) carries every number the report would need
+(`laws: dict[str, LawFit]`, each with `ea_ev`/`ea_stderr`/`t_ref`/`x_ref`), but nothing renders
+it into `ObjectiveReport` yet. This is why gate A5 is deferred rather than measured (§3.3).
+
+**The invariant it must not break.** The objective still never reaches a number:
+`fit_joint`, `select_level2` and `discover_set` take no `Objective` and import nothing from
+`.objective`. Once a `SpectrumSet`-aware report exists this becomes gate A5's byte-identity
+check; today it is a structural fact about the module rather than a measured gate.
 
 ### 3.3 Gates
 
-- **A1 (the degeneracy breaks when it should):** `R1-p(R2,C1)` simulated at five temperatures
-  between 300 K and 400 K with `E_a(R1) = 0.3 eV`, `E_a(R2) = 0.8 eV`, C1 shared, 1% noise, ten
-  seeds. Level 2 on the pair of forms must rank the true form ahead of its equivalent by more
-  than 10 BIC points on 9 of 10 seeds, and the report's class line must say which form the
-  series selected.
-- **A2 (and does not when it should not):** the same with `E_a(R1) = E_a(R2)`. The two forms
-  must be reported as **still equivalent** — same score to within the class tolerance — on 10
-  of 10 seeds. A plan that passes A1 and fails A2 has built a machine that picks a form the
-  data cannot support, which is worse than what exists now, and ships nothing.
-- **A3 (energies are recovered):** on A1's data, `E_a` for each resistance within 3 standard
-  errors of the generating value on 9 of 10 seeds, and the standard error itself within a
-  factor of 2 of the seed-to-seed scatter (the calibration item E measures more generally).
-- **A4 (level 1 pools evidence):** `p(R1,C1)-p(R2,C2)` at the 100/5000 Ω split that
-  `docs/HANDOFF.md` §21 records as unrecoverable from one spectrum, simulated at two
-  temperatures chosen so the small block's share rises to 20% at the second. Level 1 must
-  report the two-block truth on the front where single-spectrum discovery on either sweep alone
-  does not. If a two-temperature pair does not do it, the gate records the number of
-  temperatures that does, and if none under ten does, the section's level 1 claim is withdrawn.
-- **A5 (O1 still holds):** byte-identical `DiscoveryResult` under both objectives on a
-  `SpectrumSet`, structural half included — `discover()` and `fit()` still import nothing from
-  the reporting layer.
+- **A1 (the degeneracy breaks when it should) — [measured] PASS, 10/10.** `R1-p(R2,C1)`
+  simulated at five temperatures 300-400 K with `Ea(R1) = 0.3 eV`, `Ea(R2) = 0.8 eV`, C1 shared,
+  1% noise, ten seeds (`benchmarks/multi_condition.py::run_a1`). `select_level2` on the pair of
+  forms ranked `R1-p(R2,C1)` ahead of `p(R1,C1-R2)` by 43.1-61.3 BIC points on all ten seeds,
+  every one well past the 10-point bar, and on every seed the winning assignment was exactly
+  `{"resistive": "lawful", "reactive": "shared"}` against the loser's best-available
+  `{"resistive": "free", "reactive": "free"}` (a lawful law is not expressible on `p(R1,C1-R2)`
+  because the algebra that maps `Ea(R1) != Ea(R2)` there is a sum of two exponentials, not one).
+  The narrower claim actually met: which form the pair *scores* as separated, via `LawFit`'s
+  fields; the report sentence itself is not written yet (§3.2's "not yet built").
+- **A2 (and does not when it should not) — [measured] PASS, 10/10.** The same scenario with
+  `Ea(R1) = Ea(R2) = 0.3 eV` (`run_a2`). `|BIC gap|` stayed under 1.4 points on all ten seeds
+  (0.000-1.327), far inside the 10-point band A1 uses to call a separation real. A plan that
+  passed A1 and failed this would have built a machine that picks a form the data cannot
+  support, which is worse than what existed before this item; it did not happen.
+- **A3 (energies are recovered) — [measured] PASS, 10/10.** On A1's data, both `Ea` estimates
+  landed within 3 standard errors of truth on all ten seeds (`Ea(R1)` reported to
+  0.2998-0.3003 against a stderr of ~0.0001; `Ea(R2)` to 0.7987-0.8012 against ~0.0010-0.0011),
+  and the calibration check held on both: seed-to-seed scatter over the ten runs was 1.47x the
+  mean reported stderr for `Ea(R1)` and 0.87x for `Ea(R2)`, both inside the factor-of-2 band the
+  gate's decision rule set in advance.
+- **A4 (level 1 pools evidence) — [measured] PASS at 2 conditions, on a recalibrated scenario;
+  see §3.7 for why the plan's original 100 Ω / 5000 Ω, 2%-to-20% design was too easy to be a
+  real test of pooling.** `p(R1,C1)-p(R2,C2)` with `R2 = 5000`, the small block's share at 2.0%
+  (`R1 = 102.04`) and 5.0% (`R1 = 263.16`): single-spectrum `discover()` recommends a
+  simpler 2-element circuit at *both* shares individually (`p(R1,C1)`, i.e. the small block
+  contributes nothing distinguishable from noise at either point alone), while `discover_set()`
+  pooling just those same two spectra recommends the true 4-element topology
+  (`p(R1,C1)-p(R2,C2)` itself, exactly, not merely an equivalent). Both single-spectrum runs and
+  the two-condition pooled run used pool `("R", "C", "L")` at a 4-element cap rather than this
+  project's usual `("R", "C", "L", "CPE")` / 5-element defaults — a scope reduction for wall-clock
+  reasons only, recorded in the benchmark's own comment (each single-spectrum exhaustive call at
+  the usual defaults measured several minutes; the truth is a 4-element R/C circuit, so neither
+  L nor CPE was ever a live alternative this comparison needed to rule out).
+- **A5 (O1 still holds) — deferred, not measured.** There is no `SpectrumSet`-aware objective
+  report yet (§3.2), so there is nothing to fingerprint for byte-identity; the structural half
+  of the invariant (no `Objective` parameter anywhere in `multicondition.py`) holds by
+  inspection, not by a gate run. Recorded here rather than marked done, per this document's own
+  rule that a gate not run is not a gate passed.
 
 ### 3.4 What this does not claim
 
@@ -370,6 +432,77 @@ share one energy stay a class, and the report says so. It does not identify *whi
 an energy belongs to — 0.8 eV is reported as a number, not as "grain boundary", because that
 step is the expert judgement `CLAUDE.md` point 3 exists to remove and this software does not
 know what kind of part it has.
+
+### 3.5 What is implemented and what is deferred
+
+**Implemented and gated**: `SpectrumSet`; `discover_set()` (level 1, exhaustive-only);
+`fit_joint()` and `select_level2()` (level 2, the parameter-class lattice, the Arrhenius law).
+All three reuse existing single-spectrum machinery rather than duplicating it —
+`enumerate_candidates()` for topology generation, `fit()`/`screen()` per condition for level 1,
+`compute_statistics()`/`information_criteria()` for every statistic level 1 and level 2 report
+— which is also why the numeric core needed no new tests of `least_squares` behaviour itself,
+only of the joint bookkeeping around it (`tests/test_multicondition.py`, 17 tests).
+
+**Deferred, each for a stated reason rather than silently**:
+
+- Wiring `select_level2` into `discover_set()`'s own Pareto front (running level 2 on every
+  front row during discovery, as §3.2's original design implied) — no gate requires it, and
+  building it well means deciding when a 27-assignment-per-row lattice is affordable during a
+  search that already fits thousands of topologies, which is its own scoping question.
+- The genetic-search fallback and growth stage for `SpectrumSet` (`discover_set` is
+  exhaustive-only) and `--pool auto`'s spectrum-shape widening — both single-spectrum-only
+  today, and extending either is `EVOLVE_SEARCH_PLAN.md`/`POOL_FROM_SPECTRUM_PLAN.md`-scale
+  work in its own right.
+- A polynomial-in-bias law for `condition_kind="bias_V"` — no gate exercises it.
+- CLI (`--condition`), web (`SpectrumSet` upload, a condition column, an Arrhenius panel) and
+  `interpret.py` (rendering `JointFitResult.laws` into a report) — none of gates A1-A5 needs a
+  report or a front end, only the core objects the report would read from.
+- Gate A5 itself (see §3.3) — blocked on the `interpret.py`/`ObjectiveReport` wiring above.
+
+### 3.6 A numerical bug the gates caught before any of them passed
+
+The first working version of `fit_joint` used the textbook Arrhenius form,
+`x(T) = x0 · exp(Ea/(kB·T))`, with `x0` bounded the same way `"shared"`/`"free"` parameters
+are (the data-derived per-parameter interval from `Circuit.bounds`). On A3's own scenario
+(`Ea(R2) = 0.8 eV`) this put the true `x0` at ~1.06e-10 Ω — because
+`exp(0.8/(kB·300 K)) ~ 2.8e13` and the *observed* R2 is a few thousand ohms, so the
+`T -> infinity` prefactor is many orders of magnitude smaller — which sits **below the
+resistor element's own hard lower bound of 1e-9 Ω** (`_R_LIMITS` in `core/elements.py`).
+The optimizer could not reach it at any starting point. **Measured, not inferred**: a direct
+comparison on one seed gave `chi2_reduced ~ 1244` for `"lawful"` against `~1.28` for `"free"`
+on the identical data — a factor of ~1000, not a rounding difference — and the lattice search
+consequently *never chose `"lawful"`* even though the data was generated by exactly that law.
+This is exactly the kind of failure `CLAUDE.md`'s "investigate before implementing" instruction
+exists to catch: the fix is not a tolerance or a wider bound (a wider bound just moves the
+same problem to a different activation energy), it is a different parameterisation. Anchoring
+the law at the first condition's own temperature (§3.2's `T_ref` form) keeps the fitted
+reference value inside the bounds `"shared"` and `"free"` already use — because it *is* one of
+the values either of those statuses would report — and the same seed then recovered
+`chi2_reduced ~ 1.27` (matching `"free"`) with `Ea` accurate to four decimal places. A
+regression test (`test_lawful_law_is_centred_at_the_first_condition_not_at_t_infinity`) pins
+the corrected behaviour on a scenario with the same large activation energy.
+
+### 3.7 Gate A4's scenario needed two rounds of recalibration
+
+The plan's original wording (a 100 Ω / 5000 Ω split, share rising from 2% to 20%) does not
+measure what it was meant to. Run as first written, the truth's *exact response* was matched by
+a second, structurally different 4-element topology (`p(p(R1,C1)-R2,C2)`, tied with the truth
+to every reported digit at these parameter values) on the tier-2 shortlist, and the naive
+"is the truth's own topology string in `pareto`/`recommended`" check said `False` even when the
+truth's full **equivalence class** was on the front and was the recommendation — the same
+literal-string-match trap `docs/HANDOFF.md` and `DISCOVERY_V2_PLAN.md` warn about, now caught
+in a benchmark rather than in the core. The check was rewritten to use the search's own
+`equivalents_of()` (querying the truth's evaluated equivalence class rather than its bare
+canonical form), the same instrument `DiscoveryResult`/`SetDiscoveryResult` already expose.
+Once that was fixed, the original 2%/20% split turned out to be a *trivial* pass: 20% alone was
+already enough for single-spectrum `discover()` to recommend the truth's class, so pooling with
+the 2% spectrum was shown to hurt nothing but was not shown to help. A short scan (0.02, 0.05,
+0.08, 0.10, 0.12, 0.15 share) found that single-spectrum `recommended` only picks up the small
+block at share >= 0.08 with this `R2`/`C1`/`C2`; **2% and 5% were chosen instead precisely
+because both fail individually** (`discover()` recommends the reduced `p(R1,C1)` 2-element
+model at both), which is what makes the pooled `discover_set()` result — the true 4-element
+topology, exactly — attributable to pooling rather than to one condition already being
+sufficient on its own.
 
 ## 4. Item C — a measured-data arena
 
@@ -524,10 +657,12 @@ interval covers 90–98% on the same draws and `recommended` on the 37-cell tabl
 
 ## 8. Order of work, and why
 
-1. **D1**, because it is a sentence that is wrong today and costs nothing to fix.
+1. **D1**, because it is a sentence that is wrong today and costs nothing to fix. **Done.**
 2. **B**, because A and C both need a σ(f) that comes from the data, and because it is the
-   only item that changes what a single-spectrum user gets.
-3. **A**, the highest-effect item, on synthetic series first (A1–A5).
+   only item that changes what a single-spectrum user gets. **Done, opt-in only (§2.4, N2).**
+3. **A**, the highest-effect item, on synthetic series first (A1–A5). **Core done, A1-A4
+   measured and passing, A5 deferred (§3).** CLI/web wiring and `interpret.py`'s report are
+   not started (§3.5) and are not required by any gate.
 4. **C**, so that A has real series to run on and the readers have real files.
 5. **E**, once A has added `E_a` to the list of numbers that need an interval.
 6. **D2**, last, because its one new measurement needs B and its budget semantics are
@@ -542,7 +677,7 @@ rather than reworded.
 | Area | Files |
 |------|-------|
 | Noise model (B) | `core/weighting.py` (new `"auto"`), a new `core/noise.py`, `core/validate.py` (expose per-point KK residual), `core/spectrum.py` (`sigma_re`, `sigma_im` fields), `cli/main.py`, `web/bridge.py`, the Data screen's `KKPanel.tsx` |
-| Multi-condition (A) | `core/spectrum.py` (`SpectrumSet`), `core/fit.py` (joint residual and Jacobian), `core/discover.py` (`screen_plan` over a set; level 2 lattice on the shortlist), `core/interpret.py` (`E_a`, series-separated class line), `core/objective.py`, readers in `io/`, `cli/main.py`, `web/bridge.py`, `DataScreen.tsx`, `ReportScreen.tsx` |
+| Multi-condition (A) | **Done**: `core/spectrum.py` (`SpectrumSet`, additive), a new `core/multicondition.py` (joint residual/Jacobian, level 1 `discover_set`, level 2 `fit_joint`/`select_level2`) rather than modifying `core/fit.py`/`core/discover.py` in place -- everything it needs from either is already public. **Not yet touched**: `core/interpret.py` (`E_a`, series-separated class line), `core/objective.py` (a `SpectrumSet`-aware report), readers in `io/`, `cli/main.py`, `web/bridge.py`, `DataScreen.tsx`, `ReportScreen.tsx` -- see section 3.5 for why none of it blocks gates A1-A4. |
 | Measured arena (C) | `benchmarks/measured/` (new), `io/gamry.py`, `io/biologic.py` (new), `web/public/samples/` |
 | Fallback and sentence (D) | `core/discover.py` (`recommended`, `_evolve` budget), `core/objective.py`, `SearchPanel.tsx` |
 | Uncertainty (E) | `core/stats.py`, `core/interpret.py`, `benchmarks/fitting.py` |
