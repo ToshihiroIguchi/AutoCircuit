@@ -498,6 +498,8 @@ export function App() {
         weighting: settings.weighting,
         seed: settings.seed,
         criterion: settings.criterion,
+        growthWidth: settings.growthWidth,
+        maxElements: settings.maxElements,
       };
       const { workers } = settings;
       const token = nextId();

@@ -535,7 +535,11 @@ static-site Web UI running the same core via WASM (Pyodide).
    level, without over-growing past the truth's own size when given a further element of headroom
    (10/10 at `max_elements=9`); the series-shaped sibling `ser8` stays at 0/5, unchanged from the
    already-documented `ser6`/`ser7` failure at reach 2 — not a new regression reach 3 introduces.
-   `GROWTH_REACH = 3` shipped; `GROWTH_DEFAULT` stays `0` for the same reason it always has.
+   `GROWTH_REACH = 3` shipped; `GROWTH_DEFAULT` stays `0` for the same reason it always has. **The
+   browser is wired too** (bridge version 12): the Discover panel's "Grow past the element limit"
+   checkbox and "Grow to" input send `growth_width`/`max_elements`, which the bridge already
+   accepted but no client had ever sent. The coverage sentence needed no browser-side change to
+   read correctly, since it is the CLI's own rendered verbatim.
 
 17. `docs/SEARCH_TIME_PLAN.md` — where the topology search spends its time, and the levers on
    it. **§3.1 implemented and shipped, §3.2 measured and its fix rejected, §4.2 measured and

@@ -22,6 +22,12 @@ export interface SearchPanelProps {
   onCustomPool: (codes: string[]) => void;
   exhaustiveLimit: number;
   onExhaustiveLimit: (value: number) => void;
+  /** `0` (`GROWTH_DEFAULT`) is off; the checkbox below sets it to `GROWTH_WIDTH` and back. */
+  growthWidth: number;
+  onGrowthWidth: (value: number) => void;
+  /** Cap on elements while growth is on; the panel hides this input while `growthWidth === 0`. */
+  maxElements: number;
+  onMaxElements: (value: number) => void;
   useSkeleton: boolean;
   onUseSkeleton: (value: boolean) => void;
   skeleton: string | null;
@@ -46,6 +52,9 @@ export interface SearchPanelProps {
 }
 
 const WEIGHTINGS = ["modulus", "proportional", "unit"];
+
+/** Matches `core/discover.py`'s `GROWTH_WIDTH` -- the checkbox below asks for exactly this. */
+const GROWTH_WIDTH = 4;
 
 export function SearchPanel(props: SearchPanelProps) {
   const locked = props.disabled || props.running;
@@ -223,13 +232,46 @@ export function SearchPanel(props: SearchPanelProps) {
         </div>
       )}
 
-      {/* There is no genetic fallback in the browser (docs/WEB_UI_PLAN.md section 7), so a
-          topology above this limit was never a candidate -- not screened, not rejected, simply
-          not looked at. That is different from "not found" and the control says so. */}
+      {/* There is no genetic fallback in the browser (docs/WEB_UI_PLAN.md section 7): with
+          growth off, a topology above this limit was never a candidate -- not screened, not
+          rejected, simply not looked at. That is different from "not found" and the control
+          says so. */}
       <p className="search-panel__hint">
         Exhaustive search only: every topology with up to this many elements from the pool is
-        evaluated, and nothing above the limit is searched at all.
+        evaluated. Nothing above the limit is searched unless growth (below) is turned on.
       </p>
+
+      {/* Growth changes what is searched, unlike `workers`, so it sits here rather than under
+          Advanced -- and it is off by default because whether it changes the *recommendation*
+          is measured only for the shapes and noise level `docs/TOPOLOGY_6PLUS_PLAN.md` section
+          5.13 tested, roughly doubles the run, and `report.completeness` (rendered verbatim
+          below the search) already carries the honest sentence once it runs: growth is not a
+          completeness claim. */}
+      <label className="search-panel__growth">
+        <input
+          type="checkbox"
+          checked={props.growthWidth > 0}
+          disabled={locked}
+          onChange={(event) => props.onGrowthWidth(event.target.checked ? GROWTH_WIDTH : 0)}
+        />
+        <span>
+          Grow past the element limit -- above it, evaluate every one-element extension of the
+          best {GROWTH_WIDTH} topologies of each completed size instead of stopping there.
+        </span>
+      </label>
+      {props.growthWidth > 0 && (
+        <label>
+          Grow to
+          <input
+            type="number"
+            min={props.exhaustiveLimit + 1}
+            max={15}
+            value={props.maxElements}
+            disabled={locked}
+            onChange={(event) => props.onMaxElements(Number(event.target.value))}
+          />
+        </label>
+      )}
 
       {/* The criterion is a search setting rather than a view of the answer, and it has to be
           said out loud: it also ranks the shortlist, so it decides which topologies get a

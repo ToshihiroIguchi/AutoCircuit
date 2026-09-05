@@ -1107,6 +1107,21 @@ this result -- exactly the caveat X4 already carries for `GROWTH_WIDTH`.
 
 See `benchmarks/six_plus/depth8.py` and `benchmarks/six_plus/x10_depth8.json`.
 
+**The browser is wired too, following a user's follow-up request** (bridge version 12,
+`light.py`, `web/src/worker/client.ts`, `web/src/components/SearchPanel.tsx`). The Discover
+panel gains a "Grow past the element limit" checkbox next to Element limit -- placed in the main
+row rather than under Advanced, because unlike `workers` it changes what is searched -- and a
+"Grow to" input that appears once it is checked. Both were previously accepted by the bridge
+(`_op_discover_start` already read `growth_width`/`max_elements` off the payload with
+`GROWTH_DEFAULT`/7 defaults) but never sent by any client, so this is a new capability rather
+than a changed default -- an old cached bundle that never sends them keeps growth off exactly as
+before. No change was needed to how the report is rendered: `ReportWire.completeness` is the
+CLI's own sentence rendered verbatim, and `DiscoveryResult.completeness()` already states
+growth's narrower claim whenever `grown_to` is set, so the same string that reads correctly on
+the command line reads correctly in the browser once growth actually runs. `web/scripts/smoke.mjs`
+drives a grown search end to end and checks the rendered sentence contains both "grew rather than
+enumerated" and "not a completeness claim".
+
 ## 6. Implementation plan
 
 *Written from §5, and the growth stage of it is built. See §5.8 for what shipped, `GROWTH_DEFAULT`

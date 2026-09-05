@@ -107,6 +107,10 @@ export interface SearchSettings {
    * disagreeing with the CLI.
    */
   criterion: string;
+  /** `0` (`GROWTH_DEFAULT`) is off. Mirrors the CLI's `--growth-width`; see `SearchOptions`. */
+  growthWidth: number;
+  /** Cap on elements when `growthWidth > 0`; ignored otherwise. Mirrors `--max-elements`. */
+  maxElements: number;
 }
 
 export function defaultSearchSettings(): SearchSettings {
@@ -124,6 +128,11 @@ export function defaultSearchSettings(): SearchSettings {
     seed: 0,
     weighting: "modulus",
     criterion: "bic",
+    // Off by default, matching `GROWTH_DEFAULT` and the CLI: growth roughly doubles a run and
+    // whether it changes the *recommendation* is validated only for the shapes and noise level
+    // `docs/TOPOLOGY_6PLUS_PLAN.md` section 5.13 measured, not as a universal default.
+    growthWidth: 0,
+    maxElements: 7,
   };
 }
 
@@ -167,8 +176,18 @@ export function DiscoverScreen({
   onPick,
   onFitCircuit,
 }: DiscoverScreenProps) {
-  const { poolName, customPool, exhaustiveLimit, useSkeleton, workers, seed, weighting, criterion } =
-    settings;
+  const {
+    poolName,
+    customPool,
+    exhaustiveLimit,
+    useSkeleton,
+    workers,
+    seed,
+    weighting,
+    criterion,
+    growthWidth,
+    maxElements,
+  } = settings;
   const overlay = useOverlay(search);
 
   const running = search?.running ?? false;
@@ -209,6 +228,10 @@ export function DiscoverScreen({
         onCustomPool={(codes) => onSettings({ customPool: codes })}
         exhaustiveLimit={exhaustiveLimit}
         onExhaustiveLimit={(value) => onSettings({ exhaustiveLimit: value })}
+        growthWidth={growthWidth}
+        onGrowthWidth={(value) => onSettings({ growthWidth: value })}
+        maxElements={maxElements}
+        onMaxElements={(value) => onSettings({ maxElements: value })}
         useSkeleton={useSkeleton}
         onUseSkeleton={(value) => onSettings({ useSkeleton: value })}
         skeleton={skeletonAvailable ? skeleton : null}

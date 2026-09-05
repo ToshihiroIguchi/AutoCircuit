@@ -391,6 +391,36 @@ check(
   JSON.stringify(report?.pareto?.map((row) => [row.score, row.bic])),
 );
 
+// Growth is off unless asked for (`growth_width` defaults to 0 on the bridge side too), so this
+// is the one case worth driving end to end: that asking for it actually reaches past the element
+// limit, and that the coverage sentence -- rendered verbatim -- states growth's narrower claim
+// rather than silently inheriting the plain exhaustive one (`docs/TOPOLOGY_6PLUS_PLAN.md`
+// section 5.13).
+const grown = ask({
+  op: "discover_start",
+  spectrum: simulated,
+  pool: ["R", "C", "L"],
+  exhaustive_limit: 3,
+  restarts: 1,
+  growth_width: 2,
+  max_elements: 4,
+});
+check("a search can ask for growth past the element limit", grown.ok === true, JSON.stringify(grown.error));
+check("a grown search runs to the end", drive(grown.result.job) === "done");
+const grownReport = ask({ op: "discover_report", job: grown.result.job }).result;
+check(
+  "it still claims only what it enumerated as complete",
+  grownReport?.complete_up_to === 3,
+  JSON.stringify(grownReport?.complete_up_to),
+);
+check(
+  "and the coverage sentence says growth is not a completeness claim",
+  typeof grownReport?.completeness === "string" &&
+    grownReport.completeness.includes("grew rather than enumerated") &&
+    grownReport.completeness.includes("not a completeness claim"),
+  grownReport?.completeness,
+);
+
 // The F-test is the one choice that is not a score, so it is the one worth driving end to end:
 // it must rank by AIC, label the column AIC, and still name a choice of its own.
 const tested = ask({

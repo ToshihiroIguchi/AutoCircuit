@@ -95,6 +95,18 @@ export interface SearchOptions {
    * different criterion had chosen.
    */
   criterion?: string;
+  /**
+   * Above `exhaustiveLimit`, evaluate every one-element extension of the best `growthWidth`
+   * topologies of each completed size instead of stopping there. `0` (the default, matching
+   * `GROWTH_DEFAULT`) turns growth off. Mirrors the CLI's `--growth-width` exactly, including
+   * the reason it is not on by default: it roughly doubles the run, and the coverage sentence
+   * (`ReportWire.completeness`, rendered verbatim) already says growth is not a completeness
+   * claim once it runs, so no separate wire field carries `grown_to` -- the rendered sentence
+   * is enough.
+   */
+  growthWidth?: number;
+  /** Cap on elements per topology when `growthWidth > 0`; ignored otherwise. Mirrors `--max-elements`. */
+  maxElements?: number;
 }
 
 /** The knobs the DRT exposes. `undefined` for a series term means "decide from the data". */
@@ -424,6 +436,8 @@ export class BridgeClient {
       seed: options.seed,
       restarts: options.restarts,
       criterion: options.criterion,
+      growth_width: options.growthWidth,
+      max_elements: options.maxElements,
     });
   }
 

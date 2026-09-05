@@ -1745,6 +1745,19 @@ body {
   font-family: var(--font-mono);
 }
 
+.search-panel__growth {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.search-panel__growth input {
+  margin-top: 2px;
+}
+
 .search-panel__custom-pool {
   margin: 10px 0 0;
 }

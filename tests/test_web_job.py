@@ -177,6 +177,50 @@ def test_a_driven_search_reproduces_discover_exactly() -> None:
     assert report["recommended"] == reference.recommended.circuit.to_string()
 
 
+def test_a_driven_search_with_growth_reproduces_discover_exactly() -> None:
+    """The web Discover panel's "Grow past the element limit" control, driven through the bridge.
+
+    `growth_width`/`max_elements` were accepted by `_op_discover_start` since growth shipped, but
+    no client ever sent them until the Discover panel gained the control -- so this is the first
+    test of that specific payload path, not a re-run of an already-covered one. Growth is
+    interleaved into the same `discover_screen` sequence as the plain screen
+    (`_open_growth`/`next_growth`), so `Driver.screen()` needs no changes to drive through it.
+    """
+    spectrum = _semicircle()
+    driver = Driver(
+        spectrum,
+        pool=list(POOL),
+        exhaustive_limit=LIMIT,
+        growth_width=2,
+        max_elements=LIMIT + 1,
+        screen_chunk=1,
+    )
+    driver.screen()
+    driver.refit()
+    report = driver.report()
+
+    reference = discover(
+        spectrum,
+        pool=POOL,
+        mode="exhaustive",
+        exhaustive_limit=LIMIT,
+        growth_width=2,
+        max_elements=LIMIT + 1,
+        seed=0,
+    )
+
+    assert reference.grown_to is not None and reference.grown_to > reference.complete_up_to
+    assert report["complete_up_to"] == reference.complete_up_to
+    assert report["completeness"] == reference.completeness()
+    assert "grew rather than enumerated" in report["completeness"]
+    assert "not a completeness claim" in report["completeness"]
+    assert [row["circuit"] for row in report["candidates"]] == [
+        c.circuit.to_string() for c in reference.candidates
+    ]
+    assert reference.recommended is not None
+    assert report["recommended"] == reference.recommended.circuit.to_string()
+
+
 def test_a_batched_screen_finds_the_same_candidates() -> None:
     """The browser's batch size changes the order of exact ties, and nothing else.
 

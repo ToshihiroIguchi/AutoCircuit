@@ -54,7 +54,12 @@ from autocircuit.core.validate import WIRE_VERSION as VALIDATE_WIRE_VERSION
 #: report -- ``model`` (a circuit to simulate with, its band and its terminal readouts) or
 #: ``interpret`` (the same class reading as before). The objective travels with the request for
 #: a *report*; no search operation takes one, which is gate O1's structural half.
-BRIDGE_VERSION = 11
+#: 12 (2026-09-05): ``discover_start`` takes ``growth_width``/``max_elements``, so the browser's
+#: Discover panel can ask for the same growth stage the CLI's ``--growth-width`` already
+#: exposes (``docs/TOPOLOGY_6PLUS_PLAN.md`` section 5.13). Both already had bridge-side defaults
+#: (0 and 7) matching ``GROWTH_DEFAULT``, so an old cached bundle that never sends them keeps its
+#: prior behaviour exactly -- this is a new capability, not a changed default.
+BRIDGE_VERSION = 12
 
 #: One operation: a request payload in, a JSON-safe result out.
 Operation = Callable[[dict[str, Any]], Any]
