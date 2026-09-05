@@ -51,6 +51,7 @@ from autocircuit.core.spice import to_netlist
 from autocircuit.core.validate import WIRE_VERSION as VALIDATE_WIRE_VERSION
 from autocircuit.core.validate import lin_kk
 from autocircuit.core.wire import decode_array, decode_complex_array, decode_float
+from autocircuit.io.writers import spectrum_csv_text
 from autocircuit.web.bridge import BRIDGE_VERSION, handle
 
 DATA = Path(__file__).parent / "test_io" / "data"
@@ -945,6 +946,25 @@ def test_export_of_a_manual_fit_is_the_netlist_the_cli_writes() -> None:
     assert ".subckt DEMO" in artifact["content"]
 
 
+def test_export_of_a_manual_fit_model_csv_is_the_file_the_cli_writes() -> None:
+    """The CSV `fit --model-csv` writes: the fitted circuit's own impedance, not the data."""
+    spectrum = simulate(
+        "R1-C1", log_frequencies(1e1, 1e5, 6), {"R1.R": 40.0, "C1.C": 2e-7}, noise=0.005, seed=2
+    )
+    result = core_fit(Circuit.parse("R1-C1"), spectrum, restarts=2, seed=0)
+
+    response = _call(
+        "export", kind="model-csv", fit=result.to_wire(), spectrum=spectrum.to_wire()
+    )
+    assert response["ok"] is True
+    artifact = response["result"]
+    assert artifact["filename"] == "autocircuit-fit-model.csv"
+    assert artifact["mime"] == "text/csv"
+    assert artifact["content"] == spectrum_csv_text(
+        Spectrum(spectrum.f, FitResult.from_wire(result.to_wire()).z_model)
+    )
+
+
 def test_an_unknown_export_kind_is_an_error_response() -> None:
     spectrum = simulate("R1-C1", log_frequencies(1e1, 1e5, 4), {"R1.R": 40.0, "C1.C": 2e-7})
     result = core_fit(Circuit.parse("R1-C1"), spectrum, restarts=1, seed=0)
@@ -977,7 +997,7 @@ def test_bridge_version_is_bumped_for_the_new_operations() -> None:
     """Pins the value rather than just its presence: a worker checks this at start-up and a
     stale cached bundle must fail loudly instead of answering with the old protocol.
     """
-    assert BRIDGE_VERSION == 12
+    assert BRIDGE_VERSION == 14
 
 
 def test_every_response_above_parses_as_json_and_re_dumps_without_allow_nan() -> None:

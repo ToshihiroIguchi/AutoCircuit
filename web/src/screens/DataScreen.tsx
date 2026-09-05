@@ -5,6 +5,7 @@
 
 import { useEffect, useRef } from "react";
 import type { LoadedSpectrum } from "../core/types";
+import type { BridgeClient, ReadHints } from "../worker/client";
 import { DropZone } from "../components/DropZone";
 import { KKPanel } from "../components/KKPanel";
 import { PlotsPanel } from "../components/PlotsPanel";
@@ -47,6 +48,11 @@ export interface DataScreenProps {
   onDismissError: (id: string) => void;
   onApplyTrim: (id: string, fMin: number | null, fMax: number | null) => Promise<string | null>;
   onResetTrim: (id: string) => void;
+  /** A measurement-fixture fact sniffing cannot recover on its own; see `ReadHints`. */
+  readHints: ReadHints;
+  onReadHints: (hints: ReadHints) => void;
+  /** Only for the residuals-CSV download in `KKPanel`; nothing else on this screen calls it. */
+  client: BridgeClient;
 }
 
 export function DataScreen(props: DataScreenProps) {
@@ -71,6 +77,8 @@ export function DataScreen(props: DataScreenProps) {
         dataReady={props.dataReady}
         formats={props.formats}
         onFiles={props.onFiles}
+        readHints={props.readHints}
+        onReadHints={props.onReadHints}
       />
 
       <SamplePanel dataReady={props.dataReady} onFile={(file) => props.onFiles([file])} />
@@ -132,7 +140,7 @@ export function DataScreen(props: DataScreenProps) {
                 onApply={props.onApplyTrim}
                 onReset={props.onResetTrim}
               />
-              <KKPanel spectrum={props.selected} />
+              <KKPanel spectrum={props.selected} client={props.client} />
               {/* The only screen that draws the Lin-KK reconstruction, so the only one that
                   passes it: elsewhere the overlay is a fitted circuit. */}
               <PlotsPanel

@@ -346,6 +346,7 @@ def test_the_browser_grows_the_same_way_the_command_line_does() -> None:
         ScreenTask,
         _full_fit,
         _screen_one,
+        run_evolve,
     )
     from autocircuit.web.job import DiscoveryJob
 
@@ -385,12 +386,32 @@ def test_the_browser_grows_the_same_way_the_command_line_does() -> None:
                 for text, restarts, seed in tasks
             ]
         )
+    # The best exhaustive-plus-growth fit can still look underfit, in which case
+    # `discover(mode="auto")` -- what this comparison now has to use, since this job always
+    # runs that same escalation -- falls back to the genetic search too. Driving it here is
+    # this test's own version of `docs/EVOLVE_WEB_PLAN.md` gate W-EV1's driving loop.
+    if driven.evolve_pending:
+        while True:
+            tasks = driven.next_evolve()
+            if tasks is None:
+                break
+            driven.submit_evolve([run_evolve(task, data, weighting="modulus") for task in tasks])
+        while True:
+            tasks = driven.next_refit()
+            if tasks is None:
+                break
+            driven.submit_refit(
+                [
+                    _full_fit(text, data, "modulus", restarts, seed)
+                    for text, restarts, seed in tasks
+                ]
+            )
     report = driven.report()
 
     reference = discover(
         data,
         pool=("R", "C"),
-        mode="exhaustive",
+        mode="auto",
         exhaustive_limit=3,
         max_elements=5,
         growth_width=GROWTH_WIDTH,

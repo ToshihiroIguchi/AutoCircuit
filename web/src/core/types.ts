@@ -426,9 +426,43 @@ export interface RefitStepWire {
    *
    * Tier 2 running out is not necessarily the end: under a derived pool the completed fit is
    * the evidence the pool question needs, so a widening starts here and the driver goes back to
-   * screening. A driver that stopped at the first `tasks: null` would report the narrow pool.
+   * screening; or the best exhaustive fit still looks underfit and the genetic fallback opens
+   * instead (`evolve` below says which). A driver that stopped at the first `tasks: null` would
+   * report the narrow, unfallen-back-to pool.
    */
   more: boolean;
+  /**
+   * Which of the two `more` can mean: true when the fallback just opened, so the next call is
+   * `discover_evolve` rather than `discover_screen` (a pool widening).
+   */
+  evolve: boolean;
+}
+
+/**
+ * One offspring for the genetic fallback's own tier 1, wire-safe as a plain tuple -- the same
+ * shape :data:`~autocircuit.core.discover._EvolveTask` already has, field for field.
+ */
+export type EvolveTaskWire = [
+  circuit: string,
+  seed: number,
+  warm: Record<string, number> | null,
+  reference: number | null,
+  warmAccept: number | null,
+  needSearch: boolean,
+  restarts: number,
+  popsize: number,
+  maxiter: number,
+  tol: number,
+];
+
+/** One offspring's outcome: its polish, its search, either the fit's wire form or null. */
+export type EvolveOutcomeWire = [FitResultWire | null, FitResultWire | null];
+
+/** A batch of the genetic fallback's own tier-1 work. `tasks` is null when it is done, at
+ *  which point the search's tier 2 answers from `discover_refit` again, on the fallback's own
+ *  shortlist. */
+export interface EvolveStepWire {
+  tasks: EvolveTaskWire[] | null;
 }
 
 /**
@@ -461,6 +495,8 @@ export interface ReportWire {
   /** Per front row, how many distinct places the skeleton sits in it; above one is ambiguous. */
   skeleton_placements: Record<string, number> | null;
   n_evaluated: number;
+  /** Zero unless the genetic fallback ran, in which case how many of its generations completed. */
+  generations: number;
   complete_up_to: number | null;
   /**
    * The pool the spectrum chose, or null when the caller named one.

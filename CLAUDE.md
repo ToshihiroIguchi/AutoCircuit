@@ -341,7 +341,20 @@ static-site Web UI running the same core via WASM (Pyodide).
    shipped tuple already was and nothing had checked; an asymmetric setting is the software
    deciding what kind of part this is from inside the search. A third arena — same truth, same
    data, element cap 6 → 7 — then separated the one remaining candidate (a lower delete weight)
-   from the fact that both arenas' truths sat at the cap.
+   from the fact that both arenas' truths sat at the cap. **The browser is wired too**
+   (`docs/EVOLVE_WEB_PLAN.md`, bridge version 14): `evolve_plan`/`evolve_refit_plan` give both of
+   this fallback's tiers the same generator shape `screen_plan`/`refit_plan` already have, so
+   `web/job.py`'s `DiscoveryJob` can drive them across a browser's Web Workers the same way it
+   already drives exhaustive search. This adds no mode switch — `docs/WEB_UI_PLAN.md` section 7's
+   "no generator behind the genetic stage" is fixed by making `discover(mode="auto")`'s own
+   trigger (`_is_underfitted`, the same function, not a reimplementation) reachable in the
+   browser, not by exposing a manual "force evolve" control the project's own decision rules
+   already rule out (`docs/TOPOLOGY_6PLUS_PLAN.md` X3: no alternative trigger measured there
+   dominates the incumbent). Gate W-EV1 — the browser driven end to end through `bridge.handle`
+   against `discover(mode="auto")` on a spectrum engineered to make the fallback fire for a real
+   reason — passed on every compared field, JSON export included, with a byte-identical
+   fingerprint (`benchmarks/ev5_fingerprint.py --mode evolve`) proving both of the fallback's own
+   tiers refactor-safe first.
 
 11. `docs/KK_RESONANCE_PLAN.md` — the Lin-KK test and the resonance its basis cannot express.
    **Implemented; gates K1–K4 measured.** Its §2 is the one to read, and it is the whole point
@@ -539,7 +552,10 @@ static-site Web UI running the same core via WASM (Pyodide).
    browser is wired too** (bridge version 12): the Discover panel's "Grow past the element limit"
    checkbox and "Grow to" input send `growth_width`/`max_elements`, which the bridge already
    accepted but no client had ever sent. The coverage sentence needed no browser-side change to
-   read correctly, since it is the CLI's own rendered verbatim.
+   read correctly, since it is the CLI's own rendered verbatim. **The genetic fallback itself —
+   distinct from growth, and the thing this whole document's X-series measures the quality of —
+   is also now reachable in the browser**, via `docs/EVOLVE_WEB_PLAN.md` (bridge version 14); see
+   item 10 above for what shipped and what gate W-EV1 measured.
 
 17. `docs/SEARCH_TIME_PLAN.md` — where the topology search spends its time, and the levers on
    it. **§3.1 implemented and shipped, §3.2 measured and its fix rejected, §4.2 measured and

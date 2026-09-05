@@ -29,13 +29,24 @@ const STAGE_LABEL: Record<SearchStage, string> = {
   enumerating: "Enumerating the topology space",
   screening: "Screening candidates",
   refitting: "Refitting the shortlist",
+  // Reached only when the best exhaustive fit still looks underfit and there is element
+  // budget left -- the same escalation `discover(mode="auto")` makes on the command line.
+  evolving: "Falling back to a genetic search",
   reporting: "Assembling the report",
   done: "Finished",
   cancelled: "Cancelled",
 };
 
 /** How far through the run each tier is. Order is the order they happen in. */
-const ORDER: SearchStage[] = ["pool", "enumerating", "screening", "refitting", "reporting", "done"];
+const ORDER: SearchStage[] = [
+  "pool",
+  "enumerating",
+  "screening",
+  "refitting",
+  "evolving",
+  "reporting",
+  "done",
+];
 
 /** Where a stage stands, which decides how its row is drawn and what it may claim. */
 type RowState = "waiting" | "running" | "finished";

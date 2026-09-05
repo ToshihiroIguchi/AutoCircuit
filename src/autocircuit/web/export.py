@@ -8,7 +8,9 @@ the same text the command line writes:
 * ``json`` is :meth:`~autocircuit.core.discover.DiscoveryResult.to_dict` and
   :func:`~autocircuit.core.fit.report_dict`, i.e. ``--json`` from ``discover`` and from ``fit``;
 * ``csv`` is :meth:`~autocircuit.core.discover.DiscoveryResult.to_csv`, i.e. ``--csv``;
-* ``netlist`` is :func:`~autocircuit.core.spice.to_netlist`, i.e. ``--spice``.
+* ``netlist`` is :func:`~autocircuit.core.spice.to_netlist`, i.e. ``--spice``;
+* ``model-csv`` (manual fit only) is :func:`~autocircuit.io.writers.spectrum_csv_text` of the
+  fitted model spectrum, i.e. ``fit --model-csv``.
 
 The one thing decided here is what a file is *called*, because the command line takes a path
 from the user and a browser has to invent one.
@@ -30,6 +32,7 @@ from autocircuit.core.discover import ExcludedEquivalents
 from autocircuit.core.fit import FitResult, report_dict
 from autocircuit.core.spectrum import Spectrum
 from autocircuit.core.spice import to_netlist
+from autocircuit.io.writers import spectrum_csv_text
 from autocircuit.web.job import DiscoveryJob
 
 #: Default SPICE subcircuit name, as on the command line (``--subckt``).
@@ -127,5 +130,11 @@ def manual_fit(
                 error_target=error_target,
                 header=f"Fitted to {source or spectrum.metadata.get('source_path', 'data')}",
             ),
+        )
+    if kind == "model-csv":
+        return _artifact(
+            "autocircuit-fit-model.csv",
+            "text/csv",
+            spectrum_csv_text(Spectrum(spectrum.f, result.z_model)),
         )
     raise ValueError(f"unknown export kind {kind!r}")

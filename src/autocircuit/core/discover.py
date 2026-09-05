@@ -1322,6 +1322,29 @@ def _cheaper(a: Candidate | None, b: Candidate | None) -> Candidate | None:
     return a if _fit_cost(a.result) <= _fit_cost(b.result) else b
 
 
+def _warm_start_for(
+    parent: Candidate | None, circuit: Circuit, known: Candidate | None, warm_accept: float
+) -> dict[str, float] | None:
+    """The inherited starting values, or None when there is nothing to gain by polishing.
+
+    Free function so :func:`evolve_plan` can share it without an :class:`_Evaluator` instance
+    of its own; :meth:`_Evaluator._warm_start` is a thin wrapper over this for its own callers,
+    unchanged from the outside.
+    """
+    if parent is None or warm_accept <= 0.0:
+        return None
+    warm = _inherited_values(parent, circuit)
+    if not warm:
+        return None
+    # The elite are re-proposed unchanged every generation, so this is the common case: a
+    # cached fit polished from its own values lands where it already is.
+    if known is not None and all(
+        known.result.params.get(name) == value for name, value in warm.items()
+    ):
+        return None
+    return warm
+
+
 # -- Search --------------------------------------------------------------------------------
 
 
@@ -1410,18 +1433,7 @@ class _Evaluator:
         self, parent: Candidate | None, circuit: Circuit, known: Candidate | None
     ) -> dict[str, float] | None:
         """The inherited starting values, or None when there is nothing to gain by polishing."""
-        if parent is None or self.warm_accept <= 0.0:
-            return None
-        warm = _inherited_values(parent, circuit)
-        if not warm:
-            return None
-        # The elite are re-proposed unchanged every generation, so this is the common case: a
-        # cached fit polished from its own values lands where it already is.
-        if known is not None and all(
-            known.result.params.get(name) == value for name, value in warm.items()
-        ):
-            return None
-        return warm
+        return _warm_start_for(parent, circuit, known, self.warm_accept)
 
     def _close_enough(self, candidate: Candidate) -> bool:
         """Whether a polish may stand in for the global stage at this complexity."""
@@ -1615,11 +1627,15 @@ _EvolveTask = tuple[
 ]
 
 
-def _evolve_polish_then_search_worker(
+def _evolve_one(
     task: _EvolveTask,
+    spectrum: Spectrum,
+    *,
+    weighting: Weighting,
+    context: FitContext | None = None,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     """One offspring's whole tier-1 turn -- warm polish, then the reduced-budget global search
-    if the polish did not make it unnecessary -- in a single worker round trip.
+    if the polish did not make it unnecessary -- in a single round trip.
 
     [`docs/SEARCH_TIME_PLAN.md` section 4.3] :meth:`_Evaluator.evaluate_all`'s parallel path
     used to be two ``executor.map`` calls with a full barrier between them: every polish in the
@@ -1632,7 +1648,13 @@ def _evolve_polish_then_search_worker(
     the search, and the driver goes back to one map call per generation instead of two.
 
     ``reference`` and ``need_search`` are precomputed by the driver from state it already has
-    (`_Evaluator.best_cost`, `_Prepared.seen`); the worker never needs `_Evaluator` itself.
+    (`_Evaluator.best_cost`, `_Prepared.seen`); this function never needs `_Evaluator` itself.
+
+    ``spectrum``/``weighting``/``context`` are explicit parameters rather than a process-global
+    (unlike the desktop-only :func:`_evolve_polish_then_search_worker`, which now delegates
+    here) so this same computation is callable from a browser's stateless bridge op, which has
+    no persistent per-process state to read one from -- the same reason :func:`_screen_one` is
+    already split from :func:`_screen_worker` this way.
     """
     text, seed, warm, reference, warm_accept, need_search, restarts, popsize, maxiter, tol = task
 
@@ -1641,14 +1663,14 @@ def _evolve_polish_then_search_worker(
         try:
             polished = fit(
                 text,
-                _WORKER["spectrum"],
-                weighting=_WORKER["weighting"],
+                spectrum,
+                weighting=weighting,
                 initial=warm,
                 global_search=False,
                 restarts=1,
                 local=SCREEN_LOCAL,
                 seed=seed,
-                context=_WORKER["context"],
+                context=context,
             )
         except (ValueError, CircuitError, np.linalg.LinAlgError):
             polished = None
@@ -1667,8 +1689,8 @@ def _evolve_polish_then_search_worker(
         try:
             searched = fit(
                 text,
-                _WORKER["spectrum"],
-                weighting=_WORKER["weighting"],
+                spectrum,
+                weighting=weighting,
                 global_search=True,
                 restarts=restarts,
                 popsize=popsize,
@@ -1676,7 +1698,7 @@ def _evolve_polish_then_search_worker(
                 tol=tol,
                 local=PUBLISH_LOCAL,
                 seed=seed,
-                context=_WORKER["context"],
+                context=context,
             )
         except (ValueError, CircuitError, np.linalg.LinAlgError):
             searched = None
@@ -1687,6 +1709,19 @@ def _evolve_polish_then_search_worker(
     return (
         None if polished is None else polished.to_wire(),
         None if searched is None else searched.to_wire(),
+    )
+
+
+def _evolve_polish_then_search_worker(
+    task: _EvolveTask,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """The :class:`multiprocessing.pool.Pool` worker wrapper over :func:`_evolve_one`.
+
+    Reads the process-global state :func:`_init_worker` set up once for this process, the same
+    way :func:`_screen_worker` wraps :func:`_screen_one`.
+    """
+    return _evolve_one(
+        task, _WORKER["spectrum"], weighting=_WORKER["weighting"], context=_WORKER["context"]
     )
 
 
@@ -2343,6 +2378,196 @@ def _is_underfitted(candidates: Sequence[Candidate]) -> bool:
     return False if math.isnan(z) else bool(z < RUNS_Z_LIMIT)
 
 
+class EvolveBatch(NamedTuple):
+    """One window of offspring to evaluate, and every candidate scored before it.
+
+    Mirrors :class:`RefitBatch`'s shape and for the same reason: a caller that stops early --
+    out of time, or cancelled from a browser -- can report exactly what ``scored`` already
+    holds, without needing the generator to run to completion to learn it. A generation is never
+    reported as finished until every one of its windows has been sent back: ``generation`` only
+    changes on the first window of the next one, so a caller deciding whether to keep going can
+    do it exactly where :func:`_evolve` always has -- between generations, never inside one.
+    """
+
+    tasks: list[_EvolveTask]
+    scored: list[Candidate]
+    generation: int
+    cache_size: int
+
+
+class EvolvePlanResult(NamedTuple):
+    """What :func:`evolve_plan` returns once its generation loop ends."""
+
+    scored: list[Candidate]
+    cache_size: int
+    generations_run: int
+
+
+def evolve_plan(
+    *,
+    pool: tuple[str, ...],
+    generations: int,
+    population: int,
+    max_elements: int,
+    min_elements: int,
+    seed: int,
+    search_restarts: int,
+    search_popsize: int,
+    search_maxiter: int,
+    search_tol: float,
+    seeds: Sequence[str] | None,
+    warm_accept: float = WARM_ACCEPT_FACTOR,
+    criterion: Criterion = DEFAULT_CRITERION,
+    item_chunk: int = 1,
+) -> Generator[
+    EvolveBatch, Sequence[tuple[dict[str, Any] | None, dict[str, Any] | None]], EvolvePlanResult
+]:
+    """The genetic search's tier 1, with the *running* of it left to the caller.
+
+    Same inversion as :func:`screen_plan`, and no ``spectrum`` for the same reason that function
+    takes none: fitting is the caller's job, not this generator's. It yields a window of
+    offspring to evaluate and expects each one's ``(polish, search)`` wire-form outcome -- what
+    :func:`_evolve_one` returns -- back through ``send``. Every decision that has to be made
+    *between* windows lives here: whether a topology needs a fresh fit at all, what warm start to
+    offer it, and (once a generation finishes) how to breed the next one. In-process this is
+    driven by :func:`_evolve`; in a browser it is driven the same way exhaustive search already
+    is, and neither gets to hold its own opinion about any of that.
+
+    ``item_chunk`` controls how many offspring are grouped into one window, which is also how
+    often the cache and the per-complexity best cost are allowed to go stale *within* a single
+    generation:
+
+    * ``item_chunk=1`` reproduces the fully sequential evaluation this search has always used
+      single-process -- every offspring judged against the cache and best cost exactly as
+      updated by everything evaluated before it, this generation included.
+    * ``item_chunk`` at least ``population`` reproduces the whole-generation batch a
+      :class:`multiprocessing.pool.Pool` dispatch has always used, where every offspring in a
+      generation reads the cache and best cost as of the *start* of that generation -- the
+      staleness :meth:`_Evaluator.evaluate_all`'s executor branch already documents and
+      :func:`_screen_parallel` already accepts for tier 1's screen.
+
+    Neither choice is decided here, for the same reason it is not decided in :func:`screen_plan`:
+    whoever runs the fits -- one process, a pool of them, or a browser's Web Workers -- is the
+    only party that knows what it can parallelise.
+    """
+    rng = np.random.default_rng(seed)
+    cache: dict[str, Candidate | None] = {}
+    best_cost: dict[float, float] = {}
+    scored: list[Candidate] = []
+
+    # The initial population has no parents: seeds come from the caller and the rest is random,
+    # so every one of these is fitted by the global stage. That is also what fills ``best_cost``,
+    # which the warm starts are later judged against.
+    trees: list[_Offspring] = []
+    for text in seeds or ():
+        trees.append((Circuit.parse(text).root, None))
+    while len(trees) < population:
+        n = int(rng.integers(min_elements, max_elements + 1))
+        trees.append((random_topology(rng, pool, n), None))
+
+    generation = 0
+    for generation in range(generations):
+        step = max(item_chunk, 1)
+        for start in range(0, len(trees), step):
+            window = trees[start : start + step]
+            prepared: list[_Prepared | None] = []
+            for node, parent in window:
+                try:
+                    circuit = Circuit(simplify(node))
+                except CircuitError:
+                    prepared.append(None)
+                    continue
+                key = circuit.canonical_form()
+                seen = key in cache
+                known = cache.get(key)
+                if seen and known is None:
+                    prepared.append(None)
+                    continue
+                if not seen and not is_plausible(circuit):
+                    cache[key] = None
+                    prepared.append(None)
+                    continue
+                warm = _warm_start_for(parent, circuit, known, warm_accept)
+                prepared.append(_Prepared(circuit, key, seen, known, warm))
+
+            indices: list[int] = []
+            tasks: list[_EvolveTask] = []
+            for i, p in enumerate(prepared):
+                if p is None:
+                    continue
+                need_search = not p.seen
+                if p.warm is None and not need_search:
+                    continue
+                reference = best_cost.get(p.circuit.complexity)
+                indices.append(i)
+                tasks.append(
+                    (
+                        p.circuit.to_string(),
+                        seed,
+                        p.warm,
+                        reference,
+                        warm_accept,
+                        need_search,
+                        search_restarts,
+                        search_popsize,
+                        search_maxiter,
+                        search_tol,
+                    )
+                )
+
+            outcomes: dict[int, tuple[Candidate | None, Candidate | None]] = {}
+            if tasks:
+                sent = yield EvolveBatch(tasks, list(scored), generation, len(cache))
+                for i, (polish_wire, search_wire) in zip(indices, sent, strict=True):
+                    p = prepared[i]
+                    assert p is not None
+                    outcomes[i] = (
+                        None
+                        if polish_wire is None
+                        else Candidate(p.circuit, FitResult.from_wire(polish_wire), generation),
+                        None
+                        if search_wire is None
+                        else Candidate(p.circuit, FitResult.from_wire(search_wire), generation),
+                    )
+
+            for i, p in enumerate(prepared):
+                if p is None:
+                    continue
+                polished, searched = outcomes.get(i, (None, None))
+                best = _cheaper(_cheaper(polished, searched), p.known)
+                cache[p.key] = best
+                if best is not None:
+                    cost = _fit_cost(best.result)
+                    if cost < best_cost.get(best.complexity, math.inf):
+                        best_cost[best.complexity] = cost
+                    scored.append(best)
+
+        alive = _unique_best(scored, criterion)
+        if not alive:
+            trees = []
+            for _ in range(population):
+                size = int(rng.integers(min_elements, max_elements + 1))
+                trees.append((random_topology(rng, pool, size), None))
+            continue
+
+        trees = _next_generation(
+            _breeding_pool(alive, criterion=criterion),
+            rng,
+            pool,
+            max_elements,
+            population,
+            criterion,
+            # Crowding is a property of the whole archive, not of the front the pool is
+            # (:func:`_complexity_frequencies`). Computed only when it can change something:
+            # the default scaling is zero and the count would otherwise walk the archive once
+            # per generation to be multiplied away.
+            frequencies=(_complexity_frequencies(alive) if PARSIMONY_SCALING else None),
+            known=cache.keys(),
+        )
+
+    return EvolvePlanResult(scored, len(cache), generation + 1)
+
+
 def _evolve(
     spectrum: Spectrum,
     *,
@@ -2377,60 +2602,73 @@ def _evolve(
     document calls a *fallback* has no principled reason to run on one core when the search it
     falls back from does not, and because a wall-clock comparison between the two is not
     correctable after the fact -- only re-run under matching resources.
+
+    Tier 1 is driven from :func:`evolve_plan` -- the same generator a browser will eventually
+    drive too -- rather than owning the generation loop itself. This function is now a thin
+    dispatcher over it, exactly as :func:`_screen_all` is over :func:`screen_plan`: pick a
+    process pool or none, and for each yielded window either ``executor.map`` it or compute it
+    in this process, one topology at a time.
     """
-    rng = np.random.default_rng(seed)
-    evaluator = _Evaluator(
-        spectrum,
-        weighting,
-        search_restarts,
-        search_popsize,
-        search_maxiter,
-        search_tol,
-        seed,
-        warm_accept,
-    )
-
-    # The initial population has no parents: seeds come from the caller and the rest is random,
-    # so every one of these is fitted by the global stage. That is also what fills
-    # ``_Evaluator.best_cost``, which the warm starts are later judged against.
-    trees: list[_Offspring] = []
-    for text in seeds or ():
-        trees.append((Circuit.parse(text).root, None))
-    while len(trees) < population:
-        n = int(rng.integers(min_elements, max_elements + 1))
-        trees.append((random_topology(rng, pool, n), None))
-
-    scored: list[Candidate] = []
-    generation = 0
+    # Built unconditionally, exactly as `_exhaustive` builds one shared `FitContext` for its own
+    # single-process path -- used only when `executor is None` below; a Pool's own workers build
+    # and reuse their own via `_init_worker` regardless.
+    context = FitContext.build(spectrum, weighting, None, 3.0)
     with _worker_pool(workers, spectrum, weighting) as executor:
-        for generation in range(generations):
-            for candidate in evaluator.evaluate_all(trees, generation, executor):
-                if candidate is not None:
-                    scored.append(candidate)
-            if time_limit is not None and time.perf_counter() - started > time_limit:
-                break
-
-            alive = _unique_best(scored, criterion)
-            if not alive:
-                trees = []
-                for _ in range(population):
-                    size = int(rng.integers(min_elements, max_elements + 1))
-                    trees.append((random_topology(rng, pool, size), None))
-                continue
-
-            trees = _next_generation(
-                _breeding_pool(alive, criterion=criterion),
-                rng,
-                pool,
-                max_elements,
-                population,
-                criterion,
-                # Crowding is a property of the whole archive, not of the front the pool is
-                # (:func:`_complexity_frequencies`). Computed only when it can change something:
-                # the default scaling is zero and the count would otherwise walk the archive once
-                # per generation to be multiplied away.
-                frequencies=(_complexity_frequencies(alive) if PARSIMONY_SCALING else None),
-                known=evaluator.cache.keys(),
+        item_chunk = population if executor is not None else 1
+        plan = evolve_plan(
+            pool=pool,
+            generations=generations,
+            population=population,
+            max_elements=max_elements,
+            min_elements=min_elements,
+            seed=seed,
+            search_restarts=search_restarts,
+            search_popsize=search_popsize,
+            search_maxiter=search_maxiter,
+            search_tol=search_tol,
+            seeds=seeds,
+            warm_accept=warm_accept,
+            criterion=criterion,
+            item_chunk=item_chunk,
+        )
+        scored: list[Candidate] = []
+        cache_size = 0
+        generations_run = 1
+        current_generation = 0
+        try:
+            batch = next(plan)
+            current_generation = batch.generation
+            while True:
+                # A generation, once begun, always finishes -- exactly as the loop this replaces
+                # always ran a whole `evaluate_all` before checking the clock. The check happens
+                # only where a *new* generation's first window arrives, so ``item_chunk=1``
+                # (many windows per generation) cannot stop mid-generation any more than
+                # ``item_chunk=population`` (one window per generation, where the two checks
+                # already coincide) could.
+                if batch.generation != current_generation:
+                    current_generation = batch.generation
+                    if time_limit is not None and time.perf_counter() - started > time_limit:
+                        scored, cache_size, generations_run = (
+                            batch.scored,
+                            batch.cache_size,
+                            batch.generation,
+                        )
+                        plan.close()
+                        break
+                if executor is not None:
+                    outcomes = list(executor.map(_evolve_polish_then_search_worker, batch.tasks))
+                else:
+                    outcomes = [
+                        _evolve_one(task, spectrum, weighting=weighting, context=context)
+                        for task in batch.tasks
+                    ]
+                batch = plan.send(outcomes)
+        except StopIteration as done:
+            result = done.value
+            scored, cache_size, generations_run = (
+                result.scored,
+                result.cache_size,
+                result.generations_run,
             )
 
         # Only refitted candidates are reported, which is the rule SCREEN_POPSIZE states and the
@@ -2441,19 +2679,50 @@ def _evolve(
         # errors and therefore "free?" marks, with nothing in the report able to say which rows
         # those were. The archive is not lost: it selects the shortlist, and `n_evaluated` still
         # counts it.
+        #
+        # Tier 2 is driven from :func:`evolve_refit_plan` the same way tier 1 is driven from
+        # :func:`evolve_plan` above: a step size of one topology (single-process) or one per
+        # worker (a pool) is what lets the deadline below be checked between batches rather than
+        # only once at the very end, exactly as :func:`_refine` (which this replaces) always did.
         alive = _unique_best(scored, criterion)
-        shortlist = _shortlist_candidates(alive, n_refine, criterion)
-        refined, attempted = _refine(
-            shortlist,
-            spectrum,
-            weighting,
-            final_restarts,
-            seed,
-            deadline=None if time_limit is None else started + time_limit * REFIT_HEADROOM,
+        deadline = None if time_limit is None else started + time_limit * REFIT_HEADROOM
+        refit_plan_ = evolve_refit_plan(
+            alive,
+            n_refine=n_refine,
+            restarts=final_restarts,
+            seed=seed,
+            chunk=max(1, workers) if executor is not None else 1,
             criterion=criterion,
-            executor=executor,
-            workers=workers,
         )
+        attempted = 0
+        refined: list[Candidate] = []
+        shortlist_total = 0
+        try:
+            refit_batch = next(refit_plan_)
+            while True:
+                shortlist_total = refit_batch.total
+                # The first batch is always attempted: a report with no rows in it cannot be
+                # read at all, and one full-budget fit is the least that can honestly be
+                # published. Every batch after it answers to the clock.
+                if attempted and deadline is not None and time.perf_counter() > deadline:
+                    refined = refit_batch.done
+                    break
+                tasks = refit_batch.tasks
+                refit_outcomes: list[RefitOutcome]
+                if executor is not None and len(tasks) > 1:
+                    refit_outcomes = list(
+                        executor.map(
+                            _refit_worker, [(t.text, t.restarts, t.seed) for t in tasks]
+                        )
+                    )
+                else:
+                    refit_outcomes = [
+                        _full_fit(t.text, spectrum, weighting, t.restarts, t.seed) for t in tasks
+                    ]
+                attempted += len(tasks)
+                refit_batch = refit_plan_.send(refit_outcomes)
+        except StopIteration as refit_done:
+            refined = refit_done.value
     # Tier 2 is authoritative even when it scores worse than the reduced fit did: a full-budget
     # refit that lands in a different basin is the better estimate of that topology, and keeping
     # whichever number happened to be smaller would be picking the fit by its answer.
@@ -2463,8 +2732,8 @@ def _evolve(
     return DiscoveryResult(
         candidates=refined,
         pareto=pareto_front(refined, criterion),
-        n_evaluated=len(evaluator.cache),
-        generations=generation + 1,
+        n_evaluated=cache_size,
+        generations=generations_run,
         elapsed_s=time.perf_counter() - started,
         pool=pool,
         mode="evolve",
@@ -2472,7 +2741,9 @@ def _evolve(
         # Set only when the tier really was cut short. A finished refit that dropped a few
         # unfittable topologies is not a partial report, and saying so would cry wolf on the
         # one signal that means "these numbers are still moving".
-        refit_progress=(None if attempted >= len(shortlist) else (len(refined), len(shortlist))),
+        refit_progress=(
+            None if attempted >= shortlist_total else (len(refined), shortlist_total)
+        ),
         criterion=criterion,
     )
 
@@ -2932,6 +3203,21 @@ def run_refit(task: RefitTask, spectrum: Spectrum, *, weighting: Weighting) -> F
     return _full_fit(task.text, spectrum, weighting, task.restarts, task.seed)
 
 
+def run_evolve(
+    task: _EvolveTask, spectrum: Spectrum, *, weighting: Weighting
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """One offspring's tier-1 turn, for the same kind of worker as :func:`run_screen` and
+    :func:`run_refit`.
+
+    Builds its own :class:`FitContext` from the spectrum on every call rather than reading one
+    from a process-global: a browser's screening pool has no persistent per-worker state to
+    read one from, the same cost :func:`run_screen`/:func:`run_refit` already accept for their
+    own single fits.
+    """
+    context = FitContext.build(spectrum, weighting, None, 3.0)
+    return _evolve_one(task, spectrum, weighting=weighting, context=context)
+
+
 def _refit_worker(task: tuple[str, int, int]) -> dict[str, Any] | None:
     """Tier-2 refit in a worker process. The whole FitResult comes back, statistics included.
 
@@ -3077,6 +3363,63 @@ def _refit_shortlist(
             batch = plan.send(outcomes)
     except StopIteration as done:
         return list(done.value)
+
+
+def evolve_refit_plan(
+    alive: Sequence[Candidate],
+    *,
+    n_refine: int,
+    restarts: int,
+    seed: int,
+    chunk: int | None = None,
+    criterion: Criterion = DEFAULT_CRITERION,
+) -> Generator[RefitBatch, Sequence[RefitOutcome], list[Candidate]]:
+    """Tier 2 for the genetic search, with the *running* of it left to the caller.
+
+    Same shape as :func:`refit_plan` -- yields batches of :class:`RefitTask`, expects one
+    outcome per task back through ``send``, returns the final :class:`Candidate` list -- but a
+    separate generator rather than a second call into it, because two things it decides are
+    genuinely different here:
+
+    * **Which topologies are worth it.** :func:`_shortlist_candidates`, not :func:`_shortlist`:
+      this tier's input is already-fitted :class:`Candidate`\\ s with a real covariance behind
+      their score, not the cost-only approximation a bare screen has to make do with.
+    * **What order they are walked in.** :func:`_refit_order`, because -- unlike the exhaustive
+      stage's tier 2, which always finishes the whole shortlist -- this one answers to a
+      deadline and stops wherever it has got to; see that function's docstring for the measured
+      cost of getting the order wrong.
+
+    Both are pre-existing, documented decisions (:func:`_shortlist_candidates`,
+    :func:`_refit_order`); this only adds the batching boundary a caller drives.
+
+    A finished candidate is tagged with the generation of the shortlist entry that proposed it,
+    not generation 0 as :func:`refit_plan`'s always-exhaustive counterpart uses -- the genetic
+    search's own report needs to say which generation found what, which the exhaustive stage
+    has no equivalent of.
+
+    ``chunk`` is not optional the way it is in :func:`refit_plan`: this tier is deadline-bounded,
+    so batch size *is* how finely the caller can check the clock (:func:`_evolve` always passes
+    one), where the exhaustive stage's tier 2 never stops early and can default to one batch.
+    """
+    ordered = _refit_order(_shortlist_candidates(alive, n_refine, criterion), criterion)
+    done: list[Candidate] = []
+    size = max(len(ordered) if chunk is None else chunk, 1)
+    for start in range(0, len(ordered), size):
+        window = ordered[start : start + size]
+        outcomes = yield RefitBatch(
+            [RefitTask(c.circuit.to_string(), restarts, seed) for c in window],
+            sorted(done, key=lambda c: c.score(criterion)),
+            len(ordered),
+        )
+        if len(outcomes) != len(window):
+            raise ValueError(
+                f"evolve_refit_plan was sent {len(outcomes)} outcomes for {len(window)} tasks"
+            )
+        for candidate, outcome in zip(window, outcomes, strict=True):
+            result = _as_fit_result(outcome)
+            if result is not None:
+                done.append(Candidate(candidate.circuit, result, candidate.generation))
+    return sorted(done, key=lambda c: c.score(criterion))
 
 
 @contextlib.contextmanager

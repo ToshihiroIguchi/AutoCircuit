@@ -130,6 +130,15 @@ export function ReportScreen({
                 source: fitLabel,
               }),
           },
+          {
+            key: "fit-model-csv",
+            label: "Model spectrum (CSV)",
+            hint: "Frequency and the fitted circuit's impedance at each point — `fit --model-csv`.",
+            run: () =>
+              client.exportFit(manualFit.fit.fit, manualFit.spectrum, "model-csv", {
+                source: fitLabel,
+              }),
+          },
         ];
 
   if (report === null && manualFit === null && spectrum === null) {

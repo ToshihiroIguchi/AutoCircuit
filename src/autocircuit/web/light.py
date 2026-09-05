@@ -22,8 +22,11 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from io import StringIO
 from pathlib import Path
 from typing import Any
+
+import numpy as np
 
 from autocircuit import io
 from autocircuit.core.spectrum import WIRE_VERSION as SPECTRUM_WIRE_VERSION
@@ -59,7 +62,23 @@ from autocircuit.core.validate import WIRE_VERSION as VALIDATE_WIRE_VERSION
 #: exposes (``docs/TOPOLOGY_6PLUS_PLAN.md`` section 5.13). Both already had bridge-side defaults
 #: (0 and 7) matching ``GROWTH_DEFAULT``, so an old cached bundle that never sends them keeps its
 #: prior behaviour exactly -- this is a new capability, not a changed default.
-BRIDGE_VERSION = 12
+#: 13 (2026-09-05): ``read`` takes an optional ``hints`` object (``port_config``, ``negate_imag``)
+#: -- the same file-reading hints the CLI's ``--port-config``/``--negate-imag`` pass; a new light
+#: operation ``export_validation`` renders the CSV ``validate --residuals`` writes, and a manual
+#: fit export accepts ``kind: "model-csv"`` for the CSV ``fit --model-csv`` writes.
+#: 14 (2026-09-05): the search now runs ``discover(mode="auto")``'s own escalation past the
+#: exhaustive stage -- a new ``evolve_task`` op (one offspring's tier-1 turn) and
+#: ``discover_evolve`` (the fallback's own batch-in/batch-out driver, mirroring
+#: ``discover_screen``); ``discover_start`` takes the fallback's own knobs
+#: (``generations``, ``population``, ``min_elements``, ``search_restarts``, ``search_popsize``,
+#: ``search_maxiter``, ``search_tol``, ``warm_accept``), all defaulted to match
+#: ``discover()``'s own signature; ``discover_refit``'s response gains ``evolve``, which tells a
+#: driver seeing ``more`` whether the next call is ``discover_screen`` (a pool widening) or
+#: ``discover_evolve`` (the fallback); ``discover_start``/``discover_report`` now report
+#: ``mode: "auto"`` rather than the always-``"exhaustive"`` placeholder, since this search always
+#: runs that same escalation whether or not either stage actually fires; and
+#: ``discover_report`` gains ``generations``, zero unless the fallback ran.
+BRIDGE_VERSION = 14
 
 #: One operation: a request payload in, a JSON-safe result out.
 Operation = Callable[[dict[str, Any]], Any]
@@ -174,6 +193,33 @@ def _op_validate(payload: dict[str, Any]) -> dict[str, Any]:
     return {"validation": result.to_wire(spectrum)}
 
 
+def _op_export_validation(payload: dict[str, Any]) -> dict[str, Any]:
+    """The residuals CSV ``validate --residuals`` writes.
+
+    Recomputed from the spectrum rather than threaded across the wire as a second payload
+    shape: Lin-KK needs only numpy, so redoing it here costs nothing and keeps this export the
+    same code path as every other one in this module -- the panel's own verdict was already
+    produced by an identical call with the same (always default) ``mu``/``limit``.
+    """
+    spectrum = Spectrum.from_wire(payload["spectrum"])
+    result = lin_kk(
+        spectrum,
+        mu_criterion=float(payload.get("mu_criterion", DEFAULT_MU_CRITERION)),
+        residual_limit=float(payload.get("residual_limit", DEFAULT_RESIDUAL_LIMIT)),
+    )
+    rows = np.column_stack([spectrum.f, result.residual_real, result.residual_imag])
+    buffer = StringIO()
+    np.savetxt(
+        buffer, rows, delimiter=",", header="frequency_hz,residual_real,residual_imag",
+        comments="",
+    )
+    return {
+        "filename": "autocircuit-kk-residuals.csv",
+        "mime": "text/csv",
+        "content": buffer.getvalue(),
+    }
+
+
 #: The operations that need numpy and nothing else. Everything else is in
 #: :mod:`autocircuit.web.bridge`, and asking for one imports it.
 LIGHT_OPERATIONS: dict[str, Operation] = {
@@ -181,4 +227,5 @@ LIGHT_OPERATIONS: dict[str, Operation] = {
     "read": _op_read,
     "trim": _op_trim,
     "validate": _op_validate,
+    "export_validation": _op_export_validation,
 }

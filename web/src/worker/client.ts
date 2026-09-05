@@ -7,6 +7,9 @@ import type {
   CircuitWire,
   DrtWire,
   EditAction,
+  EvolveOutcomeWire,
+  EvolveStepWire,
+  EvolveTaskWire,
   ExcludedReportWire,
   ExcludedStartWire,
   ExcludedStepWire,
@@ -117,8 +120,22 @@ export interface DrtOptions {
   regularisation?: number;
 }
 
-/** Which file to write. The same three the command line writes. */
-export type ExportKind = "json" | "csv" | "netlist";
+/** Which file to write. The same ones the command line writes: `--json`, `--csv`, `--spice`,
+ *  and `model-csv` (`fit --model-csv`, manual fit only). */
+export type ExportKind = "json" | "csv" | "netlist" | "model-csv";
+
+/**
+ * File-reading hints for ambiguity a reader cannot resolve from the bytes alone.
+ *
+ * The same two the CLI's `--port-config`/`--negate-imag` pass -- a measurement-fixture fact,
+ * not a physics judgement, so it is safe for the person who ran the measurement to supply.
+ * Every reader accepts `**hints` and ignores the ones it does not recognise (`io/*.py`), so
+ * these are sent on every read rather than gated on the sniffed format.
+ */
+export interface ReadHints {
+  port_config?: "series_thru" | "shunt_thru";
+  negate_imag?: boolean;
+}
 
 /** What goes into one. Every field has a command-line counterpart. */
 export interface ExportOptions {
@@ -301,14 +318,20 @@ export class BridgeClient {
     return this.loadTimings;
   }
 
-  /** Read one dropped file, returning every sweep it holds. */
-  async readFile(file: File): Promise<SpectrumWire[]> {
+  /**
+   * Read one dropped file, returning every sweep it holds.
+   *
+   * `hints` carries a fixture fact sniffing cannot recover on its own, such as which of two
+   * physically different formulas a 2-port Touchstone file's S21 should be read with -- an
+   * empty object behaves exactly as before (`io.read_many`'s own defaults).
+   */
+  async readFile(file: File, hints: ReadHints = {}): Promise<SpectrumWire[]> {
     await this.ready();
     const bytes = await file.arrayBuffer();
     const uploaded = await this.send({ kind: "upload", id: 0, name: file.name, bytes }, [bytes]);
     const { path } = uploaded as { path: string };
     try {
-      const result = await this.call<{ spectra: SpectrumWire[] }>({ op: "read", path });
+      const result = await this.call<{ spectra: SpectrumWire[] }>({ op: "read", path, hints });
       return result.spectra;
     } catch (error) {
       // A reader's diagnostic names the file it failed on, which on the command line is the path
@@ -340,6 +363,17 @@ export class BridgeClient {
   async validate(spectrum: SpectrumWire): Promise<ValidationWire> {
     const result = await this.call<{ validation: ValidationWire }>({ op: "validate", spectrum });
     return result.validation;
+  }
+
+  /**
+   * The residuals CSV `validate --residuals` writes, for the Lin-KK verdict on this spectrum.
+   *
+   * Recomputed rather than built from the `ValidationWire` already on screen -- light because
+   * Lin-KK needs only numpy, so this stays a Python render like every other export instead of
+   * a second, JavaScript-side formatting of the same numbers.
+   */
+  async exportValidation(spectrum: SpectrumWire): Promise<ExportArtifactWire> {
+    return this.call<ExportArtifactWire>({ op: "export_validation", spectrum });
   }
 
   /** Every element the core knows, and the named pools it groups them into. */
@@ -424,6 +458,28 @@ export class BridgeClient {
     return result.fit;
   }
 
+  /**
+   * One offspring's turn in the genetic fallback: a warm polish, then the reduced-budget
+   * global search if the polish did not make it unnecessary. `task` travels exactly as
+   * `discoverEvolve` handed it out -- this never decides what a task means, only runs it.
+   */
+  async evolveTask(
+    spectrum: SpectrumWire,
+    task: EvolveTaskWire,
+    options: SearchOptions = {},
+  ): Promise<EvolveOutcomeWire> {
+    const result = await this.call<{
+      polish: FitResultWire | null;
+      search: FitResultWire | null;
+    }>({
+      op: "evolve_task",
+      spectrum,
+      task,
+      weighting: options.weighting,
+    });
+    return [result.polish, result.search];
+  }
+
   /** Enumerate the space and open both plans. Nothing is fitted yet. */
   async discoverStart(spectrum: SpectrumWire, options: SearchOptions): Promise<SearchPlanWire> {
     return this.call<SearchPlanWire>({
@@ -452,6 +508,20 @@ export class BridgeClient {
     results: Array<FitResultWire | null> | null,
   ): Promise<RefitStepWire> {
     return this.call<RefitStepWire>({ op: "discover_refit", job, results });
+  }
+
+  /**
+   * Hand back the last batch's polish/search outcomes, take the genetic fallback's next batch.
+   *
+   * Only tier 1 of the fallback goes through this: once it finishes, `discoverRefit` starts
+   * answering from the fallback's own shortlist instead of the exhaustive stage's, the same
+   * way it already does after a pool widening -- one tier-2 driving loop, not two.
+   */
+  async discoverEvolve(
+    job: string,
+    outcomes: EvolveOutcomeWire[] | null,
+  ): Promise<EvolveStepWire> {
+    return this.call<EvolveStepWire>({ op: "discover_evolve", job, outcomes });
   }
 
   /** The report, whether the search finished or was stopped. */

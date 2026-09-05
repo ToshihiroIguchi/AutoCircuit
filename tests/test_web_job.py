@@ -117,18 +117,38 @@ class Driver:
                 for text, restarts, seed in step["tasks"]
             ]
 
-    def run(self) -> None:
-        """Both tiers, and again for every further pass the search asks for.
+    def evolve(self) -> None:
+        """Run the genetic fallback's own tier 1, one offspring per round trip.
 
-        The loop is what a derived pool needs: tier 2 running out is no longer the end of the
-        search, because the completed fit is the evidence `choose_pool` reads. How many passes
-        there are is the core's decision, so the driver asks (`more`) rather than counting.
+        Mirrors what ``web/src/core/search.ts`` drives through ``client.evolveTask`` -- a
+        batch of tasks out, one wire-form ``(polish, search)`` outcome per task back in.
         """
-        for _ in range(4):  # a bound, so a driver bug cannot hang the suite
+        outcomes: list[list[Any]] | None = None
+        while True:
+            step = _call("discover_evolve", job=self.id, outcomes=outcomes)
+            if step["tasks"] is None:
+                return
+            outcomes = []
+            for task in step["tasks"]:
+                result = _call("evolve_task", spectrum=self.wire, task=task)
+                outcomes.append([result["polish"], result["search"]])
+
+    def run(self) -> None:
+        """Every tier, and again for every further pass the search asks for.
+
+        The loop is what a derived pool -- and the genetic fallback -- both need: tier 2
+        running out is no longer the end of the search, because the completed fit is the
+        evidence `choose_pool` and `_is_underfitted` each read. How many passes there are is
+        the core's decision, so the driver asks (`more`, `evolve`) rather than counting.
+        """
+        for _ in range(6):  # a bound, so a driver bug cannot hang the suite
             self.screen()
             self.refit()
-            if not self.refit_steps[-1]["more"]:
+            last = self.refit_steps[-1]
+            if not last["more"]:
                 return
+            if last["evolve"]:
+                self.evolve()
         raise AssertionError("the search asked for more passes than it can have")
 
     def cancel(self) -> dict[str, Any]:
@@ -252,7 +272,10 @@ def test_a_batched_screen_finds_the_same_candidates() -> None:
 def test_the_plan_says_how_much_work_it_committed_to() -> None:
     spectrum = _semicircle()
     driver = Driver(spectrum, pool=list(POOL), exhaustive_limit=LIMIT)
-    assert driver.plan["mode"] == "exhaustive"
+    # This search always runs `discover(mode="auto")`'s own escalation -- a possible pool
+    # widening, then a possible genetic fallback -- whether or not either stage actually
+    # fires, so "auto" is what the plan honestly commits to before either is known.
+    assert driver.plan["mode"] == "auto"
     assert driver.plan["limit"] == LIMIT
     assert driver.plan["candidates"] == sum(
         level["candidates"] for level in driver.plan["levels"]
@@ -426,7 +449,12 @@ def test_a_cost_of_null_means_hopeless_and_removes_the_topology() -> None:
     with a coverage claim and nothing to rank.
     """
     spectrum = _semicircle()
-    driver = Driver(spectrum, pool=list(POOL), exhaustive_limit=LIMIT)
+    # `max_elements=LIMIT` matters here: with room left above `complete_up_to`, an empty
+    # candidate list reads as underfit (`_best_runs_z([]) == -inf`) and the genetic fallback
+    # would otherwise open next -- correctly, the same way `discover(mode="auto")` would, but
+    # not what this test is about. Capping at the exhaustive limit keeps this test to tier 1's
+    # own hopeless-cost handling.
+    driver = Driver(spectrum, pool=list(POOL), exhaustive_limit=LIMIT, max_elements=LIMIT)
     step = _call("discover_screen", job=driver.id)
     assert step["tasks"] is not None
     hopeless = [None] * len(step["tasks"])
@@ -800,7 +828,10 @@ def test_the_json_export_is_the_file_the_command_line_writes() -> None:
     it is the CLI's own ``--json`` payload rather than a browser rendering of the same idea."""
     spectrum, driver = _finished_search()
     artifact = _call("export", kind="json", job=driver.id)
-    reference = discover(spectrum, pool=POOL, mode="exhaustive", exhaustive_limit=LIMIT, seed=0)
+    # "auto", matching the browser's own `mode` -- this search always runs that escalation
+    # (see `test_the_plan_says_how_much_work_it_committed_to`), and this comparison is a full
+    # dict equality rather than field-by-field, so the reference has to be built the same way.
+    reference = discover(spectrum, pool=POOL, mode="auto", exhaustive_limit=LIMIT, seed=0)
 
     assert artifact["filename"].endswith(".json")
     assert artifact["mime"] == "application/json"
@@ -1068,4 +1099,65 @@ def test_a_named_pool_is_an_assertion_and_is_never_widened() -> None:
     assert report["base_complete_up_to"] is None
     assert len(driver.screen_steps) == len(
         [step for step in driver.screen_steps if step["widened"] is False]
+    )
+
+
+# =============================================================================================
+# Gate W-EV1: the genetic fallback in the browser is discover(mode="auto")'s own escalation
+# =============================================================================================
+
+
+def test_the_genetic_fallback_in_the_browser_matches_discover_mode_auto() -> None:
+    """Gate W-EV1: on a spectrum the exhaustive stage cannot explain, the browser reaches for
+    the same genetic fallback ``discover(mode="auto")`` does, and reports what it reports.
+
+    ``pool=["R", "C"]`` against a diffusion spectrum is the same scenario
+    ``test_a_named_pool_is_an_assertion_and_is_never_widened`` uses to prove the fallback opens
+    at all; this asks the sharper question -- that what it reports then agrees with the CLI's
+    own ``mode="auto"``, field for field, not merely that it ran. ``generations``/``population``
+    are cut down from their defaults only to keep this gate fast; both sides get the same cut.
+    """
+    spectrum = _diffusion()
+    driver = Driver(
+        spectrum,
+        pool=["R", "C"],
+        exhaustive_limit=3,
+        screen_chunk=1,
+        seed=0,
+        generations=3,
+        population=6,
+    )
+    driver.run()
+    report = driver.report()
+
+    reference = discover(
+        spectrum,
+        pool=["R", "C"],
+        mode="auto",
+        exhaustive_limit=3,
+        seed=0,
+        generations=3,
+        population=6,
+    )
+
+    # The fallback actually ran, on both sides -- otherwise this gate would pass by never
+    # exercising the thing it exists to check.
+    assert reference.generations > 0
+    assert report["mode"] == "auto"
+
+    assert report["complete_up_to"] == reference.complete_up_to
+    assert report["n_evaluated"] == reference.n_evaluated
+    assert [row["circuit"] for row in report["candidates"]] == [
+        c.circuit.to_string() for c in reference.candidates
+    ]
+    assert [row["aicc"] for row in report["candidates"]] == [
+        c.aicc for c in reference.candidates
+    ]
+    assert report["recommended"] == (
+        None if reference.recommended is None else reference.recommended.circuit.to_string()
+    )
+
+    artifact = _call("export", kind="json", job=driver.id)
+    assert _without_clocks(json.loads(artifact["content"])) == _without_clocks(
+        reference.to_dict()
     )

@@ -9,11 +9,17 @@ answer with a number.
 
 What this module deliberately does **not** contain is any decision. Which topologies exist,
 where a level stops being affordable, what may then be claimed, which candidates earn a
-full-budget refit, and what each screen's early-abandon threshold is all come from
-:mod:`autocircuit.core.discover` -- from :func:`~autocircuit.core.discover.enumerate_candidates`,
-:func:`~autocircuit.core.discover.screen_plan` and
-:func:`~autocircuit.core.discover.refit_plan`, the same three the command line drives. This is
-a fourth driver of them, not a second search.
+full-budget refit, what each screen's early-abandon threshold is, and whether the search should
+fall back to a genetic search at all, all come from :mod:`autocircuit.core.discover` -- from
+:func:`~autocircuit.core.discover.enumerate_candidates`,
+:func:`~autocircuit.core.discover.screen_plan`, :func:`~autocircuit.core.discover.refit_plan`,
+:func:`~autocircuit.core.discover.evolve_plan` and
+:func:`~autocircuit.core.discover.evolve_refit_plan`, the same generators the command line
+drives. This is a fourth driver of them, not a second search -- and, since
+:func:`~autocircuit.core.discover._is_underfitted` is the same function
+:func:`~autocircuit.core.discover.discover`'s own ``mode="auto"`` calls, this search always runs
+that same escalation (exhaustive, then a possible pool widening, then a possible genetic
+fallback) rather than exhaustive search alone.
 
 Two consequences are worth stating because they are what a stopped run reports from:
 
@@ -39,18 +45,25 @@ from autocircuit.core.discover import (
     GROWTH_DEFAULT,
     GROWTH_REACH,
     REFINE_DEFAULT,
+    WARM_ACCEPT_FACTOR,
     WORKER_CHUNK,
     Candidate,
     DiscoveryResult,
     Enumeration,
+    EvolveBatch,
+    EvolvePlanResult,
     ExcludedBatch,
     ExcludedEquivalents,
     RefitBatch,
     RefitOutcome,
     ScreenTask,
     _best_runs_z,
+    _EvolveTask,
+    _is_underfitted,
     _unique_best,
     enumerate_candidates,
+    evolve_plan,
+    evolve_refit_plan,
     excluded_plan,
     excluded_target,
     exhaustive_limit_for,
@@ -97,6 +110,9 @@ _COUNTER = itertools.count(1)
 type ScreenGenerator = Generator[list[ScreenTask], Sequence[float], list[tuple[float, str]]]
 type RefitGenerator = Generator[RefitBatch, Sequence[RefitOutcome], list[Candidate]]
 type ExcludedGenerator = Generator[ExcludedBatch, Sequence[float], ExcludedEquivalents]
+#: One offspring's outcome: its polish, its search, either as a wire dict or None.
+type EvolveOutcome = tuple[dict[str, Any] | None, dict[str, Any] | None]
+type EvolveGenerator = Generator[EvolveBatch, Sequence[EvolveOutcome], EvolvePlanResult]
 
 
 class DiscoveryJob:
@@ -127,6 +143,16 @@ class DiscoveryJob:
         growth_width: int = GROWTH_DEFAULT,
         screen_chunk: int = SCREEN_CHUNK,
         refit_chunk: int = REFIT_CHUNK,
+        # The genetic fallback's own knobs, defaults matching `discover()`'s own signature
+        # exactly -- this is that same default becoming reachable here, not a second one.
+        generations: int = 30,
+        population: int = 40,
+        min_elements: int = 2,
+        search_restarts: int = 1,
+        search_popsize: int = 12,
+        search_maxiter: int = 60,
+        search_tol: float = 1e-5,
+        warm_accept: float = WARM_ACCEPT_FACTOR,
     ) -> None:
         unknown = [code for code in pool or () if code not in REGISTRY]
         if unknown:
@@ -218,6 +244,42 @@ class DiscoveryJob:
         # the growth stage is not allowed to claim -- the one-line version of the failure
         # `DiscoveryResult.grown_to` exists to prevent.
         self._enumerated: int | None = None
+
+        # The genetic fallback -- the same escalation `discover(mode="auto")` makes past the
+        # exhaustive stage, reachable here for the first time (`docs/WEB_UI_PLAN.md` section 7
+        # is what this replaces: "there is no generator behind the genetic stage"). Skipped
+        # under a skeleton for the same reason growth is: its mutation operator can delete an
+        # asserted element, and a report mixing constrained and unconstrained candidates could
+        # not state which space it had covered.
+        self.generations = generations
+        self.population = population
+        self.min_elements = min_elements
+        self.search_restarts = search_restarts
+        self.search_popsize = search_popsize
+        self.search_maxiter = search_maxiter
+        self.search_tol = search_tol
+        self.warm_accept = warm_accept
+        # Asked once tier 2 has genuinely finished, in the same order `discover(mode="auto")`
+        # asks it: after the widening question, never before, since a wider pool's own refit is
+        # what the trigger has to read.
+        self._evolve_checked = False
+        self._evolve_finished = False
+        self._evolve: EvolveGenerator | None = None
+        self._evolve_open = False
+        self._evolve_batch: EvolveBatch | None = None
+        self._evolve_issued = 0
+        self._evolve_outcomes: list[EvolveOutcome] | None = None
+        self._evolve_generation = 0
+        self._evolve_generations_run = 0
+        self._evolve_cache_size = 0
+        # What `self._candidates` held from the exhaustive (and possibly widened) stage, kept
+        # apart because the genetic fallback's own tier 2 then replaces `self._refit`/
+        # `self._candidates` for its own shortlist -- mirrors `_base_candidates` for the same
+        # reason: `discover()` merges every stage's candidates rather than replacing them.
+        self._pre_evolve_candidates: list[Candidate] = []
+        # True once `self._refit` holds the genetic fallback's own tier 2 rather than the
+        # exhaustive stage's, so a finished `self._refit` is read as the right kind of "done".
+        self._refit_is_evolve = False
 
     # -- Tier 1 ------------------------------------------------------------------------------
 
@@ -376,11 +438,11 @@ class DiscoveryJob:
         if self._refit is None:
             self._open_refit()
         if not self._refit_open or self._refit is None:
-            # A tier that had nothing to do is a tier that ran out of work, so the widening
+            # A tier that had nothing to do is a tier that ran out of work, so the next
             # question is due here too -- otherwise a search whose shortlist was empty would
-            # report a pool it never asked the data about.
+            # report a pool (or a fallback) it never asked the data about.
             if self._refit_done:
-                self._consider_widening()
+                self._refit_stage_finished()
             return None
         if self._batch is None:
             if self._outcomes is None:
@@ -391,7 +453,7 @@ class DiscoveryJob:
                 self._refit_open = False
                 self._refit_done = True
                 self._candidates = list(done.value)
-                self._consider_widening()
+                self._refit_stage_finished()
                 return None
             self._outcomes = None
             self._absorb(self._batch)
@@ -448,6 +510,187 @@ class DiscoveryJob:
         """The Pareto front of what has been refitted so far."""
         return pareto_front(self._candidates, self.criterion)
 
+    # -- The genetic fallback ------------------------------------------------------------------
+
+    @property
+    def evolve_pending(self) -> bool:
+        """True while the genetic fallback's own tier 1 is open, waiting to be driven through
+        :meth:`next_evolve`/:meth:`submit_evolve` before its tier 2 can start.
+
+        A driver reads this off :meth:`next_refit`'s response to tell "loop back to screening a
+        wider pool" apart from "drive the fallback next" -- the two things ``more`` alone
+        cannot distinguish, since both mean tier 2 is not the last word yet.
+        """
+        return self._evolve_open
+
+    def next_evolve(self) -> list[_EvolveTask] | None:
+        """The genetic fallback's next batch of offspring, or None once its own tier 1 has
+        finished -- successfully, or because :meth:`_consider_evolve` decided not to run it.
+
+        Each task is already wire-safe as a plain tuple: :func:`~autocircuit.core.discover.
+        evolve_plan` builds it from JSON scalars, a ``dict[str, float] | None`` and nothing
+        else, the same as :class:`~autocircuit.core.discover.ScreenTask` is for the screen.
+        """
+        if self.stopped or not self._evolve_open or self._evolve is None:
+            return None
+        if self._evolve_batch is None:
+            if self._evolve_outcomes is None:
+                raise ValueError("the previous evolve batch has not been submitted")
+            outcomes, self._evolve_outcomes = self._evolve_outcomes, None
+            try:
+                self._evolve_batch = self._evolve.send(outcomes)
+            except StopIteration as done:
+                self._finish_evolve_tier1(done.value)
+                return None
+            self._evolve_generation = self._evolve_batch.generation
+        batch, self._evolve_batch = self._evolve_batch, None
+        self._evolve_issued = len(batch.tasks)
+        return list(batch.tasks)
+
+    def submit_evolve(self, outcomes: list[EvolveOutcome]) -> None:
+        """Hand back one ``(polish, search)`` wire-form outcome per task in the batch just
+        issued."""
+        if len(outcomes) != self._evolve_issued:
+            raise ValueError(f"{len(outcomes)} outcomes for {self._evolve_issued} evolve tasks")
+        self._evolve_outcomes = list(outcomes)
+
+    def _finish_evolve_tier1(self, result: EvolvePlanResult) -> None:
+        """Tier 1 of the fallback is done; open tier 2 on its own shortlist.
+
+        ``result.scored`` is deduplicated the same way :func:`_evolve` deduplicates it before
+        building a shortlist -- :func:`~autocircuit.core.discover.evolve_refit_plan` expects
+        that already done, not a second copy of the rule inside it.
+        """
+        self._evolve_open = False
+        self._evolve_generations_run = result.generations_run
+        self._evolve_cache_size = result.cache_size
+        self._open_evolve_refit(_unique_best(result.scored, self.criterion))
+
+    def _open_evolve_refit(self, alive: list[Candidate]) -> None:
+        """Reopen tier 2 on the genetic fallback's own shortlist.
+
+        Exactly as :meth:`_consider_widening` reopens tier 2 on a wider pool's enumeration:
+        :meth:`next_refit`/:meth:`submit_refit` do not care which generator ``self._refit``
+        holds, so this reuses them rather than duplicating a second tier-2 driving loop.
+        ``self._candidates`` held the exhaustive (and possibly widened) stage's own refit until
+        now; :meth:`_merged_candidates` is what keeps it rather than discarding it, the same
+        way :attr:`_base_candidates` keeps the pre-widening pass.
+        """
+        self._refit_is_evolve = True
+        self._pre_evolve_candidates = list(self._candidates)
+        self._refit = evolve_refit_plan(
+            alive,
+            n_refine=self.n_refine,
+            restarts=self.final_restarts,
+            seed=self.seed,
+            chunk=self.refit_chunk,
+            criterion=self.criterion,
+        )
+        self._refit_done = False
+        self._batch = None
+        self._issued_refits = 0
+        self._outcomes = None
+        self._candidates = []
+        self._shortlisted = 0
+        try:
+            self._batch = next(self._refit)
+        except StopIteration as done:
+            self._refit_open = False
+            self._refit_done = True
+            self._candidates = list(done.value)
+            return
+        self._refit_open = True
+        self._absorb(self._batch)
+
+    def _merged_candidates(self) -> list[Candidate]:
+        """Every candidate fitted so far, in the same union ``discover(mode="auto")`` builds
+        at its own two merge points: a wider pool's own refit (if one ran), the genetic
+        fallback's own refit (if it ran), and whichever tier-2 pass ``self._candidates`` holds
+        right now -- each contributing the better fit where their spaces overlap.
+        """
+        if not self._base_candidates and not self._pre_evolve_candidates:
+            return self._candidates
+        return _unique_best(
+            self._base_candidates + self._pre_evolve_candidates + self._candidates,
+            self.criterion,
+        )
+
+    def _consider_evolve(self) -> None:
+        """Ask whether the genetic fallback should run.
+
+        Literally ``discover(mode="auto")``'s own trigger at its own escalation point
+        (:func:`~autocircuit.core.discover._is_underfitted`, no skeleton, room left under
+        ``max_elements``) -- not a re-implementation of it, so this is that same default
+        becoming reachable here rather than a second opinion about when to use it. The seeds
+        are the current best five candidates, exactly as ``discover()`` warm-starts the
+        fallback's initial population from what the exhaustive stage already found.
+        """
+        if self._evolve_checked:
+            return
+        self._evolve_checked = True
+        complete_up_to = self.coverage_level
+        candidates = self._merged_candidates()
+        if (
+            self.frame is not None
+            or not _is_underfitted(candidates)
+            or self.max_elements <= (complete_up_to or 0)
+        ):
+            self._evolve_finished = True
+            return
+        self._evolve = evolve_plan(
+            pool=self.pool,
+            generations=self.generations,
+            population=self.population,
+            max_elements=self.max_elements,
+            min_elements=max((complete_up_to or 0) + 1, self.min_elements),
+            seed=self.seed,
+            search_restarts=self.search_restarts,
+            search_popsize=self.search_popsize,
+            search_maxiter=self.search_maxiter,
+            search_tol=self.search_tol,
+            seeds=[c.circuit.to_string() for c in candidates[:5]],
+            warm_accept=self.warm_accept,
+            criterion=self.criterion,
+            # One offspring per round trip: the browser fans a generation across its own
+            # worker pool exactly as it fans a screen, rather than this generator batching
+            # several into one round trip the way a `multiprocessing.Pool` dispatch would.
+            item_chunk=1,
+        )
+        try:
+            self._evolve_batch = next(self._evolve)
+        except StopIteration as done:
+            self._finish_evolve_tier1(done.value)
+            return
+        self._evolve_open = True
+        self._evolve_generation = self._evolve_batch.generation
+
+    def _refit_stage_finished(self) -> None:
+        """Called whenever ``self._refit`` has just run out of work, whichever generator it
+        holds.
+
+        The exhaustive stage's tier 2 finishing raises the widen-then-evolve question
+        (:meth:`_consider_next_stage`); the genetic fallback's own tier 2 finishing needs no
+        further question -- it *is* the answer to that question, the same way
+        ``discover(mode="auto")`` returns straight from ``_evolve``'s own result once it
+        completes.
+        """
+        if self._refit_is_evolve:
+            self._evolve_finished = True
+        else:
+            self._consider_next_stage()
+
+    def _consider_next_stage(self) -> None:
+        """After the exhaustive stage's tier 2 finishes, ask in order: does the pool need
+        widening, then does the fit need the genetic fallback -- the same two questions
+        ``discover(mode="auto")`` asks at its own two escalation points, in the same order and
+        for the same reason :meth:`_consider_widening` gives: the pool axis is cheap and
+        reliable, so it is tried first, and the fallback only runs once the data has been
+        given every element it might be missing.
+        """
+        self._consider_widening()
+        if self._refit_done and (self._considered_widening or not self.derive_pool):
+            self._consider_evolve()
+
     # -- Finishing ---------------------------------------------------------------------------
 
     def cancel(self) -> None:
@@ -461,6 +704,9 @@ class DiscoveryJob:
         if self._screen_open:
             self._screen.close()
             self._screen_open = False
+        if self._evolve_open and self._evolve is not None:
+            self._evolve.close()
+            self._evolve_open = False
         if self._refit_open and self._refit is not None:
             self._refit.close()
             self._refit_open = False
@@ -539,16 +785,19 @@ class DiscoveryJob:
 
     @property
     def finished(self) -> bool:
-        """True once both tiers ran out of work of their own accord.
+        """True once every stage ran out of work of its own accord -- the exhaustive screen,
+        its tier 2, a possible pool widening, and a possible genetic fallback and its own
+        tier 2.
 
-        Not the same as "no longer running": cancelling also closes both generators, and a
-        report that could not tell the difference would present a stopped search as a
+        Not the same as "no longer running": cancelling also closes every open generator, and
+        a report that could not tell the difference would present a stopped search as a
         finished one.
         """
         return (
             self._screen_done
             and self._refit_done
             and (self._considered_widening or not self.derive_pool)
+            and self._evolve_finished
         )
 
     def candidate(self, text: str | None = None) -> Candidate:
@@ -581,23 +830,22 @@ class DiscoveryJob:
             # Nothing was refitted, not even opened -- but the shortlist size is knowable
             # without fitting, and "0 of 37" is a far more useful thing to report than "0".
             self._open_refit()
-        # After a widening there are two passes' worth of candidates and they are merged, not
-        # replaced: see `_consider_widening`. `_unique_best` is what `discover` uses for the
-        # same merge, so a topology screened in both pools is reported once, at its better fit.
-        merged = (
-            _unique_best(self._base_candidates + self._candidates, self.criterion)
-            if self._base_candidates
-            else self._candidates
-        )
-        candidates = sorted(merged, key=lambda c: c.score(self.criterion))
+        # After a widening, and after the genetic fallback, there are more than one pass's
+        # worth of candidates and they are merged, not replaced -- see `_merged_candidates`.
+        candidates = sorted(self._merged_candidates(), key=lambda c: c.score(self.criterion))
         return DiscoveryResult(
             candidates=candidates,
             pareto=pareto_front(candidates, self.criterion),
-            n_evaluated=self._base_screened + len(self._scored),
-            generations=0,
+            n_evaluated=self._base_screened + len(self._scored) + self._evolve_cache_size,
+            generations=self._evolve_generations_run,
             elapsed_s=time.perf_counter() - self.started,
             pool=self.pool,
-            mode="exhaustive",
+            # This search always runs the same escalation `discover(mode="auto")` does --
+            # widen the pool, then fall back to the genetic search -- whether or not either
+            # one actually fires, so "auto" is the honest description regardless (mirrors
+            # `discover()`'s own return, which reports the mode it was *asked* to run under,
+            # not merely the stages that happened to trigger).
+            mode="auto",
             complete_up_to=self.coverage_level,
             grown_to=self.grown_to,
             base_complete_up_to=self.base_complete_up_to,
@@ -868,7 +1116,9 @@ def plan_summary(job: DiscoveryJob) -> dict[str, Any]:
         # the plan the user is looking at is the *first* of up to two.
         "derive_pool": job.derive_pool,
         "skeleton": None if job.frame is None else job.frame.to_string(),
-        "mode": "exhaustive",
+        # This search always runs `discover(mode="auto")`'s own escalation -- widen the pool,
+        # then fall back to the genetic search -- whether or not either stage ends up firing.
+        "mode": "auto",
         "screen_chunk": job.screen_chunk,
         "refit_chunk": job.refit_chunk,
     }
@@ -911,6 +1161,10 @@ def report_payload(job: DiscoveryJob) -> dict[str, Any]:
             else {c.circuit.to_string(): result.placements_of(c) for c in result.pareto}
         ),
         "n_evaluated": result.n_evaluated,
+        # Zero unless the genetic fallback ran, in which case it is how many of its generations
+        # actually completed -- the browser's equivalent of the CLI's own `--json` field, absent
+        # here until the fallback became reachable.
+        "generations": result.generations,
         "complete_up_to": result.complete_up_to,
         # Sent beside `complete_up_to` and never merged into it: this is the largest size the
         # *growth* stage reached, and it licenses a much weaker sentence than completeness does.

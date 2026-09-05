@@ -29,7 +29,7 @@
 // pool would be four more Pyodide workers.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BridgeClient, BridgeError, type SearchOptions } from "./worker/client";
+import { BridgeClient, BridgeError, type ReadHints, type SearchOptions } from "./worker/client";
 import type { LoadStage } from "./worker/protocol";
 import type {
   CatalogueWire,
@@ -212,6 +212,10 @@ export function App() {
   /** Files being read, including ones chosen before the runtime was up. See `loadFile`. */
   const [pending, setPending] = useState<PendingFile[]>([]);
   const [dragActive, setDragActive] = useState(false);
+  // A measurement-fixture fact sniffing cannot recover on its own -- see `ReadHints`. Applies to
+  // every file read next, the same way the CLI's `--port-config`/`--negate-imag` apply to one
+  // whole invocation rather than to a single reader.
+  const [readHints, setReadHints] = useState<ReadHints>({});
   // The element catalogue: what the loaded core was built with, so it cannot change while the
   // page is open. Fetched once here rather than by each of the two screens that need it -- the
   // palette on Fit and the pool menu on Discover -- and by the search, which needs the pool.
@@ -327,7 +331,7 @@ export function App() {
       const ticket = nextId();
       setPending((prev) => [...prev, { id: ticket, name: file.name }]);
       try {
-        const wires = await client.readFile(file);
+        const wires = await client.readFile(file, readHints);
         const multiple = wires.length > 1;
         const entries: LoadedSpectrum[] = wires.map((wire, index) => ({
           id: nextId(),
@@ -346,7 +350,7 @@ export function App() {
         setPending((prev) => prev.filter((entry) => entry.id !== ticket));
       }
     },
-    [client, runValidation],
+    [client, runValidation, readHints],
   );
 
   const handleFiles = useCallback(
@@ -797,6 +801,9 @@ export function App() {
             onDismissError={dismissFileError}
             onApplyTrim={applyTrim}
             onResetTrim={resetTrim}
+            readHints={readHints}
+            onReadHints={setReadHints}
+            client={client}
           />
         ) : screen === "fit" ? (
           <FitScreen

@@ -95,6 +95,52 @@ print(json.dumps({{
     assert answers["validate"] is True
 
 
+def test_read_hints_reach_the_reader(tmp_path: Path) -> None:
+    """``negate_imag`` is the same hint the CLI's ``--negate-imag`` passes, threaded from the
+    request payload through :func:`autocircuit.io.read_many` -- not a second, browser-side
+    interpretation of the file.
+    """
+    csv = tmp_path / "example.csv"
+    csv.write_text(
+        "Frequency,Re(Z),Im(Z)\n1000,10.0,-5.0\n",
+        encoding="utf8",
+    )
+    answers = _run(f"""
+plain = ask({{"op": "read", "path": {str(csv)!r}}})
+negated = ask({{"op": "read", "path": {str(csv)!r}, "hints": {{"negate_imag": True}}}})
+print(json.dumps({{
+    "plain_im": plain["result"]["spectra"][0]["z"]["im"][0],
+    "negated_im": negated["result"]["spectra"][0]["z"]["im"][0],
+}}))
+""")
+    assert answers["plain_im"] == -5.0
+    assert answers["negated_im"] == 5.0
+
+
+def test_export_validation_matches_the_residuals_flag(tmp_path: Path) -> None:
+    """The CSV a Report-screen download produces is the same text ``validate --residuals``
+    writes for the same spectrum, header included.
+    """
+    csv = tmp_path / "example.csv"
+    csv.write_text(
+        "Frequency,Re(Z),Im(Z)\n"
+        + "\n".join(f"{10**k},{10.0 + k},{-100.0 / 10**k}" for k in range(6))
+        + "\n",
+        encoding="utf8",
+    )
+    answers = _run(f"""
+read = ask({{"op": "read", "path": {str(csv)!r}}})
+spectrum = read["result"]["spectra"][0]
+export = ask({{"op": "export_validation", "spectrum": spectrum}})
+print(json.dumps(export["result"]))
+""")
+    assert answers["filename"] == "autocircuit-kk-residuals.csv"
+    assert answers["mime"] == "text/csv"
+    lines = answers["content"].splitlines()
+    assert lines[0] == "frequency_hz,residual_real,residual_imag"
+    assert len(lines) == 1 + 6
+
+
 def test_version_says_what_the_first_stage_can_know(tmp_path: Path) -> None:
     """The handshake and the two menus, all answerable before the fitter exists."""
     answer = _run("""
@@ -147,7 +193,13 @@ print(json.dumps(ask({"op": "elements"})))
 
 
 def test_the_light_table_holds_exactly_the_operations_the_first_stage_promises() -> None:
-    assert sorted(LIGHT_OPERATIONS) == ["read", "trim", "validate", "version"]
+    assert sorted(LIGHT_OPERATIONS) == [
+        "export_validation",
+        "read",
+        "trim",
+        "validate",
+        "version",
+    ]
 
 
 def test_the_full_bridge_answers_everything_through_the_same_handle() -> None:

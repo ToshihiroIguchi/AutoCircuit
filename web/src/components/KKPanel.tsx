@@ -5,10 +5,32 @@
 import type { LoadedSpectrum } from "../core/types";
 import { decodeFloat } from "../core/wire";
 import { formatNumber, formatPercent } from "../utils/format";
+import type { BridgeClient } from "../worker/client";
+import { ExportPanel, type ExportItem } from "./ExportPanel";
 import { KKBadge, kkBadgeState } from "./KKBadge";
 
-export function KKPanel({ spectrum }: { spectrum: LoadedSpectrum }) {
+export function KKPanel({
+  spectrum,
+  client,
+}: {
+  spectrum: LoadedSpectrum;
+  client: BridgeClient;
+}) {
   const state = kkBadgeState(spectrum);
+  // The window Lin-KK was actually run against -- `spectrum.validation` describes `current`,
+  // not `original`, once a trim has been applied (see `App.tsx`'s `runValidation` calls).
+  const validated = spectrum.current;
+  const exports: ExportItem[] =
+    spectrum.validation === null
+      ? []
+      : [
+          {
+            key: "kk-residuals",
+            label: "Residuals (CSV)",
+            hint: "Per-point residuals against the Lin-KK reconstruction — `validate --residuals`.",
+            run: () => client.exportValidation(validated),
+          },
+        ];
 
   return (
     <section className="kk-panel">
@@ -56,6 +78,11 @@ export function KKPanel({ spectrum }: { spectrum: LoadedSpectrum }) {
             </div>
           </dl>
           <pre className="kk-panel__summary">{spectrum.validation.summary}</pre>
+          <ExportPanel
+            title="Download"
+            description="Written in Python by the same code `validate --residuals` runs."
+            items={exports}
+          />
         </>
       )}
     </section>

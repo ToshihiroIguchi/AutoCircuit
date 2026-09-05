@@ -50,7 +50,7 @@ from autocircuit.core.circuit import (
     subtree_at,
     subtree_paths,
 )
-from autocircuit.core.discover import RefitTask, ScreenTask, run_refit, run_screen
+from autocircuit.core.discover import RefitTask, ScreenTask, run_evolve, run_refit, run_screen
 from autocircuit.core.drt import DEFAULT_POINTS_PER_DECADE, drt
 from autocircuit.core.drt import WIRE_VERSION as DRT_WIRE_VERSION
 from autocircuit.core.elements import POOLS, REGISTRY
@@ -276,6 +276,38 @@ def _op_refit_task(payload: dict[str, Any]) -> dict[str, Any]:
     return {"fit": None if result is None else result.to_wire()}
 
 
+def _op_evolve_task(payload: dict[str, Any]) -> dict[str, Any]:
+    """One offspring's tier-1 turn for the genetic fallback: a warm polish, then the
+    reduced-budget global search if the polish did not make it unnecessary -- see
+    :func:`~autocircuit.core.discover.run_evolve`.
+
+    ``task`` is the wire form of one :data:`~autocircuit.core.discover._EvolveTask`, in the
+    same field order that type already has -- ``job.next_evolve`` builds it, so nothing here
+    decides what a task means, only how to unpack it.
+    """
+    spectrum = Spectrum.from_wire(payload["spectrum"])
+    text, seed, warm, reference, warm_accept, need_search, restarts, popsize, maxiter, tol = (
+        payload["task"]
+    )
+    polish, search = run_evolve(
+        (
+            str(text),
+            int(seed),
+            None if warm is None else {str(k): float(v) for k, v in warm.items()},
+            None if reference is None else float(reference),
+            job.from_wire_cost(warm_accept),
+            bool(need_search),
+            int(restarts),
+            int(popsize),
+            int(maxiter),
+            float(tol),
+        ),
+        spectrum,
+        weighting=job.cast_weighting(payload.get("weighting", "modulus")),
+    )
+    return {"polish": polish, "search": search}
+
+
 def _op_discover_start(payload: dict[str, Any]) -> dict[str, Any]:
     """Enumerate the candidate space and open both plans. Nothing is fitted yet.
 
@@ -312,6 +344,17 @@ def _op_discover_start(payload: dict[str, Any]) -> dict[str, Any]:
         growth_width=int(payload.get("growth_width", job.GROWTH_DEFAULT)),
         screen_chunk=int(payload.get("screen_chunk", job.SCREEN_CHUNK)),
         refit_chunk=int(payload.get("refit_chunk", job.REFIT_CHUNK)),
+        # The genetic fallback's own knobs. Defaults match `discover()`'s own signature, since
+        # an old cached bundle that never sends these keeps that same default rather than a
+        # bridge-invented one.
+        generations=int(payload.get("generations", 30)),
+        population=int(payload.get("population", 40)),
+        min_elements=int(payload.get("min_elements", 2)),
+        search_restarts=int(payload.get("search_restarts", 1)),
+        search_popsize=int(payload.get("search_popsize", 12)),
+        search_maxiter=int(payload.get("search_maxiter", 60)),
+        search_tol=float(payload.get("search_tol", 1e-5)),
+        warm_accept=float(payload.get("warm_accept", job.WARM_ACCEPT_FACTOR)),
     )
     return job.plan_summary(job.install(started))
 
@@ -370,6 +413,40 @@ def _op_discover_refit(payload: dict[str, Any]) -> dict[str, Any]:
         # the driver has to go back to screening. It asks this rather than being told to loop a
         # fixed number of times, because how many passes there are is the core's decision.
         "more": not running.finished,
+        # `more` alone cannot say *which* stage is due next -- a wider pool needs screening
+        # again, the genetic fallback needs `discover_evolve` instead. This is that answer, so
+        # a driver seeing `more` know which of the two to call before coming back here.
+        "evolve": running.evolve_pending,
+    }
+
+
+def _op_discover_evolve(payload: dict[str, Any]) -> dict[str, Any]:
+    """Take the last batch's polish/search outcomes, hand out the genetic fallback's next
+    batch of offspring.
+
+    Its own tier 2 is not a separate operation: once tier 1 finishes, ``next_refit`` starts
+    answering from the fallback's own shortlist instead, so a driver goes back to
+    ``discover_refit`` the same way it already does after a pool widening.
+    """
+    running = job.current(str(payload["job"]))
+    outcomes = payload.get("outcomes")
+    if outcomes is not None:
+        running.submit_evolve([(o[0], o[1]) for o in outcomes])
+    tasks = running.next_evolve()
+    return {
+        "tasks": (
+            None if tasks is None
+            else [
+                # `warm_accept` ships as `math.inf` by default (WARM_ACCEPT_FACTOR), unlike
+                # `reference`, which is a real cost or `None` and therefore already JSON-safe.
+                [text, seed, warm, reference, job.to_wire_cost(warm_accept), need_search,
+                 restarts, popsize, maxiter, tol]
+                for (
+                    text, seed, warm, reference, warm_accept, need_search,
+                    restarts, popsize, maxiter, tol,
+                ) in tasks
+            ]
+        ),
     }
 
 
@@ -683,9 +760,11 @@ OPERATIONS: dict[str, Operation] = {
     "fit": _op_fit,
     "screen_task": _op_screen_task,
     "refit_task": _op_refit_task,
+    "evolve_task": _op_evolve_task,
     "discover_start": _op_discover_start,
     "discover_screen": _op_discover_screen,
     "discover_refit": _op_discover_refit,
+    "discover_evolve": _op_discover_evolve,
     "discover_report": _op_discover_report,
     "discover_candidate": _op_discover_candidate,
     "discover_objective": _op_discover_objective,

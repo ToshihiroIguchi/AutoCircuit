@@ -118,7 +118,7 @@ check(
   // keeping its own copy of the list -- a copy could say "light" about an operation that is not.
   "and it names the operations this stage can answer",
   JSON.stringify(version.result?.light_operations) ===
-    JSON.stringify(["read", "trim", "validate", "version"]),
+    JSON.stringify(["export_validation", "read", "trim", "validate", "version"]),
   JSON.stringify(version.result?.light_operations),
 );
 pyodide.FS.mkdirTree("/uploads/0");
@@ -355,7 +355,10 @@ check(
   search.result?.levels?.every((level) => typeof level.candidates === "number") === true,
   JSON.stringify(search.result?.levels),
 );
-check("the search is exhaustive; the browser has no genetic fallback", search.result?.mode === "exhaustive");
+// This search always runs `discover(mode="auto")`'s own escalation -- a possible pool
+// widening, then a possible genetic fallback -- whether or not either stage actually fires on
+// this particular fit, so "auto" is what the plan honestly commits to.
+check("the search runs discover(mode=\"auto\")'s own escalation", search.result?.mode === "auto");
 
 check("a whole search runs to the end", drive(search.result.job) === "done");
 const report = ask({ op: "discover_report", job: search.result.job }).result;
@@ -482,6 +485,91 @@ check(
   "a job that has been replaced is refused rather than confused with the current one",
   ask({ op: "discover_screen", job: search.result.job }).ok === false,
 );
+
+console.log("genetic fallback");
+// A diffusion spectrum against pool R,C alone: no finite R/C/L/CPE tree reproduces a Warburg
+// element, so the exhaustive stage's best fit looks systematically underfit and
+// discover(mode="auto") falls back to the genetic search -- reachable in the browser for the
+// first time (docs/EVOLVE_WEB_PLAN.md). generations/population are cut down from their
+// defaults only to keep this check fast.
+pyodide.runPython(`
+_diffusion_spectrum = simulate(
+    "R1-Ws1",
+    log_frequencies(1e-2, 1e3, 6),
+    {"R1.R": 10.0, "Ws1.R": 100.0, "Ws1.tau": 1.0},
+    noise=0.01,
+    seed=0,
+)
+_diffusion_wire = json.dumps(_diffusion_spectrum.to_wire())
+`);
+const diffusion = JSON.parse(pyodide.globals.get("_diffusion_wire"));
+
+const evolveSearch = ask({
+  op: "discover_start",
+  spectrum: diffusion,
+  pool: ["R", "C"],
+  exhaustive_limit: 3,
+  generations: 3,
+  population: 6,
+  restarts: 1,
+});
+check(
+  "a search that cannot be explained by the pool starts",
+  evolveSearch.ok === true,
+  JSON.stringify(evolveSearch.error),
+);
+
+function driveWithEvolve(job) {
+  for (let pass = 0; pass < 6; pass += 1) {
+    let costs = null;
+    for (;;) {
+      const step = ask({ op: "discover_screen", job, costs });
+      if (step.ok !== true) throw new Error(JSON.stringify(step.error));
+      if (step.result.tasks === null) break;
+      costs = step.result.tasks.map(
+        ([circuit, abandon]) =>
+          ask({ op: "screen_task", spectrum: diffusion, circuit, abandon_above: abandon })
+            .result.cost,
+      );
+    }
+    let results = null;
+    let last = null;
+    for (;;) {
+      const step = ask({ op: "discover_refit", job, results });
+      if (step.ok !== true) throw new Error(JSON.stringify(step.error));
+      last = step.result;
+      if (step.result.tasks === null) break;
+      results = step.result.tasks.map(
+        ([circuit, restarts, seed]) =>
+          ask({ op: "refit_task", spectrum: diffusion, circuit, restarts, seed }).result.fit,
+      );
+    }
+    if (last.evolve) {
+      let outcomes = null;
+      for (;;) {
+        const step = ask({ op: "discover_evolve", job, outcomes });
+        if (step.ok !== true) throw new Error(JSON.stringify(step.error));
+        if (step.result.tasks === null) break;
+        outcomes = step.result.tasks.map((task) => {
+          const result = ask({ op: "evolve_task", spectrum: diffusion, task }).result;
+          return [result.polish, result.search];
+        });
+      }
+      continue;
+    }
+    if (!last.more) return;
+  }
+  throw new Error("the search asked for more passes than it can have");
+}
+
+driveWithEvolve(evolveSearch.result.job);
+const evolveReport = ask({ op: "discover_report", job: evolveSearch.result.job }).result;
+check(
+  "the genetic fallback actually ran",
+  evolveReport?.generations > 0,
+  JSON.stringify(evolveReport?.generations),
+);
+check("its report still commits to discover(mode=\"auto\")", evolveReport?.mode === "auto");
 
 console.log("what the skeleton excluded");
 // The Report screen's own job: a pass over the topologies the assertion removed, driven exactly
