@@ -2139,8 +2139,10 @@ ngspice in WSL); `ruff check .` and `mypy` clean; `npm run check` and `npm run s
 
 The Fit screen still shows no report of either kind; `fit --objective` covers mode 1 on the
 command line. The multi-condition fit -- several sweeps at different temperature or bias, fitted
-to one circuit -- remains the only instrument that could *break* a degeneracy, and it belongs to
-`interpret` alone (§6).
+to one circuit -- was built and its gates measured passing, then withdrawn on a scope decision
+(`docs/IMPACT_PLAN.md` §3): relating a part's parameters across experimental conditions via a
+named physical law is the analyst's own judgement to make outside this software, not a
+narrowing this software should offer.
 
 ## 29. The breeding pool loses its width, and the islands lose their case
 
