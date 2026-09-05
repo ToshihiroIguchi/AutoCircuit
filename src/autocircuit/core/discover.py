@@ -320,10 +320,17 @@ GROWTH_WIDTH = 4
 #: weaker claim than growing two from a complete level 5, and the coverage sentence cannot tell
 #: the two apart. Bounding the *distance* keeps the sentence honest at any exhaustive limit.
 #:
-#: It also bounds the cost where it would otherwise run away: with the production limit of 5 and
-#: ``max_elements=7`` this changes nothing, and on a small test space with the limit at 3 it is
-#: the difference between two grown levels and four.
-GROWTH_REACH = 2
+#: [measured, docs/TOPOLOGY_6PLUS_PLAN.md section 5.13, experiment X10] Raised from 2 to 3 after
+#: an eight-element (four-block Maxwell-Wagner) chain, ``p(R1,C1)-p(R2,C2)-p(R3,C3)-p(R4,C4)``,
+#: was found to sit at the old reach's own ceiling: with the production exhaustive limit of 5,
+#: reach 2 caps growth at 7 elements regardless of ``max_elements``, so an eight-element truth
+#: could never be screened at all -- 0/13 seeds reported. Reach 3 reaches it on 10/10 seeds
+#: (par8, ~35 s, ~700 topologies fitted) and on the mixed-shape sibling mix8 (5/5), without
+#: over-growing past the truth's own size when given a further element of headroom (10/10 at
+#: ``max_elements=9``). The series-shaped sibling ser8 stays at 0/5 -- unchanged from the
+#: already-documented ser6/ser7 failure at reach 2, not a new regression reach 3 introduces.
+#: Raising this further than 3 is not measured and is not implied safe by this result.
+GROWTH_REACH = 3
 
 #: Whether growth runs when the caller says nothing. **Zero, and that is a decision.**
 #:

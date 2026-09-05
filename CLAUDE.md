@@ -526,7 +526,16 @@ static-site Web UI running the same core via WASM (Pyodide).
    `GROWTH_DEFAULT` stays `0` for the reason X4 already gave it, now doubled: no report-side check
    measured here is trustworthy enough to promise the user the sixth element is real, and the
    series shape X2 flagged is where every candidate agrees least — at the project's own standard
-   cell, `ser7` is read "no" by all four.
+   cell, `ser7` is read "no" by all four. **X10 (§5.13, complete)** answered a narrower question a
+   user's own request raised: growth's inability to reach eight elements was never a measured
+   ceiling, only `GROWTH_REACH = 2` capping growth at `complete_up_to + 2` — a hard seven-element
+   wall regardless of `max_elements`. Raising it to 3 recovers an eight-element four-block
+   Maxwell-Wagner chain (`par8`, the parallel shape X4 already found reliable) on 10/10 seeds and
+   its mixed-shape sibling `mix8` on 5/5, at the same ~1.5-1.7x cost §5.5 measured for one growth
+   level, without over-growing past the truth's own size when given a further element of headroom
+   (10/10 at `max_elements=9`); the series-shaped sibling `ser8` stays at 0/5, unchanged from the
+   already-documented `ser6`/`ser7` failure at reach 2 — not a new regression reach 3 introduces.
+   `GROWTH_REACH = 3` shipped; `GROWTH_DEFAULT` stays `0` for the same reason it always has.
 
 17. `docs/SEARCH_TIME_PLAN.md` — where the topology search spends its time, and the levers on
    it. **§3.1 implemented and shipped, §3.2 measured and its fix rejected, §4.2 measured and

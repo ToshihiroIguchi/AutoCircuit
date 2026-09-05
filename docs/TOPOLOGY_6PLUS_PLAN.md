@@ -1029,6 +1029,84 @@ first pass might expect — §5.10 measures two of `ser6`'s three seeds landing 
 front with a Δaicc in the tens and every parameter resolved, and the parsimony rule still
 declining it, purely on chi²-threshold width rather than on any unresolved-parameter finding.
 
+### 5.13 X10 — growth's reach past seven elements was a cost decision, not a measured ceiling [measured]
+
+**The question.** A user asked to fit an eight-element circuit -- four Maxwell-Wagner relaxation
+blocks in series, `p(R1,C1)-p(R2,C2)-p(R3,C3)-p(R4,C4)` -- reliably and automatically. That shape
+is `par8` in this document's own taxonomy (§4.6): every element sits inside a parallel block, so
+`truths.shape_of` reads it as "parallel", the shape §5.9's X4 already measured growth recovering
+completely at six and seven elements (`par6`/`par7`, 12/12). Depth, not shape, turned out to be
+the obstacle. `GROWTH_REACH` (§5.8, `discover.py`) caps growth at `complete_up_to + 2` regardless
+of `max_elements` -- with the production exhaustive limit of 5, that is a hard ceiling of seven
+elements no caller can raise by any argument `discover()` exposes. An eight-element topology could
+never be screened at all, independent of `growth_width`, `max_elements`, or how identifiable the
+truth is.
+
+**Why the cap was two and not something larger was never itself measured.** The comment above
+`GROWTH_REACH` gave a real reason for bounding the *distance* rather than leaving it unbounded --
+the further growth runs from the last complete level, the narrower the sample its survivors were
+drawn from, and the coverage sentence cannot tell that apart from a stronger claim -- but the
+specific value 2 was picked because "with the production limit of 5 and `max_elements=7` this
+changes nothing", i.e. it matched what X4 had already tested, not because 3 was tried and found
+unsafe.
+
+**Method.** Three new eight-element truths, one per shape, added to `benchmarks/six_plus/depth8.py`
+rather than to `truths.py`'s own `TRUTHS` tuple (`recovery.py` hard-codes `max_elements=7`, so
+mixing an eight-element truth into that registry without also touching every consumer would
+silently under-test it):
+
+* `par8` -- the motivating shape, `p(R1,C1)-p(R2,C2)-p(R3,C3)-p(R4,C4)`.
+* `mix8` -- extends `mix7` by replacing its trailing series `R4` with a fourth parallel block,
+  `p(p(R1,C1)-R2,C2)-p(R3,C3)-p(R4,C4)`, keeping the parallel-inside-parallel shape.
+* `ser8` -- extends `ser7`'s pattern, `C1-R1-L1-p(R2,C2-L2,C3-R3)`. **The first attempt failed
+  identically at 4.762% weakest leverage on all five tuner seeds** -- not a lottery but a
+  structural degeneracy: the first draft put `R3` as a fourth bare-resistor branch alongside `R2`,
+  and two plain resistors in parallel are only ever seen through their combined value, so no
+  amount of tuning separates them. Putting `R3` in series with `C3` instead removed the
+  degeneracy and passed at 9.780% on the second tuner seed. Recorded here because it is exactly
+  the same failure mode `truths.py`'s own `ADJUSTMENTS` log already documents for `ser6`/`ser7` at
+  six and seven elements, now seen once more at eight.
+
+All three pass the same four-part admission screen `truths.py` requires (leverage, unresolved
+parameters, value-matched deviation, feasibility) before being used to measure anything.
+
+**[measured] Reach 3 recovers `par8` on 10/10 seeds -- reported, on the front, and recommended --
+at a median ~40 s and ~700-730 topologies fitted, and `mix8` on 5/5 at the same cost.** Reach 2
+recovers neither (0/3 sanity seeds run, structurally: `grown_to` never exceeds 7). The cost
+increase over reach 2's own seven-element runs (~25-30 s, ~545-650 topologies) is the same
+1.5-1.7x §5.5 already measured for growth reaching six elements from five -- one more level costs
+about the same fraction again, not a runaway.
+
+**`ser8` stays at 0/5 under reach 3 -- unchanged from the already-documented `ser6`/`ser7` failure
+at reach 2 (§5.9's X4), not a new regression reach 3 introduces.** The admission screen already
+rules out an identifiability gap (9.780% weakest leverage, comfortably above the 1% noise floor),
+so this is the same search-side failure already on record: the beam's insertion moves do not reach
+a series-shaped topology of this size from the five-element level. Raising the reach did not make
+the series shape worse; it simply did not fix a defect that was never about depth.
+
+**Parameter convergence at this depth was already measured, by a different experiment, before this
+one ran.** `benchmarks/six_plus/x8_oracle.json`'s `8el/8par` case is `par8`'s exact topology (same
+circuit, a different plausible parameter set), and it reaches the global optimum 12/12 even at the
+cheapest budget in that sweep's grid (`restarts=1, popsize=8, maxiter=40` -- the tier-1 screening
+budget itself). X10 did not need to re-ask the parameter question; §5.1's own instrument had
+already answered it for this shape.
+
+**Over-growth control.** Giving `par8` a further element of headroom -- `max_elements=9` with the
+reach raised to 4, so growth *can* reach nine elements -- does not cause the report to prefer a
+spurious nine-element candidate: 10/10 seeds still recommend the true eight-element topology
+(`over_grown=False` throughout). Parsimony holds at this depth the same way §5.9's negative
+control already showed it holding at five elements.
+
+**Shipped:** `GROWTH_REACH` raised from 2 to 3 (`discover.py`), with the measurement recorded in
+its own comment. `GROWTH_DEFAULT` is unchanged at 0 -- this result says reach 3 is safe and
+effective for the shapes tested, not that growth should run unasked; the discipline §5.8 and
+§4.7 already established (an opt-in lever until an end-to-end measurement shows it changing what
+the report says, with no shape made worse) applies to the reach the same way it applies to the
+width and the default. Raising the reach further than 3 is not measured and is not implied safe by
+this result -- exactly the caveat X4 already carries for `GROWTH_WIDTH`.
+
+See `benchmarks/six_plus/depth8.py` and `benchmarks/six_plus/x10_depth8.json`.
+
 ## 6. Implementation plan
 
 *Written from §5, and the growth stage of it is built. See §5.8 for what shipped, `GROWTH_DEFAULT`
