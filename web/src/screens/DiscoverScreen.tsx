@@ -222,7 +222,17 @@ export function DiscoverScreen({
         onCriterion={(value) => onSettings({ criterion: value })}
         poolNames={catalogue === null ? [poolName] : [AUTO_POOL, CUSTOM_POOL]}
         poolName={poolName}
-        onPoolName={(value) => onSettings({ poolName: value })}
+        onPoolName={(value) => {
+          // Switching into Custom starts from R, C, L rather than an empty checklist: CPE is
+          // the element the pool-from-spectrum design widens *to* deliberately (it is essential
+          // to the ceramic grain-boundary use case this project targets), so it must remain an
+          // opt-in addition here rather than something a fresh Custom selection carries by
+          // default. Only seeds the checklist the first time it is empty -- a user who has
+          // already unchecked everything on purpose keeps that choice.
+          const next: Partial<SearchSettings> = { poolName: value };
+          if (value === CUSTOM_POOL && customPool.length === 0) next.customPool = ["R", "C", "L"];
+          onSettings(next);
+        }}
         catalogue={catalogue}
         customPool={customPool}
         onCustomPool={(codes) => onSettings({ customPool: codes })}
