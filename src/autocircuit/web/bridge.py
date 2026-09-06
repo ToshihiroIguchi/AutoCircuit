@@ -417,6 +417,13 @@ def _op_discover_refit(payload: dict[str, Any]) -> dict[str, Any]:
         # again, the genetic fallback needs `discover_evolve` instead. This is that answer, so
         # a driver seeing `more` know which of the two to call before coming back here.
         "evolve": running.evolve_pending,
+        # Carried on every response, not only when `evolve` is true, so a driver can explain the
+        # fallback the moment it opens without a second round trip: what the exhaustive stage
+        # (and any pool widening) actually finished, and the cap the fallback would search up to
+        # if it runs. Both are exactly what `discover(mode="auto")`'s own `on_stage("evolve", ...)`
+        # message already states on the command line (`docs/DISCOVER_UX_PLAN.md`).
+        "complete_up_to": running.coverage_level,
+        "max_elements": running.max_elements,
     }
 
 

@@ -232,13 +232,19 @@ export function SearchPanel(props: SearchPanelProps) {
         </div>
       )}
 
-      {/* There is no genetic fallback in the browser (docs/WEB_UI_PLAN.md section 7): with
-          growth off, a topology above this limit was never a candidate -- not screened, not
-          rejected, simply not looked at. That is different from "not found" and the control
-          says so. */}
+      {/* The genetic fallback is reachable in the browser (docs/EVOLVE_WEB_PLAN.md) and its
+          trigger is `discover(mode="auto")`'s own -- a systematic residual in the best fit found
+          up to this limit -- not this checkbox. Growth and the fallback are two independent
+          escalations past the same limit, so the hint says both rather than naming only the one
+          with a control next to it; the progress panel explains whichever one actually fires. */}
       <p className="search-panel__hint">
-        Exhaustive search only: every topology with up to this many elements from the pool is
-        evaluated. Nothing above the limit is searched unless growth (below) is turned on.
+        Every topology with up to this many elements from the pool is evaluated exhaustively.
+        If the best fit found this way still looks systematically wrong, the search escalates on
+        its own: it grows the best candidates one element further if Growth (below) is turned on,
+        and independently of that checkbox it may fall back to a slower randomized (genetic)
+        search past this limit. Neither escalation is something you switch on directly here --
+        both are decided from how well the data fits -- and the progress panel names whichever
+        one runs.
       </p>
 
       {/* Growth changes what is searched, unlike `workers`, so it sits here rather than under

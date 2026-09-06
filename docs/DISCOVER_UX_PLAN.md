@@ -470,6 +470,28 @@ Manually exercised end to end (`autocircuit discover web/public/samples/li-ion-c
 **Verification.** `mypy --strict` and `ruff check` on both changed files (clean); `tests/test_cli.py`
 (24 passed) and `tests/test_discover.py` (31 passed); manual CLI run above.
 
+**Superseded (2026-09-06).** This section's finding — "the browser never runs the genetic
+search" — was true when written and stopped being true once `docs/EVOLVE_WEB_PLAN.md` (bridge
+version 14) reached the fallback into the browser via `evolve_plan`/`evolve_refit_plan`. Neither
+this section nor the two things it points at as proof were updated when that shipped:
+`SearchPanel.tsx`'s hint text kept asserting "no genetic fallback" and "nothing above the limit
+is searched unless growth is turned on" for months after both became false (`job.py`'s
+`_consider_evolve` fires from the exhaustive stage's own residual test regardless of the Growth
+checkbox), and `smoke.mjs` had in fact been rewritten to *exercise* the fallback (see its
+"genetic fallback" section) without this document's claim being corrected to match. A user
+reading the live Discover panel flagged the resulting contradiction directly. Fixed in the same
+session: `SearchPanel.tsx`'s hint now states the true, checkbox-independent trigger; a live
+explanatory notice (parity with the pool-`widened` one already in `SearchProgress.tsx`) now
+names what the fallback is escalating past the moment it opens, carried on `discover_refit`'s
+response as `complete_up_to`/`max_elements` (bridge version 14 → 15); gate W-EV1
+(`tests/test_web_job.py`) and `smoke.mjs` both assert the new fields. A separate proposal made
+during this same review — splitting exhaustive-only and genetic search into two user-chosen
+modes/buttons — was considered and rejected: it would require the analyst to already know
+whether their part needs more than the exhaustive limit, which is exactly the "what kind of part
+is this" judgement CLAUDE.md's purpose section rules out asking for, and it has no CLI
+equivalent to stay in parity with (`mode="auto"` always includes the fallback; there is no flag
+to disable it). The fix instead keeps the automatic, data-driven trigger and makes it legible.
+
 ### Not changed: startup library loading
 
 **Finding.** The fifth point — "multiple libraries load from the start and it takes too long;

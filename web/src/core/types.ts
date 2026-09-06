@@ -436,6 +436,14 @@ export interface RefitStepWire {
    * `discover_evolve` rather than `discover_screen` (a pool widening).
    */
   evolve: boolean;
+  /**
+   * Largest element count the exhaustive stage (and any pool widening) actually finished, sent
+   * on every response rather than only once `evolve` is true -- so a driver can say what the
+   * fallback is escalating past the instant it opens. Null before the first tier-2 pass ends.
+   */
+  complete_up_to: number | null;
+  /** The element cap the genetic fallback would search up to, if it runs. */
+  max_elements: number;
 }
 
 /**

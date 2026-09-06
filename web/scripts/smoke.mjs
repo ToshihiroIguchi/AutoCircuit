@@ -519,6 +519,11 @@ check(
   JSON.stringify(evolveSearch.error),
 );
 
+// Set from the `discover_refit` step that actually opens the fallback, so the check below can
+// look at the same numbers the progress panel's explanatory notice is built from
+// (`SearchProgress.tsx`'s "evolving" paragraph) rather than re-deriving them.
+let evolveOpenedAt = null;
+
 function driveWithEvolve(job) {
   for (let pass = 0; pass < 6; pass += 1) {
     let costs = null;
@@ -545,6 +550,7 @@ function driveWithEvolve(job) {
       );
     }
     if (last.evolve) {
+      evolveOpenedAt = { completeUpTo: last.complete_up_to, maxElements: last.max_elements };
       let outcomes = null;
       for (;;) {
         const step = ask({ op: "discover_evolve", job, outcomes });
@@ -570,6 +576,16 @@ check(
   JSON.stringify(evolveReport?.generations),
 );
 check("its report still commits to discover(mode=\"auto\")", evolveReport?.mode === "auto");
+// bridge v15: `discover_refit` names what the fallback is escalating past the moment it opens,
+// so the web UI's progress panel can explain why rather than just naming the new stage.
+check(
+  "discover_refit named the fallback's escalation point before it opened",
+  evolveOpenedAt !== null &&
+    Number.isInteger(evolveOpenedAt.completeUpTo) &&
+    evolveOpenedAt.completeUpTo <= 3 &&
+    evolveOpenedAt.maxElements === 7,
+  JSON.stringify(evolveOpenedAt),
+);
 
 console.log("what the skeleton excluded");
 // The Report screen's own job: a pass over the topologies the assertion removed, driven exactly

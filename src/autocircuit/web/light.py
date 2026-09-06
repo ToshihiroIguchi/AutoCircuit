@@ -78,7 +78,12 @@ from autocircuit.core.validate import WIRE_VERSION as VALIDATE_WIRE_VERSION
 #: ``mode: "auto"`` rather than the always-``"exhaustive"`` placeholder, since this search always
 #: runs that same escalation whether or not either stage actually fires; and
 #: ``discover_report`` gains ``generations``, zero unless the fallback ran.
-BRIDGE_VERSION = 14
+#: 15 (2026-09-06): ``discover_refit``'s response gains ``complete_up_to`` and ``max_elements``,
+#: carried on every response rather than only once ``evolve`` turns true, so the panel can say
+#: why the fallback opened -- the exhaustive stage's own coverage and the cap the fallback would
+#: run up to -- the moment it does, instead of a bare stage-name change. Mirrors the ``on_stage``
+#: message ``discover(mode="auto")`` already prints for the same escalation on the command line.
+BRIDGE_VERSION = 15
 
 #: One operation: a request payload in, a JSON-safe result out.
 Operation = Callable[[dict[str, Any]], Any]

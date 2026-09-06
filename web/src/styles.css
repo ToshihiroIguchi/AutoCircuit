@@ -1906,6 +1906,23 @@ body {
   color: var(--text-primary);
 }
 
+/* Same treatment as `.search-progress__widened`: the fallback is the search's other escalation
+   past plain exhaustive search, and deserves the same explanation in the same place. */
+.search-progress__evolving {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-left: 3px solid var(--series-1);
+  background: var(--surface-2);
+  border-radius: 0 4px 4px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.search-progress__evolving code {
+  color: var(--text-primary);
+}
+
 /* One row per tier, all of them on screen at once. A tier that has not started is dimmed rather
    than hidden, so the reader knows how many bars there are before the first one fills -- which is
    the whole point of showing them together (see the component's header comment). */

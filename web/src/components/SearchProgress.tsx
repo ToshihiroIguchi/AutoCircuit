@@ -204,6 +204,17 @@ export function SearchProgressPanel({ progress, poolSize }: SearchProgressPanelP
         unit="shortlisted topologies refitted"
       />
 
+      {progress.evolving && (
+        <p className="search-progress__evolving">
+          Exhaustive search is complete to {progress.evolving.completeUpTo ?? 0} element(s) and
+          the best fit still shows a systematic residual, so the search is falling back to a
+          randomized (genetic) search up to {progress.evolving.maxElements} elements &mdash; the
+          same escalation <code>discover(mode=&quot;auto&quot;)</code> makes on the command line,
+          and independent of whether Growth (in the panel above) was turned on. The counts above
+          now describe genetic-search offspring, not an exhaustive enumeration.
+        </p>
+      )}
+
       {levels.length > 0 && (
         <table className="search-progress__levels">
           <thead>

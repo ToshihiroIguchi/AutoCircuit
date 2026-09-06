@@ -1145,6 +1145,14 @@ def test_the_genetic_fallback_in_the_browser_matches_discover_mode_auto() -> Non
     assert reference.generations > 0
     assert report["mode"] == "auto"
 
+    # `discover_refit` names what it is escalating past the moment the fallback opens
+    # (bridge v15), so the progress panel can explain why rather than just naming the new
+    # stage. That number is the exhaustive stage's own, unaffected by the fallback that reads
+    # it -- so it must already equal what the finished report claims.
+    evolve_step = next(step for step in driver.refit_steps if step["evolve"])
+    assert evolve_step["complete_up_to"] == reference.complete_up_to
+    assert evolve_step["max_elements"] == 7
+
     assert report["complete_up_to"] == reference.complete_up_to
     assert report["n_evaluated"] == reference.n_evaluated
     assert [row["circuit"] for row in report["candidates"]] == [

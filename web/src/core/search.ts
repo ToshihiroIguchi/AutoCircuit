@@ -67,6 +67,11 @@ export interface SearchProgress {
   pool: string[];
   /** Per-size counts for the space being screened now; empty until the first batch lands. */
   levels: SearchLevelWire[];
+  /**
+   * Set once the genetic fallback opens, so the panel can say why rather than just naming the
+   * stage. Null before that, and never cleared afterward -- a run has at most one fallback pass.
+   */
+  evolving: { completeUpTo: number | null; maxElements: number } | null;
   elapsedMs: number;
 }
 
@@ -83,6 +88,7 @@ const IDLE: SearchProgress = {
   widened: false,
   pool: [],
   levels: [],
+  evolving: null,
   elapsedMs: 0,
 };
 
@@ -148,7 +154,10 @@ export class SearchRun {
           // Tier 1 of the fallback, then loop back: `screen` no-ops (nothing left to screen)
           // and `refit` now answers from the fallback's own shortlist instead, the same way it
           // already does after a pool widening -- one tier-2 driving loop, not two.
-          await this.evolve(job);
+          await this.evolve(job, {
+            completeUpTo: step.completeUpTo,
+            maxElements: step.maxElements,
+          });
           if (this.cancelled) break;
           this.emit({ stage: "screening" }, true);
           continue;
@@ -222,7 +231,12 @@ export class SearchRun {
    * true means the next thing to drive is the genetic fallback's own tier 1 (`evolve` below),
    * false means it is a pool widening (loop back to `screen`).
    */
-  private async refit(job: string): Promise<{ more: boolean; evolve: boolean }> {
+  private async refit(job: string): Promise<{
+    more: boolean;
+    evolve: boolean;
+    completeUpTo: number | null;
+    maxElements: number;
+  }> {
     let results: Array<Awaited<ReturnType<BridgeClient["refitTask"]>>> | null = null;
     this.emit({ stage: "refitting" }, true);
     for (;;) {
@@ -233,9 +247,14 @@ export class SearchRun {
       );
       const tasks = step.tasks;
       if (tasks === null) {
-        return { more: step.more && !this.cancelled, evolve: step.evolve && !this.cancelled };
+        return {
+          more: step.more && !this.cancelled,
+          evolve: step.evolve && !this.cancelled,
+          completeUpTo: step.complete_up_to,
+          maxElements: step.max_elements,
+        };
       }
-      if (this.cancelled) return { more: false, evolve: false };
+      if (this.cancelled) return { more: false, evolve: false, completeUpTo: null, maxElements: 0 };
       const base = step.refitted;
       results = await this.pool.map(
         tasks.length,
@@ -243,7 +262,7 @@ export class SearchRun {
           client.refitTask(this.spectrum, tasks[index] as [string, number, number], this.options),
         (completed) => this.emit({ refitted: base + completed }),
       );
-      if (this.cancelled) return { more: false, evolve: false };
+      if (this.cancelled) return { more: false, evolve: false, completeUpTo: null, maxElements: 0 };
     }
   }
 
@@ -253,9 +272,12 @@ export class SearchRun {
    * instead of `screenTask`. Its own tier 2 is not driven here: once tier 1 finishes, the next
    * `refit` call answers from the fallback's own shortlist instead.
    */
-  private async evolve(job: string): Promise<void> {
+  private async evolve(
+    job: string,
+    evolving: { completeUpTo: number | null; maxElements: number },
+  ): Promise<void> {
     let outcomes: EvolveOutcomeWire[] | null = null;
-    this.emit({ stage: "evolving" }, true);
+    this.emit({ stage: "evolving", evolving }, true);
     for (;;) {
       const step = await this.client.discoverEvolve(job, outcomes);
       const tasks = step.tasks;
