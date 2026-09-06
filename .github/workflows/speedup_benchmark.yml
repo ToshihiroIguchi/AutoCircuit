@@ -1,0 +1,49 @@
+# On-demand runner for the exploratory, long-running scripts under benchmarks/speedup/ (see
+# docs/SEARCH_SPEEDUP_PLAN.md). These are measurement rounds, not regression tests -- they are
+# not wired into tests.yml and never run on push/PR, only when explicitly dispatched, because a
+# single run can take from minutes to hours depending on the script and seed count.
+
+name: Speedup benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      script:
+        description: "Path to the benchmark script to run"
+        required: true
+        default: "benchmarks/speedup/idea_a2_foster_cauer.py"
+      timeout_minutes:
+        description: "Job timeout in minutes"
+        required: true
+        default: "120"
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ fromJSON(inputs.timeout_minutes) }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install the package and the development tools
+        run: pip install -e ".[dev]"
+
+      - name: Run the benchmark
+        run: |
+          set -eo pipefail
+          python "${{ inputs.script }}" | tee benchmark-output.log
+
+      - name: Upload output log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: speedup-benchmark-output
+          path: benchmark-output.log
+          retention-days: 90
