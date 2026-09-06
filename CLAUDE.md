@@ -348,9 +348,13 @@ static-site Web UI running the same core via WASM (Pyodide).
    already drives exhaustive search. This adds no mode switch — `docs/WEB_UI_PLAN.md` section 7's
    "no generator behind the genetic stage" is fixed by making `discover(mode="auto")`'s own
    trigger (`_is_underfitted`, the same function, not a reimplementation) reachable in the
-   browser, not by exposing a manual "force evolve" control the project's own decision rules
-   already rule out (`docs/TOPOLOGY_6PLUS_PLAN.md` X3: no alternative trigger measured there
-   dominates the incumbent). Gate W-EV1 — the browser driven end to end through `bridge.handle`
+   browser, not by exposing a manual "force evolve" control. Unlike `pool` and `skeleton`, a
+   `mode` choice encodes no knowledge about the part, so it is not the same kind of opt-in
+   narrowing; the CLI ships `--mode` anyway for an audience that already carries every other
+   algorithm-internal flag, and the browser withholds it because it is the front end built for
+   a non-expert to reach an expert's answer (`docs/EVOLVE_WEB_PLAN.md`, which also retracts an
+   earlier, weaker citation of `docs/TOPOLOGY_6PLUS_PLAN.md` X3 for this point — X3 scored only
+   *automatic* escalation rules and never evaluated a manual toggle). Gate W-EV1 — the browser driven end to end through `bridge.handle`
    against `discover(mode="auto")` on a spectrum engineered to make the fallback fire for a real
    reason — passed on every compared field, JSON export included, with a byte-identical
    fingerprint (`benchmarks/ev5_fingerprint.py --mode evolve`) proving both of the fallback's own

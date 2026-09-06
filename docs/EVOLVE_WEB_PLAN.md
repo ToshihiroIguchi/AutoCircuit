@@ -11,20 +11,38 @@ the CLI on a spectrum the fallback actually has to run on to explain.
 ## What this is not
 
 A user-facing "run the genetic search" toggle was considered and rejected before any code was
-written. Three independent reasons converged on the same answer:
+written, for two reasons -- and a third, originally listed alongside them, turned out on
+inspection not to hold and is recorded here rather than quietly dropped.
 
-- **CLAUDE.md's own rule.** "A knob the target user cannot set correctly is not a feature...
-  search internals must have measured defaults instead of being handed over." Which search to
-  run is exactly the kind of algorithm-internal decision this rule is about.
-- **No replacement trigger beats the incumbent.** `docs/TOPOLOGY_6PLUS_PLAN.md` X3 scored four
-  candidate triggers against a 108-row labelled set; the best alternative (a nested F-test)
-  roughly triples recovery but at more than three times the nominal false-positive rate, and
-  nothing dominates the plain runs test on both axes. There is no trigger to hand the user that
-  is known to be better than the one already running silently.
-- **A manual override reintroduces exactly the dependency this project exists to remove.**
-  Whether the answer is "the exhaustive one" or "the evolved one" would depend on whether a
-  particular person happened to tick a box, which is the same analyst-dependence problem
-  `docs/AUTOEIS_COMPARISON.md` and this file's own CLAUDE.md section on objectives are about.
+- **The browser is the surface CLAUDE.md's own rule is written for.** "A knob the target user
+  cannot set correctly is not a feature ... search internals must have measured defaults instead
+  of being handed over." `mode` is not a fact about the physical part the way `pool` and
+  `skeleton` are: a named pool or a skeleton encodes something the user actually knows about
+  their component, and the report states what that assertion excluded. Choosing `exhaustive` vs.
+  `evolve` encodes no such thing -- nothing about a spectrum tells a non-expert which is the right
+  search to run, and `evolve` is strictly dominated whenever `exhaustive` is affordable
+  (`docs/EVOLVE_SEARCH_PLAN.md`'s 30/30 recovery against the fallback's 1/9-5/9). A toggle here
+  would not be a narrowing the user asked for; it would be a coin flip dressed as a setting. The
+  CLI exposes `--mode` anyway, because its audience already carries the burden of every other
+  algorithm-internal flag it accepts (`--workers`, `--growth-width`, a raw element pool); the
+  browser is the front end built specifically so a non-expert reaches the same answer an expert
+  would (CLAUDE.md's purpose point 3), so the same knob is withheld there without that being
+  inconsistent with the CLI shipping it to a different audience.
+- **No automatic trigger is known to do better, so there is nothing better to expose instead.**
+  `docs/TOPOLOGY_6PLUS_PLAN.md` X3 scored four *automatic* decision rules for when to escalate --
+  the current runs test, a nested F-test, a parametric bootstrap of it, and a pole-count margin --
+  against a 108-row labelled set, and none dominates the incumbent runs test on both recovery and
+  false-positive rate. This means the escalation already running is not a stand-in for some
+  known-better rule; it is the best rule measured so far.
+- **Retracted: "a manual override reintroduces analyst dependence."** This was the third reason
+  originally given, and it proves too much: the same sentence applies unchanged to `pool` and
+  `skeleton`, which this project keeps as legitimate opt-in narrowings precisely because the user
+  supplies real knowledge about the part and the report discloses what was excluded. X3 also does
+  not bear on this question either way -- a human tapping a checkbox was never one of the four
+  candidates it measured, so it is neither evidence for nor against a manual toggle. The actual
+  reason a mode switch is withheld is the first bullet above (there is no part-specific knowledge
+  a `mode` choice could encode), not an analyst-dependence argument that would equally forbid
+  `pool` and `skeleton`.
 
 So the browser does not gain a mode switch. It gains the same automatic capability the CLI
 already defaults to: when `_is_underfitted` says the best exhaustive fit still looks
