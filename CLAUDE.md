@@ -817,6 +817,27 @@ static-site Web UI running the same core via WASM (Pyodide).
    decision above that relating parameters *across conditions* is not this software's job
    regardless of whether the resulting number needs a geometry.
 
+21. `docs/PARAM_OPTIMIZER_PLAN.md` — whether the parameter fitter's global stage
+    (`core/fit.py`'s `_global_stage`, `scipy.optimize.differential_evolution`) could be replaced
+    by a more modern optimiser. **Measured, not shipped.** Ten alternatives were implemented and
+    compared at equal cost-function-evaluation budget (`benchmarks/screening_round/param_opt.py`,
+    extended with a Wilson-interval gate this round added): L-SHADE decisively beat the incumbent
+    on both Phase 1 arenas (a non-overlapping-CI win at 63% of the NFE on the R/C/L arena, a tie
+    at 75% of the NFE on the harder R/C/L/CPE one), while SHADE, JADE, CMA-ES, PSO, a real-coded
+    GA, `dual_annealing`, `basinhopping`, a from-scratch GP-EI Bayesian optimiser and `shgo` all
+    tied or lost (`shgo` was excluded from the wider run on its own evidence: 361.7 s for one
+    topology against under 1 s for every other arm, and it still missed the basin). Phase 2 wired
+    L-SHADE into production and found it withdrawn its own decision rule earned: a T5-style
+    `.summary()` comparison matched on 5 of 6 references and regressed the sixth (a `LARGE_
+    REFERENCES` entry already documented in `docs/TOPOLOGY_6PLUS_PLAN.md` as a known hard,
+    multi-modal landscape) from 5/12 seeds reaching the noise floor to 0/12, and the full test
+    suite then surfaced three failures on small, noise-free circuits in
+    `tests/test_discover_skeleton.py` — a robustness gap, not merely a quality trade-off, which is
+    the stronger of the two reasons the round stopped. `core/fit.py` is unchanged; the
+    experimental `core/lshade.py` module was removed rather than left unused in the production
+    tree, and the benchmark harness's new arms stay as a measurement instrument, the same way
+    CMA-ES and Sobol multi-start already did from the round that rejected them.
+
 Update these when decisions change.
 
 ## Stack and conventions
