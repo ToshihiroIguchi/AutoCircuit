@@ -559,7 +559,25 @@ static-site Web UI running the same core via WASM (Pyodide).
    read correctly, since it is the CLI's own rendered verbatim. **The genetic fallback itself —
    distinct from growth, and the thing this whole document's X-series measures the quality of —
    is also now reachable in the browser**, via `docs/EVOLVE_WEB_PLAN.md` (bridge version 14); see
-   item 10 above for what shipped and what gate W-EV1 measured.
+   item 10 above for what shipped and what gate W-EV1 measured. **X11 (§5.14, complete)** found
+   that X10's own reach-3 result was unreachable from the browser's own default: the Discover
+   panel's "Element limit" has shipped at 4, not the CLI/core's 5, since the screen was
+   introduced, so reach 3 there caps growth at `4+3=7` and `par8` was never reachable no matter
+   what "Grow to" asked for (confirmed, 0/2). Reach 4 from that same base-4 start recovers `par8`
+   on 8/8 seeds and `mix8` on 5/5 at the same per-run cost X10 measured, leaves `ser8` at 0/3
+   (unchanged, not worsened), and does not over-grow three smaller truths (`par5`/`par6`/`par7`,
+   5/5/3 seeds, all still recommended at their true size) despite four levels of headroom being
+   available from a shallower base than X10 tested. `GROWTH_REACH = 4` shipped on that measurement.
+   A second, independent staleness was found and fixed alongside it: `max_elements`'s default of
+   7 (`discover()`, `job.py`, `--max-elements`) predates `GROWTH_REACH` ever passing 2, so even the
+   CLI's own already-shipped reach 3 was silently capped at 7 instead of the 8 §5.13 had already
+   measured safe — raised to 8 everywhere the value is mirrored. And the browser's "Grow to" input
+   carried the same shape of bug apart from the default value: its numeric range was a flat 15
+   unrelated to what "Element limit" made reachable, so a value it accepted could be silently
+   unreachable regardless of which limit was in play. It now bounds itself at
+   `Element limit + GROWTH_REACH`, states the relationship in a hint, and `DiscoverScreen.tsx`
+   clamps a stale `maxElements` back into range whenever "Element limit" changes or growth is
+   turned on.
 
 17. `docs/SEARCH_TIME_PLAN.md` — where the topology search spends its time, and the levers on
    it. **§3.1 implemented and shipped, §3.2 measured and its fix rejected, §4.2 measured and

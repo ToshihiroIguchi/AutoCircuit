@@ -1122,7 +1122,67 @@ the command line reads correctly in the browser once growth actually runs. `web/
 drives a grown search end to end and checks the rendered sentence contains both "grew rather than
 enumerated" and "not a completeness claim".
 
-## 6. Implementation plan
+### 5.14 X11 — the browser's own "Element limit" default left reach 3 unusable for the shape that motivated it [measured]
+
+**The question.** A user asked, in the browser, for the same eight-element Voigt-ladder-shaped
+circuit X10 built `par8` to represent (four RC blocks, `p(R1,C1)-p(R2,C2)-p(R3,C3)-p(R4,C4)`), and
+turning growth on did not find it. X10's own reach-3 measurement (§5.13) never explains this,
+because it was run at the CLI/core default `exhaustive_limit=5` throughout (`5 + 3 = 8`). The
+Discover panel's own "Element limit" has shipped with a default of **4**, not 5, since the screen
+was introduced (`docs/WEB_UI_PLAN.md`'s gate W2 run, never reconciled with the CLI afterward) --
+undocumented as a deliberate choice anywhere, and never itself covered by a growth benchmark. From
+that base, reach 3 caps growth at `4 + 3 = 7`, one element short of `par8` regardless of what
+"Grow to" asks for -- confirmed here on 2/2 seeds (`grown_to` never exceeds 7).
+
+The user asked to keep "Element limit" at 4 rather than raise it to match the CLI (its own,
+separate, lower exhaustive-search cost in the browser was the reason given), which means the only
+lever left is `GROWTH_REACH` itself -- a global constant, not scoped to one caller's exhaustive
+limit, so raising it changes the ceiling for every caller, CLI included (`5 + 4 = 9` there, up from
+`5 + 3 = 8`).
+
+**Method.** `benchmarks/six_plus/depth8_limit4.py`, built on X10's own `Referee`/`Truth` machinery
+and its three eight-element truths (`par8`, `mix8`, `ser8`, imported from `depth8.py` rather than
+redefined), plus three smaller truths already on record (`par5`, `par6`, `par7`) as an over-growth
+control at this new, shallower base. Every run passes `exhaustive_limit=4` explicitly rather than
+relying on the default, so the result is about the base-4 case specifically rather than about
+whatever the default happens to be by the time this file is read.
+
+**[measured] Reach 4 from a base-4 exhaustive stage recovers `par8` on 8/8 seeds and `mix8` on
+5/5** -- reported, on the front, and recommended, `grown_to=8` throughout, at 33-130 s per run,
+the same cost range X10 already measured for one growth level. **`ser8` stays at 0/3**, consistent
+with (not worsened by) the reach-independent, shape-specific failure §5.9 and §5.13 already put on
+record for that shape. **Over-growth control:** `par5`, `par6` and `par7` (5/5, 5/5 and 3/3 seeds)
+all still recommend their own true size despite four levels of headroom being available from a
+base of 4 -- parsimony holds at this shallower base exactly as §5.13's own over-growth control
+already showed it holding at the deeper one. Full grid: `benchmarks/six_plus/x10b_limit4.json`.
+
+**Shipped:** `GROWTH_REACH` raised from 3 to 4 (`discover.py`), the measurement recorded in its own
+comment beside X10's. This repeats X10's own caveat rather than retiring it: raising the reach
+further than 4 is not measured and is not implied safe by this result, and `GROWTH_DEFAULT` stays
+0 for the reason it always has -- reach is a lever a caller who asks for growth may turn up, not a
+behaviour every user gets by default.
+
+**A second, independent default was found stale during this investigation and fixed alongside it.**
+`max_elements` (`discover()`'s own signature, `job.py`'s mirror of it, and the CLI's
+`--max-elements`) had defaulted to 7 since before `GROWTH_REACH` was ever raised past 2 -- so even
+at the *already-shipped* reach 3 from the CLI's own `exhaustive_limit=5` base, the default ceiling
+was `min(7, 5+3=8) = 7`, one element short of what §5.13 had already measured safe. Turning growth
+on with every other setting left at its default has silently under-used the shipped reach since
+X10 shipped; only a caller who also raised `--max-elements` to 8 by hand ever got what the reach
+constant allowed. Raised to 8 everywhere the constant is mirrored, matching what is now measured
+safe at both bases this document tests (`4+4` here, `5+3` in §5.13); reaching for the theoretical
+`5+4=9` ceiling the new reach also opens at the CLI's base is left to a caller who asks for it by
+name, precisely because no truth in this project's suite has ever tested nine-element recovery.
+
+**The browser's "Grow to" input carried the same shape of bug apart from the default value.** Its
+`max` was a flat, unrelated `15`, so a value the input happily accepted could still be silently
+unreachable -- unrelated to whether "Element limit" was 4, 5, or anything else, and this is exactly
+the quiet narrowing this document's own `_with_growth_note()` sentence exists to prevent *after* a
+search finishes; nothing had been protecting the *input* beforehand. `web/src/components/
+SearchPanel.tsx` now mirrors `GROWTH_REACH` and bounds "Grow to" at `Element limit + GROWTH_REACH`
+rather than a flat ceiling, with a hint stating the relationship in words; `DiscoverScreen.tsx`
+clamps a stale `maxElements` back into range whenever "Element limit" changes or growth is turned
+on, so a value left over from a hidden input never reads as achievable when it no longer is.
 
 *Written from §5, and the growth stage of it is built. See §5.8 for what shipped, `GROWTH_DEFAULT`
 for why it is off, and §5.10 and §5.12 for what the default is waiting on.*

@@ -56,6 +56,15 @@ const WEIGHTINGS = ["modulus", "proportional", "unit"];
 /** Matches `core/discover.py`'s `GROWTH_WIDTH` -- the checkbox below asks for exactly this. */
 const GROWTH_WIDTH = 4;
 
+/**
+ * Matches `core/discover.py`'s `GROWTH_REACH`: growth stops `GROWTH_REACH` elements past
+ * wherever the exhaustive stage actually completed, no matter what "Grow to" below asks for.
+ * Exported so `DiscoverScreen` can keep `maxElements` inside the reachable range when
+ * `exhaustiveLimit` changes, instead of leaving a value on screen that the search will silently
+ * fall short of.
+ */
+export const GROWTH_REACH = 4;
+
 export function SearchPanel(props: SearchPanelProps) {
   const locked = props.disabled || props.running;
   const chosen = props.criteria.find((entry) => entry.name === props.criterion) ?? null;
@@ -265,19 +274,36 @@ export function SearchPanel(props: SearchPanelProps) {
           best {GROWTH_WIDTH} topologies of each completed size instead of stopping there.
         </span>
       </label>
-      {props.growthWidth > 0 && (
-        <label>
-          Grow to
-          <input
-            type="number"
-            min={props.exhaustiveLimit + 1}
-            max={15}
-            value={props.maxElements}
-            disabled={locked}
-            onChange={(event) => props.onMaxElements(Number(event.target.value))}
-          />
-        </label>
-      )}
+      {props.growthWidth > 0 &&
+        (() => {
+          const growthCeiling = props.exhaustiveLimit + GROWTH_REACH;
+          const clamp = (value: number) =>
+            Math.min(growthCeiling, Math.max(props.exhaustiveLimit + 1, value));
+          return (
+            <>
+              <label>
+                Grow to
+                <input
+                  type="number"
+                  min={props.exhaustiveLimit + 1}
+                  max={growthCeiling}
+                  value={props.maxElements}
+                  disabled={locked}
+                  onChange={(event) => props.onMaxElements(clamp(Number(event.target.value)))}
+                />
+              </label>
+              {/* Growth cannot go past `exhaustiveLimit + GROWTH_REACH` regardless of this
+                  number -- said here rather than left for the report to reveal after the run,
+                  because a value this input silently cannot honour is exactly the kind of
+                  quiet narrowing this project's own reporting rules elsewhere refuse to allow. */}
+              <p className="search-panel__hint">
+                Growth reaches at most {growthCeiling} elements here — {GROWTH_REACH} past the
+                element limit above, however high this is set. Raise Element limit to grow
+                further.
+              </p>
+            </>
+          );
+        })()}
 
       {/* The criterion is a search setting rather than a view of the answer, and it has to be
           said out loud: it also ranks the shortlist, so it decides which topologies get a

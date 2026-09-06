@@ -329,8 +329,19 @@ GROWTH_WIDTH = 4
 #: over-growing past the truth's own size when given a further element of headroom (10/10 at
 #: ``max_elements=9``). The series-shaped sibling ser8 stays at 0/5 -- unchanged from the
 #: already-documented ser6/ser7 failure at reach 2, not a new regression reach 3 introduces.
-#: Raising this further than 3 is not measured and is not implied safe by this result.
-GROWTH_REACH = 3
+#:
+#: [measured, docs/TOPOLOGY_6PLUS_PLAN.md section 5.14, experiment X11] Raised from 3 to 4 for a
+#: gap reach 3 left uncovered: the browser's own "Element limit" default has shipped at 4, not
+#: the CLI/core default of 5, since the Discover panel was introduced -- so from that base, reach
+#: 3 caps growth at 7 elements (``4 + 3``) and par8 was never reachable there no matter what
+#: "Grow to" asked for (confirmed, 0/2). Reach 4 from that same base-4 start reaches par8 on 8/8
+#: seeds and mix8 on 5/5, both at a cost (33-130 s) in the same range reach 3 already measured,
+#: and ser8 stays at 0/3 -- consistent with, not worsened by, the reach-independent failure
+#: already on record for that shape. Over-growth was checked at this same base-4 depth on three
+#: truths smaller than eight elements (par5, par6, par7, 5/5/3 seeds): every one still recommends
+#: its own true size, none grown past it. Raising this further than 4 is not measured and is not
+#: implied safe by this result.
+GROWTH_REACH = 4
 
 #: Whether growth runs when the caller says nothing. **Zero, and that is a decision.**
 #:
@@ -349,6 +360,22 @@ GROWTH_REACH = 3
 #: ``--growth-width 4``. This is the same rule `SCREEN_RESTARTS` follows and for the same reason:
 #: every number recorded in this repository was taken without it.
 GROWTH_DEFAULT = 0
+
+#: ``max_elements``'s own default, for both the genetic search and the growth stage, when the
+#: caller names none.
+#:
+#: A named constant rather than a bare literal repeated at each caller because it already was one,
+#: silently: :func:`discover`, :class:`~autocircuit.web.job.DiscoveryJob` and the CLI's
+#: ``--max-elements`` each carried their own copy of ``7``, and :mod:`autocircuit.web.bridge`
+#: carried a fourth as a bare ``payload.get("max_elements", 7)`` with no import linking it to the
+#: other three at all. That let it go stale exactly once already
+#: (docs/TOPOLOGY_6PLUS_PLAN.md section 5.14, experiment X11): raising :data:`GROWTH_REACH` past 2
+#: made 8 the ceiling this project's own measurements support from the CLI's default
+#: :data:`DEFAULT_EXHAUSTIVE_LIMIT`, but every one of those four copies kept reading 7, so turning
+#: growth on with every other setting left at default silently used one fewer element than what had
+#: already been measured safe. Raised to 8 for the same reach-3 measurement X10 already recorded;
+#: every caller above now reads this constant instead of holding its own copy.
+DEFAULT_MAX_ELEMENTS = 8
 
 
 #: Largest element count the exhaustive stage enumerates when the caller names no limit.
@@ -1772,7 +1799,7 @@ def discover(
     on_stage: Callable[[str, str], None] | None = None,
     generations: int = 30,
     population: int = 40,
-    max_elements: int = 7,
+    max_elements: int = DEFAULT_MAX_ELEMENTS,
     min_elements: int = 2,
     growth_width: int = GROWTH_DEFAULT,
     screen_restarts: int = SCREEN_RESTARTS,

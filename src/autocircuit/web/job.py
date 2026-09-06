@@ -42,6 +42,7 @@ from typing import Any, cast
 from autocircuit.core.circuit import Circuit, count_elements
 from autocircuit.core.descriptors import PoolChoice, choose_pool
 from autocircuit.core.discover import (
+    DEFAULT_MAX_ELEMENTS,
     GROWTH_DEFAULT,
     GROWTH_REACH,
     REFINE_DEFAULT,
@@ -139,7 +140,7 @@ class DiscoveryJob:
         criterion: Criterion = DEFAULT_CRITERION,
         final_restarts: int = 5,
         n_refine: int | None = None,
-        max_elements: int = 7,
+        max_elements: int = DEFAULT_MAX_ELEMENTS,
         growth_width: int = GROWTH_DEFAULT,
         screen_chunk: int = SCREEN_CHUNK,
         refit_chunk: int = REFIT_CHUNK,

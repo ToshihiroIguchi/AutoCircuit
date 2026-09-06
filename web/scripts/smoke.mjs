@@ -583,7 +583,7 @@ check(
   evolveOpenedAt !== null &&
     Number.isInteger(evolveOpenedAt.completeUpTo) &&
     evolveOpenedAt.completeUpTo <= 3 &&
-    evolveOpenedAt.maxElements === 7,
+    evolveOpenedAt.maxElements === 8,
   JSON.stringify(evolveOpenedAt),
 );
 

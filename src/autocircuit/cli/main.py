@@ -22,6 +22,7 @@ from autocircuit import __version__
 from autocircuit.core.circuit import Circuit
 from autocircuit.core.descriptors import WIDENING_CANDIDATES
 from autocircuit.core.discover import (
+    DEFAULT_MAX_ELEMENTS,
     GROWTH_DEFAULT,
     discover,
     excluded_equivalents,
@@ -708,7 +709,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_disc.add_argument("--generations", type=int, default=30)
     p_disc.add_argument("--population", type=int, default=40)
-    p_disc.add_argument("--max-elements", type=int, default=7)
+    p_disc.add_argument("--max-elements", type=int, default=DEFAULT_MAX_ELEMENTS)
     p_disc.add_argument(
         "--growth-width", type=int, default=GROWTH_DEFAULT,
         help="above --exhaustive-limit, evaluate every one-element extension of the best N "

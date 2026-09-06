@@ -29,7 +29,7 @@ import { defaultPoolSize } from "../worker/pool";
 import { CircuitPreview } from "../components/CircuitPreview";
 import { ParetoTable } from "../components/ParetoTable";
 import { PlotsPanel, type ModelOverlay } from "../components/PlotsPanel";
-import { SearchPanel } from "../components/SearchPanel";
+import { GROWTH_REACH, SearchPanel } from "../components/SearchPanel";
 import { SearchProgressPanel } from "../components/SearchProgress";
 import { RuntimeNotice } from "../components/RuntimeNotice";
 
@@ -132,7 +132,10 @@ export function defaultSearchSettings(): SearchSettings {
     // whether it changes the *recommendation* is validated only for the shapes and noise level
     // `docs/TOPOLOGY_6PLUS_PLAN.md` section 5.13 measured, not as a universal default.
     growthWidth: 0,
-    maxElements: 7,
+    // Matches `exhaustiveLimit` (4) + `GROWTH_REACH` (4) above -- checking the box alone reaches
+    // the full measured ceiling from this screen's own default limit (docs/TOPOLOGY_6PLUS_PLAN.md
+    // section 5.14) instead of silently falling one element short until "Grow to" is raised too.
+    maxElements: 8,
   };
 }
 
@@ -237,9 +240,30 @@ export function DiscoverScreen({
         customPool={customPool}
         onCustomPool={(codes) => onSettings({ customPool: codes })}
         exhaustiveLimit={exhaustiveLimit}
-        onExhaustiveLimit={(value) => onSettings({ exhaustiveLimit: value })}
+        onExhaustiveLimit={(value) => {
+          // "Grow to" is drawn from `exhaustiveLimit + GROWTH_REACH` down; a value this screen
+          // already had can go stale the instant the limit changes -- either past the new
+          // ceiling (silently unreachable) or below the new floor (the panel's own `min`).
+          // Re-deriving it here keeps the number on screen the one the next run will honour.
+          const next: Partial<SearchSettings> = { exhaustiveLimit: value };
+          if (growthWidth > 0) {
+            const ceiling = value + GROWTH_REACH;
+            next.maxElements = Math.min(ceiling, Math.max(value + 1, maxElements));
+          }
+          onSettings(next);
+        }}
         growthWidth={growthWidth}
-        onGrowthWidth={(value) => onSettings({ growthWidth: value })}
+        onGrowthWidth={(value) => {
+          // Turning growth on can reveal a `maxElements` left over from an `exhaustiveLimit` that
+          // has since changed while the input showing it was hidden -- clamp it into range now
+          // rather than showing a value the search will silently fall short of.
+          const next: Partial<SearchSettings> = { growthWidth: value };
+          if (value > 0) {
+            const ceiling = exhaustiveLimit + GROWTH_REACH;
+            next.maxElements = Math.min(ceiling, Math.max(exhaustiveLimit + 1, maxElements));
+          }
+          onSettings(next);
+        }}
         maxElements={maxElements}
         onMaxElements={(value) => onSettings({ maxElements: value })}
         useSkeleton={useSkeleton}

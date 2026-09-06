@@ -1151,7 +1151,7 @@ def test_the_genetic_fallback_in_the_browser_matches_discover_mode_auto() -> Non
     # it -- so it must already equal what the finished report claims.
     evolve_step = next(step for step in driver.refit_steps if step["evolve"])
     assert evolve_step["complete_up_to"] == reference.complete_up_to
-    assert evolve_step["max_elements"] == 7
+    assert evolve_step["max_elements"] == 8
 
     assert report["complete_up_to"] == reference.complete_up_to
     assert report["n_evaluated"] == reference.n_evaluated
