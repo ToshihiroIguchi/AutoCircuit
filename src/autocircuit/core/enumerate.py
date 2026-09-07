@@ -44,6 +44,7 @@ from .circuit import (
     Series,
     canonical_form,
     count_elements,
+    count_params,
     parallel,
     replace_subtree,
     series,
@@ -60,9 +61,12 @@ __all__ = [
     "contains_skeleton",
     "count_skeleton_placements",
     "count_topologies",
+    "count_topologies_by_params",
     "endpoint_exponents",
     "enumerate_topologies",
+    "enumerate_topologies_by_params",
     "enumerate_up_to",
+    "enumerate_up_to_params",
     "feasible_topologies",
     "grow_from_skeleton",
     "grow_up_to",
@@ -232,6 +236,137 @@ def enumerate_up_to(pool: Sequence[str], n_max: int, n_min: int = 1) -> Iterator
 def count_topologies(pool: Sequence[str], n: int) -> int:
     """How many distinct plausible topologies exist at exactly ``n`` elements."""
     return sum(1 for _ in enumerate_topologies(pool, n))
+
+
+# -- Parameter-budgeted enumeration ---------------------------------------------------------
+#
+# docs/PARAM_BUDGET_PLAN.md: the element-axis enumeration above claims completeness in a
+# currency -- elements -- that is not commensurable across pools. A capacitor costs one free
+# parameter and a CPE costs two, so "every topology up to 5 elements" is a different amount of
+# model freedom depending on which codes are in the pool. This section enumerates the *same*
+# distinct, plausible, canonically deduplicated space, indexed by total free parameters
+# instead. It is dark: nothing in discover.py calls it yet (that plan's phase 1).
+#
+# Parameters are additive over a tree exactly as elements are, so every argument above for why
+# _compose enumerates the element axis completely and without duplicates carries over verbatim
+# to the parameter axis, with "size" read as "parameter count" throughout.
+
+#: Memoised sub-levels on the parameter axis, keyed (pool, n_params). Kept apart from
+#: _LEVELS rather than merged behind an axis tag: the two indices coincide exactly when every
+#: code in the pool costs one parameter, and that coincidence is the free correctness gate
+#: tests/test_enumerate.py checks -- a shared dict would make it untestable. Retained sizes are
+#: smaller here than on the element axis for the same parameter budget, because a parameter
+#: level only ever holds topologies with *at most* that many elements.
+_PARAM_LEVELS: dict[tuple[tuple[str, ...], int], tuple[Node, ...]] = {}
+
+
+def _pool_min_params(pool: tuple[str, ...]) -> int:
+    """Cheapest element in the pool, in free parameters. Bounds :func:`_compose_params`'s search."""
+    return min(elements.get(code).n_params for code in pool)
+
+
+def _survives_params(node: Node, p: int) -> Node | None:
+    """The parameter-axis counterpart of :func:`_survives`.
+
+    Equivalent to it, not merely analogous: ``simplify`` only ever merges duplicate leaves of
+    the ``_MERGEABLE`` codes (``circuit.py``'s ``("R", "C", "L")``), and every one of those
+    costs exactly one parameter, so a reduction that drops one element always drops exactly one
+    parameter too. A candidate that survives on one axis at its true size survives on the other
+    at its true parameter count, and nothing about the dedup semantics changes between them.
+    """
+    reduced = simplify(node)
+    if count_params(reduced) != p:
+        return None
+    return reduced if is_plausible_node(reduced) else None
+
+
+def _compose_params(pool: tuple[str, ...], p: int) -> Iterator[Node]:
+    """Stream the distinct surviving topologies with exactly ``p`` free parameters.
+
+    :func:`_compose`'s counterpart on the parameter axis. The base case is not "one element":
+    a CPE (2 parameters) is a leaf of *level 2*, so every code whose own ``n_params`` equals
+    ``p`` is emitted at every level requested, not only at ``p == 1``. Composition then
+    partitions ``p`` over branch parameter counts exactly as ``_compose`` partitions element
+    counts over branch element counts, and the argument for why that reaches every topology
+    exactly once carries over unchanged, because ``series``/``parallel`` flatten same-type
+    nodes regardless of which axis is being counted.
+
+    Pruned rather than filtered, so no over-budget tree is ever built: a branch costs at least
+    ``pmin`` parameters, so a partition into more than ``p // pmin`` parts can never be filled,
+    and ``integer_partitions``' non-increasing order puts the smallest part last, so one
+    comparison rejects a whole partition. What remains after that is caught by the levels
+    themselves coming back empty (some parameter counts are unattainable for a pool whose costs
+    do not all divide evenly, e.g. ``{CPE, Ws}`` leaves every odd level empty) -- checked once,
+    not per-candidate.
+    """
+    if p < 1:
+        return
+    for code in pool:
+        if elements.get(code).n_params == p:
+            yield ElementNode(code)
+
+    pmin = _pool_min_params(pool)
+    seen: set[str] = set()
+    for n_parts in range(2, p // pmin + 1):
+        for parts in integer_partitions(p, n_parts):
+            if parts[-1] < pmin:
+                continue
+            levels = [_param_level(pool, part) for part in parts]
+            if not all(levels):
+                continue
+            for combo in itertools.product(*levels):
+                for node in (series(*combo), parallel(*combo)):
+                    key = canonical_form(node)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    reduced = _survives_params(node, p)
+                    if reduced is not None:
+                        yield reduced
+
+
+def _param_level(pool: tuple[str, ...], p: int) -> tuple[Node, ...]:
+    """Materialise and memoise one complete parameter level."""
+    key = (pool, p)
+    cached = _PARAM_LEVELS.get(key)
+    if cached is None:
+        cached = tuple(_compose_params(pool, p))
+        _PARAM_LEVELS[key] = cached
+    return cached
+
+
+def enumerate_topologies_by_params(pool: Sequence[str], p: int) -> Iterator[Node]:
+    """Every distinct plausible topology built from ``pool`` with exactly ``p`` free parameters.
+
+    The parameter-axis counterpart of :func:`enumerate_topologies`. On a pool where every
+    element costs exactly one parameter this yields the *identical sequence* as
+    ``enumerate_topologies`` -- checked by ``tests/test_enumerate.py``, since that identity is
+    what makes this a genuine extension of the existing enumeration rather than a second
+    implementation with its own, independent bugs.
+
+    Args:
+        pool: Element codes the enumeration may use. Duplicates are ignored; unknown codes
+            raise ``KeyError``.
+        p: Total free parameters. ``p < 1`` yields nothing.
+    """
+    codes = _normalise_pool(pool)
+    if p < 1:
+        return iter(())
+    cached = _PARAM_LEVELS.get((codes, p))
+    return iter(cached) if cached is not None else _compose_params(codes, p)
+
+
+def enumerate_up_to_params(pool: Sequence[str], p_max: int, p_min: int = 1) -> Iterator[Node]:
+    """Enumerate every parameter level from ``p_min`` to ``p_max`` inclusive, cheapest first."""
+    codes = _normalise_pool(pool)
+    return itertools.chain.from_iterable(
+        enumerate_topologies_by_params(codes, p) for p in range(max(1, p_min), p_max + 1)
+    )
+
+
+def count_topologies_by_params(pool: Sequence[str], p: int) -> int:
+    """How many distinct plausible topologies exist at exactly ``p`` free parameters."""
+    return sum(1 for _ in enumerate_topologies_by_params(pool, p))
 
 
 # -- Skeleton-constrained enumeration ------------------------------------------------------

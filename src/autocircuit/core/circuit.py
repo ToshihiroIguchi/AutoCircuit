@@ -319,6 +319,17 @@ def count_elements(node: Node) -> int:
     return len(_walk(node))
 
 
+def count_params(node: Node) -> int:
+    """Total free parameters in a topology, summed over its element leaves.
+
+    A bare recursion rather than ``len(Circuit(node).param_names)``: the parameter-budgeted
+    enumerator in :mod:`autocircuit.core.enumerate` calls this once per candidate tree while
+    composing it, and ``Circuit.__init__`` relabels and validates every leaf on construction --
+    work this call sits squarely upstream of and must not pay for.
+    """
+    return sum(elements.get(leaf.code).n_params for leaf in _walk(node))
+
+
 # -- Tree addressing -----------------------------------------------------------------------
 # A position in a topology is the path of child indices from the root, so that a caller can
 # name a subtree, read it and put a different one in its place. The genetic operators in

@@ -1,6 +1,6 @@
 # PARAM_BUDGET_PLAN.md — should the exhaustive search be budgeted by free parameters instead of elements?
 
-**Status: plan only, §1 measured. Phases run in order; each states in advance what result means
+**Status: Phase 0 and Phase 1 done. Phases run in order; each states in advance what result means
 "do not ship" and a null result is an acceptable outcome of any phase after Phase 1.**
 
 ## 1. Why this needs an experiment before it needs an opinion
@@ -257,10 +257,28 @@ Each phase names, in advance, what would make it not ship.
 
 0. **Confirm, no code.** This document. *Null rule:* if the parameter axis completes no higher a
    level than the element axis on any of F4's four pools, stop and record the negative.
-1. **The enumerator, dark.** §4, no caller in `discover.py`. Gates: the two free checks, the §6
-   lemma as a property test, pruning tests, `test_enumerate.py` untouched,
-   `benchmarks/ev5_fingerprint.py` byte-identical (trivially — nothing `discover` calls has
-   changed). No null branch.
+1. **The enumerator, dark. [done, 2026-09-08]** §4, no caller in `discover.py`.
+   `count_params` added to `core/circuit.py`; `_PARAM_LEVELS`, `_pool_min_params`,
+   `_survives_params`, `_compose_params`, `_param_level`, `enumerate_topologies_by_params`,
+   `enumerate_up_to_params`, `count_topologies_by_params` added to `core/enumerate.py`, all in a
+   new section, none called from `discover.py`. Gates, all measured: list-identity with the
+   element-axis enumerator on unit-parameter-cost pools (`("R","C","L")`, `("R","C","L","W")`);
+   set-equality against enumerate-then-filter on four mixed-cost pools × three budgets, including
+   `("CPE","Ws")` (`pmin = 2`, exercising the empty-even-level pruning path); the §6 completeness
+   lemma as a property test (`R,C,L,CPE` at P=6: level 3 full at 61/61, level 4 a strict subset at
+   318/376); `tests/test_enumerate.py` untouched (`git diff` empty, its 66 tests unaffected) —
+   kept structurally guaranteed by putting the new tests in a **separate** file,
+   `tests/test_enumerate_params.py` (50 tests, all passing); `ruff check`/`ruff format --check`
+   clean on every touched/new file (pre-existing formatting warnings in `circuit.py`/
+   `enumerate.py` confirmed unchanged by `git stash` comparison); `mypy --strict` clean on both
+   core files. Full-suite regression, beyond the two enumerate-related files: `pytest -q` is
+   1103 passed / 19 skipped / 1 failed, and the one failure
+   (`test_web_bridge.py::test_bridge_version_is_bumped_for_the_new_operations`, pinned to
+   `BRIDGE_VERSION == 15` against today's `16`) reproduces identically with this phase's changes
+   stashed out — pre-existing, unrelated to this work, not a Phase 1 regression.
+   `benchmarks/ev5_fingerprint.py --mode exhaustive` is **byte-identical** before and after this
+   phase's changes (same sha256, confirmed via `git stash`), as expected since nothing `discover`
+   calls has changed. No null branch; nothing else observed.
 2. **Build E.1's controls and E.2's real-data arm**, before wiring, and baseline both on today's
    element axis.
 3. **`discover(max_params=...)`, opt-in, default `None`.** §6's fields/sentences/refusals,

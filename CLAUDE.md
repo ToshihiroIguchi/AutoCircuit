@@ -840,7 +840,7 @@ static-site Web UI running the same core via WASM (Pyodide).
 
 22. `docs/PARAM_BUDGET_PLAN.md` — whether the exhaustive search should be budgeted by free
     parameters rather than raw element count, since a `C` costs one and a `CPE` costs two.
-    **Plan only, §1 measured.** The originally suspected mechanism does not exist: tier 1 and
+    **Phases 0-1 done, dark (no caller in `discover.py` yet).** The originally suspected mechanism does not exist: tier 1 and
     tier 2 already feed `n_params` to the chosen criterion, and `recommended`'s first key,
     `Circuit.complexity`, is a weighted sum rather than a count, so no code path lets a CPE win a
     comparison for being counted as one element. What *is* raw element count, unconditionally, is
@@ -858,6 +858,12 @@ static-site Web UI running the same core via WASM (Pyodide).
     `n_data` in a way an element count never could be, which `CLAUDE.md`'s own "derived from the
     spectrum's own shape" rule was not checked against until this pass. Every phase states in
     advance what result means "do not ship," and a null result is acceptable after phase 1.
+    **Phase 1 [measured]**: the parameter-axis enumerator (`core/enumerate.py`'s
+    `enumerate_topologies_by_params`/`enumerate_up_to_params`/`count_topologies_by_params`, plus
+    `core/circuit.py`'s `count_params`) reproduces the element-axis enumerator exactly on
+    unit-parameter-cost pools and agrees with an independent naive filter on mixed-cost pools;
+    `tests/test_enumerate.py` is untouched byte-for-byte, and `ev5_fingerprint.py` is
+    byte-identical before/after, since nothing in `discover.py` calls the new code yet.
 
 Update these when decisions change.
 
