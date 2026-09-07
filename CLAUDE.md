@@ -838,6 +838,27 @@ static-site Web UI running the same core via WASM (Pyodide).
     tree, and the benchmark harness's new arms stay as a measurement instrument, the same way
     CMA-ES and Sobol multi-start already did from the round that rejected them.
 
+22. `docs/PARAM_BUDGET_PLAN.md` — whether the exhaustive search should be budgeted by free
+    parameters rather than raw element count, since a `C` costs one and a `CPE` costs two.
+    **Plan only, §1 measured.** The originally suspected mechanism does not exist: tier 1 and
+    tier 2 already feed `n_params` to the chosen criterion, and `recommended`'s first key,
+    `Circuit.complexity`, is a weighted sum rather than a count, so no code path lets a CPE win a
+    comparison for being counted as one element. What *is* raw element count, unconditionally, is
+    the budget, the `complete_up_to` coverage claim and the tier-2 refit quota, and those are
+    measurably distorted — at element cap 5 on the default pool, 79% of the enumerated space
+    carries more free parameters than the entire `R,C,L` cap-5 space allows, while a parameter
+    budget of 6 costs about a quarter *less* work (the topology-count view said "+8%"; that is the
+    wrong quantity, because the mix shifts away from the expensive element, 84.9%→32.3%
+    CPE-bearing) and reaches every six-element `R,C,L` topology exhaustively — the reach
+    `TOPOLOGY_6PLUS_PLAN.md` built the whole growth stage for and still ships off by default. The
+    plan's own §8 records what its first draft missed before any code was written: no truth
+    anywhere in this repository is small in elements and large in parameters, so every existing
+    benchmark would return a vacuous pass and parameter-dense negative controls have to be built
+    before anything is wired (§9 phase 2); a parameter budget is derivable from the spectrum's own
+    `n_data` in a way an element count never could be, which `CLAUDE.md`'s own "derived from the
+    spectrum's own shape" rule was not checked against until this pass. Every phase states in
+    advance what result means "do not ship," and a null result is acceptable after phase 1.
+
 Update these when decisions change.
 
 ## Stack and conventions
