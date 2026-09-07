@@ -47,6 +47,7 @@ export interface SearchProgress {
   plan: SearchPlanWire | null;
   /** Workers up, of the pool size asked for; only meaningful during `pool`. */
   workersReady: number;
+  /** Enumeration-only; never counts growth's own rows, so `screened <= toScreen` always holds. */
   screened: number;
   toScreen: number;
   /** Best-scoring topology so far. Deliberately without its score: a screen is not reportable. */
@@ -63,6 +64,18 @@ export interface SearchProgress {
    * finding out that the data needs an element the default pool does not have.
    */
   widened: boolean;
+  /**
+   * Topologies the growth stage (above the element limit) has screened so far. No denominator
+   * exists for this -- growth generates candidates as it runs -- so it is shown as a bare,
+   * ever-rising count rather than folded into `screened`/`toScreen`, which would let the
+   * numerator exceed the denominator.
+   */
+  grown: number;
+  /** True while the growth stage, not the enumeration, is what `screened`/`toScreen` describe. */
+  growing: boolean;
+  /** The genetic fallback's own progress: the current/total generation. Zero before it opens. */
+  generation: number;
+  generations: number;
   /** The pool being searched right now, which is not the one the plan started with if widened. */
   pool: string[];
   /** Per-size counts for the space being screened now; empty until the first batch lands. */
@@ -86,6 +99,10 @@ const IDLE: SearchProgress = {
   shortlisted: 0,
   front: [],
   widened: false,
+  grown: 0,
+  growing: false,
+  generation: 0,
+  generations: 0,
   pool: [],
   levels: [],
   evolving: null,
@@ -204,6 +221,8 @@ export class SearchRun {
           toScreen: step.total,
           best: step.best,
           widened: step.widened,
+          grown: step.grown,
+          growing: step.growing,
           pool: step.pool,
           levels: step.levels ?? [],
         },
@@ -211,14 +230,18 @@ export class SearchRun {
       );
       const tasks = step.tasks;
       if (tasks === null || this.cancelled) return;
-      const base = step.screened;
+      // Growth has no denominator, so its intra-batch progress goes to its own counter rather
+      // than `screened` -- the enumeration's own count is frozen while growth runs, and adding
+      // to it here is exactly the bug that let `screened` exceed `toScreen`.
+      const base = step.growing ? step.grown : step.screened;
       costs = await this.pool.map(
         tasks.length,
         (client, index) => {
           const [circuit, abandonAbove] = tasks[index] as [string, number | null];
           return client.screenTask(this.spectrum, circuit, abandonAbove, this.options);
         },
-        (completed) => this.emit({ screened: base + completed }),
+        (completed) =>
+          this.emit(step.growing ? { grown: base + completed } : { screened: base + completed }),
       );
       if (this.cancelled) return;
     }
@@ -280,6 +303,7 @@ export class SearchRun {
     this.emit({ stage: "evolving", evolving }, true);
     for (;;) {
       const step = await this.client.discoverEvolve(job, outcomes);
+      this.emit({ generation: step.generation, generations: step.generations }, true);
       const tasks = step.tasks;
       if (tasks === null || this.cancelled) return;
       outcomes = await this.pool.map(tasks.length, (client, index) =>

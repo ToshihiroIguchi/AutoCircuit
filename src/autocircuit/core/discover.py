@@ -1795,7 +1795,7 @@ def discover(
     feasibility_filter: bool = True,
     feasibility_budget: int = DEFAULT_DEGENERACY_BUDGET,
     workers: int = 1,
-    on_progress: Callable[[int, int, str | None], None] | None = None,
+    on_progress: Callable[[int, int | None, str | None], None] | None = None,
     on_stage: Callable[[str, str], None] | None = None,
     generations: int = 30,
     population: int = 40,
@@ -1869,8 +1869,15 @@ def discover(
         feasibility_budget: How many elements that screen may treat as degenerate; larger is
             more conservative and removes fewer candidates.
         workers: Processes for the tier-1 screen. Keep at 1 under Pyodide.
-        on_progress: Called as ``on_progress(done, total, best)`` during the screen, where
-            ``best`` is the DSL string of the best-scoring topology so far.
+        on_progress: Called as ``on_progress(done, total, best)``, where ``best`` is the DSL
+            string of the best-scoring topology so far (``None`` where none is meaningful yet).
+            Three phases share the call, distinguished by what ``done``/``total`` count: the
+            exhaustive screen (``done`` topologies screened of ``total`` enumerated), the growth
+            stage above ``exhaustive_limit`` (``done`` topologies screened, ``total`` always
+            ``None`` -- growth generates candidates as it runs and has no denominator to report),
+            and the genetic fallback (``done``/``total`` are the current/total *generation*, not
+            a topology count). A caller must not assume ``total`` is set, and must not compare
+            counts from different phases against each other.
         on_stage: Called as ``on_stage(name, message)`` exactly once at each point the search
             escalates beyond the plain exhaustive stage -- ``"widen_pool"`` when the default
             pool's own completed fit left a systematic residual and the search is re-screening
@@ -1978,6 +1985,7 @@ def discover(
             warm_accept=warm_accept,
             criterion=criterion,
             workers=workers,
+            on_progress=on_progress,
         )
         # The genetic search never completes a pool, so it cannot produce the evidence the
         # widening rests on. Saying "unasked" rather than leaving the field empty is the
@@ -2089,7 +2097,7 @@ def discover(
                     f"the best fit still shows a systematic residual; falling back to a "
                     f"genetic search up to {max_elements} elements ({generations} generations, "
                     f"population {population}). The 'screening N/M' line below now counts "
-                    f"genetic-search candidates, not an exhaustive enumeration.",
+                    f"generations of the genetic search, not screened topologies.",
                 )
             evolved = _evolve(
                 spectrum,
@@ -2112,6 +2120,7 @@ def discover(
                 warm_accept=warm_accept,
                 criterion=criterion,
                 workers=workers,
+                on_progress=on_progress,
             )
             candidates = _unique_best(candidates + evolved.candidates, criterion)
             n_screened += evolved.n_evaluated
@@ -2595,6 +2604,14 @@ def evolve_plan(
     return EvolvePlanResult(scored, len(cache), generation + 1)
 
 
+def _best_text(scored: Sequence[Candidate], criterion: Criterion) -> str | None:
+    """The lowest-cost circuit's DSL text, for a progress line only -- see :func:`screen_plan`'s
+    ``tracker.best_text`` for the tier-1 counterpart this mirrors."""
+    if not scored:
+        return None
+    return min(scored, key=lambda c: c.score(criterion)).circuit.to_string()
+
+
 def _evolve(
     spectrum: Spectrum,
     *,
@@ -2617,6 +2634,7 @@ def _evolve(
     warm_accept: float = WARM_ACCEPT_FACTOR,
     criterion: Criterion = DEFAULT_CRITERION,
     workers: int = 1,
+    on_progress: Callable[[int, int | None, str | None], None] | None = None,
 ) -> DiscoveryResult:
     """Regularised evolution over the topology grammar, warm-started from each parent.
 
@@ -2674,6 +2692,14 @@ def _evolve(
                 # already coincide) could.
                 if batch.generation != current_generation:
                     current_generation = batch.generation
+                    # `batch.scored` is "every candidate scored before this window" -- at a
+                    # generation boundary that is exactly everything the just-finished
+                    # generation produced, so this is the one place in the loop that can report
+                    # a *completed* generation rather than a partial one.
+                    if on_progress is not None:
+                        on_progress(
+                            current_generation, generations, _best_text(batch.scored, criterion)
+                        )
                     if time_limit is not None and time.perf_counter() - started > time_limit:
                         scored, cache_size, generations_run = (
                             batch.scored,
@@ -2697,6 +2723,8 @@ def _evolve(
                 result.cache_size,
                 result.generations_run,
             )
+            if on_progress is not None:
+                on_progress(generations_run, generations, _best_text(scored, criterion))
 
         # Only refitted candidates are reported, which is the rule SCREEN_POPSIZE states and the
         # rule `_exhaustive` has always followed: every number that reaches the user comes from
@@ -2896,7 +2924,7 @@ def _exhaustive(
     n_refine: int,
     final_restarts: int,
     workers: int,
-    on_progress: Callable[[int, int, str | None], None] | None,
+    on_progress: Callable[[int, int | None, str | None], None] | None,
     time_limit: float | None,
     started: float,
     extra: Sequence[str] | None = None,
@@ -3476,7 +3504,7 @@ def _screen_all(
     weighting: Weighting,
     seed: int,
     executor: multiprocessing.pool.Pool | None,
-    on_progress: Callable[[int, int, str | None], None] | None,
+    on_progress: Callable[[int, int | None, str | None], None] | None,
     time_limit: float | None,
     started: float,
     budget: ScreenBudget = SCREEN_BUDGET,
@@ -3529,7 +3557,7 @@ def _grow_all(
     weighting: Weighting,
     seed: int,
     executor: multiprocessing.pool.Pool | None,
-    on_progress: Callable[[int, int, str | None], None] | None,
+    on_progress: Callable[[int, int | None, str | None], None] | None,
     time_limit: float | None,
     started: float,
     criterion: Criterion,
@@ -3587,7 +3615,11 @@ def _grow_all(
                 ]
             produced.extend(zip(costs, (t.text for t in tasks), strict=True))
             if on_progress is not None:
-                on_progress(len(produced), len(produced), None)
+                # No denominator: growth generates candidates as it runs, one level at a time,
+                # and has no enumeration to size it against beforehand (unlike the exhaustive
+                # screen this shares its batching with). `None` says so rather than reusing the
+                # numerator as a total that would always read 100%.
+                on_progress(len(produced), None, None)
             # A growth level is all-or-nothing, and the check is deliberately *after* the batch
             # rather than inside it: half a level is not "every one-element extension of the
             # best W", so a truncated level would leave :meth:`DiscoveryResult.completeness`
@@ -3866,7 +3898,7 @@ def _screen_parallel(
     executor: multiprocessing.pool.Pool,
     *,
     seed: int,
-    on_progress: Callable[[int, int, str | None], None] | None,
+    on_progress: Callable[[int, int | None, str | None], None] | None,
     time_limit: float | None,
     started: float,
     budget: ScreenBudget = SCREEN_BUDGET,

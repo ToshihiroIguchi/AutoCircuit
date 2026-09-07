@@ -211,46 +211,56 @@ def _objective_of(args: argparse.Namespace) -> Objective:
     return cast("Objective", args.objective or DEFAULT_OBJECTIVE)
 
 
-def _stage_reporter() -> Callable[[str, str], None]:
-    """Build an ``on_stage`` callback that announces a search escalation on stderr.
+def _progress_reporters() -> tuple[
+    Callable[[int, int | None, str | None], None], Callable[[str, str], None]
+]:
+    """Build the paired ``on_progress``/``on_stage`` callbacks for ``--progress``.
 
-    Printed on its own line, ahead of whatever ``_progress_reporter`` is doing with
-    self-overwriting ``\\r`` lines, so the announcement is not immediately clobbered by the
-    next progress update -- and so a reader watching only the live line still sees why its
-    denominator just changed or reset.
-    """
+    One shared, self-overwriting ``\\r`` line, and the two callbacks share a mutable label
+    because ``on_progress`` alone cannot tell what its ``done``/``total`` count *of* -- both the
+    exhaustive screen and the genetic fallback report a count-of-total, and only ``on_stage``'s
+    ``"evolve"`` transition says which one it now is (`core.discover.discover`'s ``on_progress``
+    docstring). Growth needs no flag: it is the one phase with no total at all
+    (``total is None``), and that alone identifies it -- rendered as its own line, on its own
+    counter, with no denominator invented for it.
 
-    def on_stage(_name: str, message: str) -> None:
-        sys.stderr.write(f"\n  {message}\n")
-        sys.stderr.flush()
-
-    return on_stage
-
-
-def _progress_reporter() -> Callable[[int, int, str | None], None]:
-    """Build an ``on_progress`` callback that writes a self-overwriting line to stderr.
-
-    Throttled to roughly 20 updates per second or every 25 candidates, whichever comes first,
-    so that a screen firing the callback thousands of times cannot dominate the run time.
-    It writes to stderr on purpose: stdout carries the report, which must stay pipeable.
+    ``on_stage`` prints its announcement on its own line, ahead of the live ``\\r`` line, so it
+    is not immediately clobbered by the next progress update and a reader watching only the
+    live line still sees why its meaning just changed.
     """
     last_time = 0.0
     last_done = -1
+    label = "screening"
 
-    def on_progress(done: int, total: int, best: str | None) -> None:
+    def on_stage(name: str, message: str) -> None:
+        nonlocal label
+        sys.stderr.write(f"\n  {message}\n")
+        sys.stderr.flush()
+        if name == "evolve":
+            label = "genetic search generation"
+        elif name == "widen_pool":
+            label = "screening"
+
+    def on_progress(done: int, total: int | None, best: str | None) -> None:
         nonlocal last_time, last_done
         now = time.perf_counter()
-        finished = done >= total
+        finished = total is not None and done >= total
         if not finished and now - last_time < 0.05 and done - last_done < 25:
             return
         last_time, last_done = now, done
-        sys.stderr.write(f"\r  screening {done}/{total}  best so far: {best or '-'}")
+        if total is None:
+            sys.stderr.write(
+                f"\r  growing {done} screened "
+                "(no total: growth generates candidates as it runs)"
+            )
+        else:
+            sys.stderr.write(f"\r  {label} {done}/{total}  best so far: {best or '-'}")
         sys.stderr.flush()
         if finished:
             sys.stderr.write("\n")
             sys.stderr.flush()
 
-    return on_progress
+    return on_progress, on_stage
 
 
 def _skeleton_plan(skeleton: str, exhaustive_limit: int | None, max_candidates: int) -> str:
@@ -324,6 +334,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
         print(_skeleton_plan(args.skeleton, args.exhaustive_limit, args.max_candidates))
         print()
 
+    on_progress, on_stage = _progress_reporters() if args.progress else (None, None)
     result = discover(
         spectrum,
         pool=pool,
@@ -334,8 +345,8 @@ def cmd_discover(args: argparse.Namespace) -> int:
         workers=args.workers,
         feasibility_filter=not args.no_feasibility_filter,
         criterion=args.criterion,
-        on_progress=_progress_reporter() if args.progress else None,
-        on_stage=_stage_reporter() if args.progress else None,
+        on_progress=on_progress,
+        on_stage=on_stage,
         generations=args.generations,
         population=args.population,
         max_elements=args.max_elements,

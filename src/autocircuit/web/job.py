@@ -239,6 +239,11 @@ class DiscoveryJob:
         self._growth_open = False
         self._grown: list[tuple[float, str]] = []
         self.grown_to: int | None = None
+        # Growth's own counter, kept apart from `_scored` for the reporting reason `job.py`'s
+        # docs already give `screened`/`coverage_level`: growth has no enumeration to size a
+        # denominator against, so its progress can only ever be a bare, ever-rising count --
+        # never a fraction of something growth does not know in advance.
+        self._growth_screened = 0
         # How many topologies the *enumeration* screened, kept apart from `_scored` because
         # growth appends to that list and `complete_up_to` is derived from a count. Letting the
         # grown rows into that count would raise the completeness claim by exactly the amount
@@ -389,6 +394,8 @@ class DiscoveryJob:
         if len(costs) != len(self._issued):
             raise ValueError(f"{len(costs)} costs for {len(self._issued)} screening tasks")
         self._costs = [float(cost) for cost in costs]
+        if self._growth_open:
+            self._growth_screened += len(self._costs)
         for cost, text in zip(self._costs, self._issued, strict=True):
             # During growth the generator's own return value is what lands in `_scored`, so
             # appending here as well would double-count. `screened` stays the enumeration's
@@ -404,16 +411,41 @@ class DiscoveryJob:
         return len(self._scored)
 
     @property
+    def screened_enumerated(self) -> int:
+        """Topologies screened *of the enumeration*, growth excluded -- the numerator that
+        belongs with ``len(self.enumeration.texts)``, the "Screening candidates" denominator.
+
+        The same count :attr:`coverage_level` reads, for the same reason: growth's own rows
+        must not be counted against a total that never included them, or the numerator can
+        exceed the denominator (`docs/DISCOVER_UX_PLAN.md`, third review round).
+        """
+        return len(self._scored) if self._enumerated is None else self._enumerated
+
+    @property
+    def grown_screened(self) -> int:
+        """Topologies the growth stage has screened so far. No denominator exists for this --
+        see :attr:`growing` and :meth:`_grow_all`'s ``on_progress`` call."""
+        return self._growth_screened
+
+    @property
+    def growing(self) -> bool:
+        """True while the growth stage is the one being driven through :meth:`next_screen`."""
+        return self._growth_open
+
+    @property
+    def evolve_generation(self) -> int:
+        """The genetic fallback's current generation, 0 before it starts."""
+        return self._evolve_generation
+
+    @property
     def coverage_level(self) -> int | None:
         """Largest element count the *enumeration* completed. Growth may not raise it.
 
-        Derived from :attr:`_enumerated` rather than from ``len(self._scored)``, because the
-        growth stage appends to that list: using the running total would raise the completeness
-        claim by exactly the amount growth is not entitled to claim.
+        Derived from :attr:`screened_enumerated` rather than from ``len(self._scored)``,
+        because the growth stage appends to that list: using the running total would raise the
+        completeness claim by exactly the amount growth is not entitled to claim.
         """
-        return self.enumeration.coverage(
-            len(self._scored) if self._enumerated is None else self._enumerated
-        )
+        return self.enumeration.coverage(self.screened_enumerated)
 
     @property
     def best_screened(self) -> str | None:
@@ -768,6 +800,7 @@ class DiscoveryJob:
         self._growth_open = False
         self._grown = []
         self.grown_to = None
+        self._growth_screened = 0
         self._enumerated = None
         self._best = None
         self._refit = None

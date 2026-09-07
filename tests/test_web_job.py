@@ -229,6 +229,13 @@ def test_a_driven_search_with_growth_reproduces_discover_exactly() -> None:
         seed=0,
     )
 
+    # `screened` must never exceed `total`: growth's own rows have no enumeration to be counted
+    # against, so they must not land in this numerator (the defect a user reported and this test
+    # guards -- `docs/DISCOVER_UX_PLAN.md`, third review round).
+    for step in driver.screen_steps:
+        assert step["screened"] <= step["total"]
+    assert any(step["grown"] > 0 for step in driver.screen_steps)
+
     assert reference.grown_to is not None and reference.grown_to > reference.complete_up_to
     assert report["complete_up_to"] == reference.complete_up_to
     assert report["completeness"] == reference.completeness()

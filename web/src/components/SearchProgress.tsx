@@ -75,33 +75,46 @@ function Row({
   label: string;
   state: RowState;
   done: number;
-  /** Zero means not yet known, which is drawn as such rather than as a full or an empty bar. */
-  total: number;
+  /**
+   * Zero means not yet known, drawn as such rather than as a full or an empty bar. `null` means
+   * no denominator exists at all -- the growth stage has none, since it generates candidates as
+   * it runs -- and is drawn as a bare, ever-rising count with no bar, rather than one invented
+   * from the numerator (which is how a fraction that could exceed 1 got shown in the first
+   * place; `docs/DISCOVER_UX_PLAN.md`, third review round).
+   */
+  total: number | null;
   unit: string;
   note?: React.ReactNode;
 }) {
-  const known = total > 0;
+  const known = total !== null && total > 0;
+  const asTotal = total ?? 0;
   // A finished stage is shown full. That is not rounding up: the tier ran to the end of its own
   // list, and `stateOf` refuses to call anything finished on a cancelled run.
-  const shown = state === "finished" && known ? total : done;
-  const fraction = known ? Math.min(1, shown / total) : 0;
+  const shown = state === "finished" && known ? asTotal : done;
+  const fraction = known ? Math.min(1, shown / asTotal) : 0;
   return (
     <div className={`search-progress__row search-progress__row--${state}`}>
       <p className="search-progress__row-head">
         <span className="search-progress__step">{step}</span>
         <span className="search-progress__label">{label}</span>
       </p>
-      <div
-        className="search-progress__bar"
-        role="progressbar"
-        aria-label={label}
-        aria-valuenow={shown}
-        aria-valuemax={known ? total : undefined}
-      >
-        <div className="search-progress__bar-fill" style={{ width: `${fraction * 100}%` }} />
-      </div>
+      {total !== null && (
+        <div
+          className="search-progress__bar"
+          role="progressbar"
+          aria-label={label}
+          aria-valuenow={shown}
+          aria-valuemax={known ? total : undefined}
+        >
+          <div className="search-progress__bar-fill" style={{ width: `${fraction * 100}%` }} />
+        </div>
+      )}
       <p className="search-progress__counts">
-        {known ? (
+        {total === null ? (
+          <>
+            {done} {unit}
+          </>
+        ) : known ? (
           <>
             {shown} / {total} {unit}
           </>
@@ -151,6 +164,7 @@ export function SearchProgressPanel({ progress, poolSize }: SearchProgressPanelP
   // they are named in the heading and fold into the neighbouring rows below.
   const screening = stateOf(progress.stage, "screening");
   const refitting = stateOf(progress.stage, "refitting");
+  const evolving = stateOf(progress.stage, "evolving");
   // The plan's breakdown until the first batch of a pass lands, and the pass's own after that:
   // a widening replaces the enumeration, and the old breakdown would describe a space nobody is
   // screening any more.
@@ -195,6 +209,23 @@ export function SearchProgressPanel({ progress, poolSize }: SearchProgressPanelP
           )
         }
       />
+      {(progress.growing || progress.grown > 0) && (
+        <Row
+          step="Above the element limit"
+          label="Growing past the element limit"
+          state={progress.growing ? "running" : "finished"}
+          done={progress.grown}
+          total={null}
+          unit="grown candidates screened"
+          note={
+            <>
+              {" "}
+              &mdash; no total: growth generates candidates as it runs, one level at a time, and
+              is not a completeness claim.
+            </>
+          }
+        />
+      )}
       <Row
         step="Stage 2 of 2"
         label="Refitting the shortlist"
@@ -205,14 +236,25 @@ export function SearchProgressPanel({ progress, poolSize }: SearchProgressPanelP
       />
 
       {progress.evolving && (
-        <p className="search-progress__evolving">
-          Exhaustive search is complete to {progress.evolving.completeUpTo ?? 0} element(s) and
-          the best fit still shows a systematic residual, so the search is falling back to a
-          randomized (genetic) search up to {progress.evolving.maxElements} elements &mdash; the
-          same escalation <code>discover(mode=&quot;auto&quot;)</code> makes on the command line,
-          and independent of whether Growth (in the panel above) was turned on. The counts above
-          now describe genetic-search offspring, not an exhaustive enumeration.
-        </p>
+        <>
+          <p className="search-progress__evolving">
+            Exhaustive search is complete to {progress.evolving.completeUpTo ?? 0} element(s) and
+            the best fit still shows a systematic residual, so the search is falling back to a
+            randomized (genetic) search up to {progress.evolving.maxElements} elements &mdash;
+            the same escalation <code>discover(mode=&quot;auto&quot;)</code> makes on the command
+            line, and independent of whether Growth (in the panel above) was turned on. Stage 1
+            above stays at the exhaustive screen&rsquo;s own numbers; the genetic search reports
+            its own progress below, one generation at a time.
+          </p>
+          <Row
+            step="Fallback"
+            label="Genetic search"
+            state={evolving}
+            done={progress.generation}
+            total={progress.generations}
+            unit="generations"
+          />
+        </>
       )}
 
       {levels.length > 0 && (

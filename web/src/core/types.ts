@@ -366,12 +366,21 @@ export interface SearchPlanWire {
 /** A batch of tier-1 work, with how far the screen has got. `tasks` is null when it is done. */
 export interface ScreenStepWire {
   tasks: ScreenTaskWire[] | null;
+  /** Enumeration-only: never counts growth's own rows, so `screened <= total` always holds. */
   screened: number;
   total: number;
   /** Best-scoring topology so far, without its score -- a screening cost is not reportable. */
   best: string | null;
   /** True on the second pass, over a wider pool. `screened` and `total` restart with it. */
   widened: boolean;
+  /**
+   * How many topologies the growth stage (above the element limit) has screened so far. No
+   * `total` exists for this -- growth generates candidates as it runs and cannot size a
+   * denominator in advance -- so it is reported as a bare, ever-rising count.
+   */
+  grown: number;
+  /** True while `next_screen` is driving the growth stage rather than the enumeration. */
+  growing: boolean;
   /** The pool being screened right now. */
   pool: string[];
   /** The per-size breakdown of the space being screened now, which a widening replaces. */
@@ -471,6 +480,10 @@ export type EvolveOutcomeWire = [FitResultWire | null, FitResultWire | null];
  *  shortlist. */
 export interface EvolveStepWire {
   tasks: EvolveTaskWire[] | null;
+  /** The fallback's own progress counter: a generation is the only honest denominator this
+   *  stage has, mirroring `core.discover._evolve`'s `on_progress` calls on the command line. */
+  generation: number;
+  generations: number;
 }
 
 /**

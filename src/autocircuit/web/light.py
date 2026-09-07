@@ -83,7 +83,16 @@ from autocircuit.core.validate import WIRE_VERSION as VALIDATE_WIRE_VERSION
 #: why the fallback opened -- the exhaustive stage's own coverage and the cap the fallback would
 #: run up to -- the moment it does, instead of a bare stage-name change. Mirrors the ``on_stage``
 #: message ``discover(mode="auto")`` already prints for the same escalation on the command line.
-BRIDGE_VERSION = 15
+#: 16 (2026-09-07): a user watching the Discover panel reported ``screening candidates`` showing
+#: a numerator past its denominator; the cause was the growth stage's own rows counted into
+#: ``discover_screen``'s ``screened`` against a ``total`` that only ever counted the enumeration.
+#: ``screened`` is now the enumeration's own count (never past ``total`` again); growth gets its
+#: own ``grown``/``growing`` fields on the same response, with no denominator invented for it
+#: (growth generates candidates as it runs and cannot size one in advance); and
+#: ``discover_evolve``'s response gains ``generation``/``generations``, the genetic fallback's own
+#: honest counter, which used to freeze because nothing reported it at all
+#: (``docs/DISCOVER_UX_PLAN.md``, third review round).
+BRIDGE_VERSION = 16
 
 #: One operation: a request payload in, a JSON-safe result out.
 Operation = Callable[[dict[str, Any]], Any]

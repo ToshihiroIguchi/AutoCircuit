@@ -371,7 +371,11 @@ def _op_discover_screen(payload: dict[str, Any]) -> dict[str, Any]:
             None if tasks is None
             else [[text, job.to_wire_cost(abandon)] for text, abandon in tasks]
         ),
-        "screened": running.screened,
+        # The enumeration's own numerator/denominator, growth excluded: growth generates
+        # candidates it never enumerated in advance, so counting them here would make
+        # ``screened`` exceed ``total`` (`docs/DISCOVER_UX_PLAN.md`, third review round). Growth's
+        # own count is reported separately below, with no total to over- or under-claim against.
+        "screened": running.screened_enumerated,
         "total": len(running.enumeration.texts),
         "best": running.best_screened,
         # A widened search screens a second, larger space, so ``screened`` and ``total`` both
@@ -379,6 +383,10 @@ def _op_discover_screen(payload: dict[str, Any]) -> dict[str, Any]:
         # backwards from looking like a bug -- and it is also the first moment the user can be
         # told that the data asked for more elements than the default pool has.
         "widened": running.widened,
+        # Growth has no denominator, so it gets its own counter rather than distorting the
+        # enumeration's -- see :attr:`~autocircuit.web.job.DiscoveryJob.grown_screened`.
+        "grown": running.grown_screened,
+        "growing": running.growing,
         "pool": list(running.pool),
         # The per-size breakdown of the space being screened *now*. It is on every step rather
         # than only the first because a widening replaces the enumeration mid-run, and a
@@ -454,6 +462,11 @@ def _op_discover_evolve(payload: dict[str, Any]) -> dict[str, Any]:
                 ) in tasks
             ]
         ),
+        # The genetic fallback's own progress counter: a generation is the only honest
+        # denominator this stage has, mirroring `core.discover._evolve`'s `on_progress` calls on
+        # the command line (`docs/DISCOVER_UX_PLAN.md`, third review round).
+        "generation": running.evolve_generation,
+        "generations": running.generations,
     }
 
 

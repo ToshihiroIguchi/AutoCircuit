@@ -511,3 +511,75 @@ that `scipy.optimize`, `scipy.special` and `scipy.interpolate` are load-bearing 
 path, not incidental — and is not attempted here without the user asking for that scope
 specifically, given `CLAUDE.md`'s hard rule that numpy and scipy are the only runtime dependencies
 and the measured cost of every cheaper alternative tried so far.
+
+## A third review round: the "screening candidates" fraction, reported wrong
+
+**Finding.** A user watching the Discover panel saw the "Screening candidates" row report a
+numerator larger than its own denominator (`500 / 446 screened`) and judged the display method
+itself suspect. It was: one wire field, `discover_screen`'s `screened`, was being asked to carry
+two different counts. `web/bridge.py` sent the denominator as `len(running.enumeration.texts)` —
+the exhaustive enumeration only — while `web/job.py`'s `screened` property summed *both* the
+enumeration and the growth stage (`GROWTH_DEFAULT`'s "grow past the element limit" checkbox),
+because `job.py:375-377` splices the whole growth stage's rows into `_scored` once growth
+finishes. Growth generates candidates as it runs and was never sized against the enumeration to
+begin with, so there never was a correct total for the numerator to be checked against — the
+report tracked at `docs/TOPOLOGY_6PLUS_PLAN.md` for the exact same reason growth may not raise
+`complete_up_to`, seen here on the progress line instead of the coverage sentence.
+
+Investigating the one reported symptom found the same root cause behind two more, on both front
+ends: `core/discover.py`'s growth loop called `on_progress(len(produced), len(produced), None)`
+— a denominator *defined* to equal its own numerator — which the CLI's `--progress` reads as
+"the screen just finished" (`done >= total`) and prints a newline for on every growth batch
+rather than the one self-overwriting line every other stage gets. And the sentence
+`on_stage("evolve", ...)` prints, and `SearchProgress.tsx`'s matching paragraph, both promised
+that "the counts below now count genetic-search candidates" — false on both front ends, because
+`on_progress` was never passed into `_evolve` at either of its two call sites and the browser's
+`discover_evolve` response carried no counters at all. The genetic fallback's progress simply
+froze.
+
+**Fix.** One progress channel was carrying three unrelated meanings with no way to say which.
+Rather than force growth into a fraction it cannot honestly report, each phase now gets its own
+counter, stated as what it counts:
+
+- **Screening** (`core.discover`'s `on_progress`, `discover_screen`'s wire response): unchanged
+  in shape, but `screened`/`total` now describe the enumeration alone, on both front ends —
+  `DiscoveryJob.screened_enumerated` on the browser side, and growth no longer appends into the
+  count `_grow_all` reports. `screened <= total` holds again.
+- **Growth**: no invented denominator. `on_progress`'s `total` parameter is now
+  `int | None`, `None` meaning "this phase has none" — `_grow_all` emits
+  `on_progress(len(produced), None, None)`. The CLI prints `growing N screened (no total: growth
+  generates candidates as it runs)` on its own self-overwriting line, no longer finishing on
+  every batch. The browser gets a new `discover_screen` field pair, `grown`/`growing`
+  (`DiscoveryJob.grown_screened`/`.growing`), and `SearchProgressPanel` renders a fourth bar-less
+  row — "Growing past the element limit — N grown candidates screened" — shown only once growth
+  is or has been active, with an explicit note that it has no total and is not a completeness
+  claim (the same discipline `TOPOLOGY_6PLUS_PLAN.md` section 4.7 already states for
+  `grown_to`).
+- **The genetic fallback**: given a real, honest denominator it already had internally but never
+  reported — a generation. `_evolve` now takes `on_progress` too, and emits once per generation
+  boundary (`current_generation` was already tracked; the boundary was just never surfaced).
+  `discover_evolve`'s wire response gains `generation`/`generations`
+  (`DiscoveryJob.evolve_generation`, already tracked, plus the existing `self.generations`), and
+  `SearchProgressPanel` gets a fifth row, "Genetic search — generation k / N", once
+  `progress.evolving` is set. Both false "the counts below now count genetic-search candidates"
+  sentences were reworded to what the code now actually does — the exhaustive stage's numbers
+  hold still, the generation count moves separately.
+
+Bridge version 15 → 16. The whole change is reporting-layer: `discover()`'s `on_progress` and
+`on_stage` change no number it returns (the module docstring's existing claim for both), and
+`web/job.py`'s new properties are read-only derivations of state the job already held.
+
+**Verification.** `tests/test_web_job.py::test_a_driven_search_with_growth_reproduces_discover_exactly`
+gained the invariant this whole fix is about: every `discover_screen` step in a growth run
+satisfies `screened <= total`, and `grown > 0` by the end. `tests/test_web_job.py`,
+`tests/test_cli.py` and `tests/test_discover.py` (105 tests), `mypy --strict`, `ruff check` on
+every changed module, `npm run check`, `npm run smoke` (`discovery`/`genetic fallback` sections,
+including the growth-specific checks already there) all pass. `benchmarks/ev5_fingerprint.py
+--limit 3` before and after this change is byte-identical, on all three references under both
+`exhaustive` and `auto` -- confirming the "reporting-layer, no number moves" claim rather than
+asserting it. The genetic fallback's own generation counter was checked directly against a fast
+synthetic circuit: five calls, `(1, 5, ...)` through `(5, 5, ...)`, each `best` naming the
+lowest-cost circuit found by that point. Manually exercised on the command line
+(`autocircuit discover web/public/samples/li-ion-cell.csv --growth-width 4 --progress`) through
+the screening, growth and pool-widening phases: no `N/M` line with `N > M`, and growth prints one
+self-overwriting line rather than a newline per batch.
