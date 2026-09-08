@@ -28,9 +28,9 @@ from pathlib import Path
 _SPEEDUP_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_SPEEDUP_DIR))
 
-from autocircuit.core import circuit as circuit_mod
-from autocircuit.core import enumerate as enum_mod
-from autocircuit.core.circuit import Circuit
+from autocircuit.core import circuit as circuit_mod  # noqa: E402
+from autocircuit.core import enumerate as enum_mod  # noqa: E402
+from autocircuit.core.circuit import Circuit  # noqa: E402
 
 POOL = ("R", "C", "L", "CPE")
 SIZES = (4, 5)

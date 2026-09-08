@@ -28,7 +28,7 @@ from pathlib import Path
 _SPEEDUP_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_SPEEDUP_DIR))
 
-from truths import MW4CPE, MW5, spectrum_for  # noqa: E402
+from truths import MW5, spectrum_for  # noqa: E402
 
 from autocircuit.core.circuit import Circuit  # noqa: E402
 from autocircuit.core.enumerate import enumerate_topologies  # noqa: E402
@@ -46,9 +46,13 @@ def _screen_task(args: tuple[str, Spectrum]) -> float:
 
 def build_heterogeneous_batch(n: int) -> list[str]:
     """Mix CPE-bearing (slow) and CPE-free (fast) topologies for real cost heterogeneity."""
-    cpe_texts = [Circuit(node).to_string() for node in enumerate_topologies(("R", "C", "L", "CPE"), 5)]
+    cpe_texts = [
+        Circuit(node).to_string() for node in enumerate_topologies(("R", "C", "L", "CPE"), 5)
+    ]
     cpe_only = [t for t in cpe_texts if "CPE" in t][: n // 2]
-    plain_texts = [Circuit(node).to_string() for node in enumerate_topologies(("R", "C", "L"), 5)][: n // 2]
+    plain_texts = [
+        Circuit(node).to_string() for node in enumerate_topologies(("R", "C", "L"), 5)
+    ][: n // 2]
     return (cpe_only + plain_texts)[:n]
 
 

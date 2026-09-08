@@ -52,7 +52,9 @@ def run_one(truth, pool) -> None:
             population=POPULATION, max_elements=truth.n_elements + 1, seed=seed, workers=1,
         )
         t1 = time.time()
-        print(f"  seed {seed}: reduced ({REDUCED_GENERATIONS}gen) done in {t1 - t0:.1f}s", flush=True)
+        print(
+            f"  seed {seed}: reduced ({REDUCED_GENERATIONS}gen) done in {t1 - t0:.1f}s", flush=True
+        )
         full = discover(
             spectrum, pool=pool, mode="evolve", generations=FULL_GENERATIONS,
             population=POPULATION, max_elements=truth.n_elements + 1, seed=seed, workers=1,
