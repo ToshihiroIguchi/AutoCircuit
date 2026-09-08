@@ -265,6 +265,26 @@ def _pool_min_params(pool: tuple[str, ...]) -> int:
     return min(elements.get(code).n_params for code in pool)
 
 
+def _pool_max_params(pool: tuple[str, ...]) -> int:
+    """Most expensive element in the pool, in free parameters.
+
+    This is ``m`` in ``docs/PARAM_BUDGET_PLAN.md`` section 6's completeness lemma: a parameter
+    budget ``P`` contains every *n*-element topology iff ``n <= P // m``, since an *n*-element
+    topology costs at most ``n * m``. ``discover.py`` uses it to translate a parameter-axis
+    coverage level back into the element-axis ``complete_up_to`` claim every existing report
+    consumer already reads.
+    """
+    return max(elements.get(code).n_params for code in pool)
+
+
+def _pool_costliest_code(pool: tuple[str, ...]) -> str:
+    """Which pool code realises :func:`_pool_max_params`'s ``m``, for the coverage sentence
+    ``discover.py`` builds under a parameter budget (docs/PARAM_BUDGET_PLAN.md section 6). Ties
+    resolve to the first such code in pool order, which is deterministic but otherwise arbitrary
+    -- more than one code can cost the same, and the sentence only needs one example."""
+    return max(pool, key=lambda code: elements.get(code).n_params)
+
+
 def _survives_params(node: Node, p: int) -> Node | None:
     """The parameter-axis counterpart of :func:`_survives`.
 

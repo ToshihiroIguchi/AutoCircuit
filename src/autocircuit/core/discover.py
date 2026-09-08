@@ -61,9 +61,16 @@ from .enumerate import (
     # be a second thing that can miss the subset-grouping moves -- which is exactly the hole
     # `benchmarks/screening_round/arms.py`'s own local `_grow` has.
     _insertions,
+    # Parameter-axis counterparts of `_pool_min_params`'s use inside `enumerate.py` itself;
+    # imported private the same way `_insertions` already is. See docs/PARAM_BUDGET_PLAN.md
+    # section 6 for what `_pool_max_params` (`m` in the completeness lemma) and
+    # `_pool_costliest_code` (the coverage sentence's worked example) are used for.
+    _pool_costliest_code,
+    _pool_max_params,
     contains_skeleton,
     count_skeleton_placements,
     enumerate_topologies,
+    enumerate_topologies_by_params,
     grow_up_to,
     is_feasible,
     # The structural plausibility filter now lives with the enumerator, which is what applies
@@ -93,6 +100,21 @@ from .stats import (
 from .validate import RUNS_Z_LIMIT, _runs_z
 
 Mode = Literal["auto", "exhaustive", "evolve"]
+
+#: Which currency an :class:`Enumeration`'s levels are counted in. See
+#: docs/PARAM_BUDGET_PLAN.md section 6: an element-axis enumeration completes a level of
+#: ``exhaustive_limit`` elements; a parameter-axis one completes a level of ``max_params`` free
+#: parameters, and a translation (``Enumeration.element_coverage``) is what lets both feed the
+#: same :attr:`DiscoveryResult.complete_up_to` claim.
+EnumerationAxis = Literal["elements", "params"]
+
+#: Hard ceiling on ``max_params``, mirroring ``core/enumerate.py``'s own cap on the parameter
+#: axis's memoisation: at a budget past this, a retained level for a six-code pool already
+#: passes 10**5 nodes -- the size that module's own comment names as unaffordable to hold.
+#: ``discover()`` clamps rather than raises, the same way an oversized ``exhaustive_limit``
+#: already gets clamped by ``max_candidates`` -- reported through ``complete_up_to``, never
+#: silently.
+MAX_PARAM_BUDGET = 7
 
 #: Why :attr:`DiscoveryResult.by_criterion` differs from :attr:`DiscoveryResult.recommended`,
 #: for the criteria where that comparison means anything (everything but ``ftest``; see
@@ -560,6 +582,30 @@ class DiscoveryResult:
     collapsing the two into one would either overclaim the wide pool or throw away what the
     narrow one actually covered.
     """
+    max_params: int | None = None
+    """The parameter budget the caller asked for, or None on the (default) element axis.
+
+    Present only so :meth:`completeness` and callers downstream of it know which axis produced
+    :attr:`complete_up_to` -- the field itself never changes meaning between the two
+    (docs/PARAM_BUDGET_PLAN.md section 6). ``None`` on every run that did not pass
+    ``discover(max_params=...)``, which is every run before this field existed.
+    """
+    complete_up_to_params: int | None = None
+    """Largest free-parameter count whose topologies were *all* evaluated, or None.
+
+    Set only when :attr:`max_params` is not None -- the raw parameter-axis coverage level,
+    before it is translated into the element-axis claim :attr:`complete_up_to` always makes.
+    The two are related by the completeness lemma: with ``m`` the most expensive pool element in
+    free parameters, ``complete_up_to == complete_up_to_params // m``. Kept as a separate field
+    rather than folded into ``complete_up_to`` so a reader can see the budget actually spent
+    alongside the element-count claim it licenses.
+    """
+    base_complete_up_to_params: int | None = None
+    """:attr:`complete_up_to_params`'s counterpart to :attr:`base_complete_up_to`: the
+    parameter-axis coverage reached before the pool was widened, when :attr:`max_params` is not
+    None and a widening happened. None otherwise, for the same two reasons ``base_complete_up_to``
+    is None otherwise -- no budget, or no widening.
+    """
 
     @property
     def best(self) -> Candidate | None:
@@ -811,6 +857,23 @@ class DiscoveryResult:
                 "elements taken from this pool. Topologies without that skeleton were never "
                 "considered, so this report is not evidence against them."
             )
+        if self.max_params is not None:
+            # A parameter budget earns a different sentence, not a bigger number in the same
+            # one: "every topology with up to N elements" would overclaim, since a topology
+            # built entirely from the pool's costliest code reaches the budget at a smaller
+            # element count than a topology built from its cheapest. See docs/PARAM_BUDGET_PLAN.md
+            # section 6 for the lemma this translates -- `_with_growth_note` is not applied here
+            # because growth and a parameter budget are refused together in discover().
+            worst = _pool_costliest_code(self.pool)
+            m = _pool_max_params(self.pool)
+            return self._with_refit_note(
+                f"Coverage: every plausible topology with up to {self.max_params} free "
+                "parameters from this pool was evaluated. That is a budget in parameters, not "
+                f"elements: it covers every topology of up to {self.complete_up_to} elements "
+                f"in full, and no more, because {worst} costs {m} parameters on its own -- a "
+                f"{self.complete_up_to + 1}-element circuit built from it carries "
+                f"{(self.complete_up_to + 1) * m}, past the budget, so it was never considered."
+            )
         return self._with_refit_note(
             self._with_growth_note(
                 f"Coverage: every plausible topology with up to {self.complete_up_to} elements "
@@ -1061,6 +1124,13 @@ class DiscoveryResult:
             "complete_up_to": self.complete_up_to,
             "base_complete_up_to": self.base_complete_up_to,
             "grown_to": self.grown_to,
+            # max_params / complete_up_to_params / base_complete_up_to_params deliberately do
+            # NOT appear here yet: EV5's byte-identity gate fingerprints this exact dict, and
+            # even an always-null key changes the byte comparison on every existing reference
+            # (docs/PARAM_BUDGET_PLAN.md phase 3's "non-negotiable" gate, measured -- adding
+            # them unconditionally was tried and reverted). The prose in `completeness()`
+            # already carries the parameter-budget numbers for a `--json` reader in the
+            # meantime; the wire schema gets these fields in phase 9, alongside the bridge.
             "pool_choice": (None if self.pool_choice is None else self.pool_choice.to_dict()),
             "coverage": self.completeness(),
             "unresolved_everywhere": self.unresolved_everywhere,
@@ -1791,6 +1861,7 @@ def discover(
     mode: Mode = "auto",
     exhaustive_limit: int | None = None,
     exhaustive_min: int = 1,
+    max_params: int | None = None,
     max_candidates: int = 20_000,
     feasibility_filter: bool = True,
     feasibility_budget: int = DEFAULT_DEGENERACY_BUDGET,
@@ -1864,6 +1935,19 @@ def discover(
             :data:`SKELETON_REACH` when one is given.
         exhaustive_min: Smallest element count to enumerate. Raise it only with an
             independent reason to believe the model is at least that big.
+        max_params: Budget the exhaustive enumeration by free parameters instead of raw
+            element count -- a ``C`` costs one, a ``CPE`` two, so an element cap is a different
+            amount of model freedom in every pool (docs/PARAM_BUDGET_PLAN.md). ``None`` (the
+            default) leaves the element axis, ``exhaustive_limit``, in force and every other
+            behaviour byte-identical to before this parameter existed. When given, it replaces
+            ``exhaustive_limit`` as the enumeration's own stopping rule -- :attr:`DiscoveryResult
+            .complete_up_to` still reports coverage in elements, derived from the parameter-axis
+            level actually reached (:attr:`DiscoveryResult.complete_up_to_params`) via the
+            completeness lemma in that plan's section 6. Clamped to :data:`MAX_PARAM_BUDGET`.
+            Refused (``ValueError``) together with ``skeleton`` -- ``grow_up_to`` grows by
+            elements and has no parameter-axis frontier clamp -- and together with
+            ``growth_width > 0`` -- the growth stage seeds its beam from one completed *element*
+            level, which a parameter budget does not produce.
         max_candidates: Ceiling on how many topologies the exhaustive stage may screen.
         feasibility_filter: Apply the structural endpoint-behaviour screen before fitting.
         feasibility_budget: How many elements that screen may treat as degenerate; larger is
@@ -1961,6 +2045,22 @@ def discover(
                     f"seed circuit {text!r} does not contain the skeleton {skeleton!r}, so it "
                     "cannot be evaluated under it. Drop one of the two."
                 )
+    if max_params is not None:
+        if frame is not None:
+            raise ValueError(
+                "max_params cannot be combined with skeleton: grow_up_to grows by elements "
+                "and has no parameter-axis frontier clamp. Use exhaustive_limit under a "
+                "skeleton instead."
+            )
+        if growth_width > 0:
+            raise ValueError(
+                "max_params cannot be combined with growth_width>0: the growth stage seeds "
+                "its beam from one completed element level, which a parameter budget does "
+                "not produce. Pass growth_width=0 (the default) under a parameter budget."
+            )
+        # Clamped, not raised -- the same treatment an oversized exhaustive_limit already gets
+        # from max_candidates, reported through complete_up_to rather than refused outright.
+        max_params = min(max_params, MAX_PARAM_BUDGET)
     limit = exhaustive_limit_for(None if frame is None else len(frame.leaves), exhaustive_limit)
 
     if mode == "evolve":
@@ -1994,7 +2094,7 @@ def discover(
             evolved.pool_choice = choose_pool(spectrum, residual_runs_z=math.nan, base=codes)
         return evolved
 
-    candidates, complete_up_to, n_screened, grown_to = _exhaustive(
+    candidates, complete_up_to, n_screened, grown_to, complete_up_to_params = _exhaustive(
         spectrum,
         pool=codes,
         skeleton=None if frame is None else frame.root,
@@ -2023,10 +2123,12 @@ def discover(
         grow_to=None if frame is not None else max_elements,
         growth_width=growth_width,
         screen_restarts=screen_restarts,
+        max_params=max_params,
     )
     generations_run = 0
     pool_choice: PoolChoice | None = None
     base_complete_up_to: int | None = None
+    base_complete_up_to_params: int | None = None
 
     # Widening the pool, when either reading of the data asks for an element it lacks.
     #
@@ -2042,6 +2144,7 @@ def discover(
         remaining = None if time_limit is None else time_limit - (time.perf_counter() - started)
         if pool_choice.added and (remaining is None or remaining > 0.0):
             base_complete_up_to = complete_up_to
+            base_complete_up_to_params = complete_up_to_params
             codes = pool_choice.pool
             if on_stage is not None:
                 on_stage(
@@ -2049,7 +2152,7 @@ def discover(
                     f"The default pool's own completed fit left a systematic residual; "
                     f"widening the pool to {', '.join(codes)} and re-screening.",
                 )
-            widened, complete_up_to, n_widened, grown_to = _exhaustive(
+            widened, complete_up_to, n_widened, grown_to, complete_up_to_params = _exhaustive(
                 spectrum,
                 pool=codes,
                 skeleton=None if frame is None else frame.root,
@@ -2071,6 +2174,7 @@ def discover(
                 grow_to=max_elements,
                 growth_width=growth_width,
                 screen_restarts=screen_restarts,
+                max_params=max_params,
             )
             # The base-pool candidates are kept rather than discarded: they were fitted against
             # the same data with the same budget, and every one of them is also a member of the
@@ -2141,6 +2245,9 @@ def discover(
         pool_choice=pool_choice,
         base_complete_up_to=base_complete_up_to,
         grown_to=grown_to,
+        max_params=max_params,
+        complete_up_to_params=complete_up_to_params,
+        base_complete_up_to_params=base_complete_up_to_params,
     )
 
 
@@ -2816,15 +2923,25 @@ class Enumeration(NamedTuple):
     """
 
     texts: tuple[str, ...]
-    """Every candidate to screen, in ascending element count."""
+    """Every candidate to screen, in ascending level order (see :attr:`axis`)."""
     boundaries: tuple[tuple[int, int], ...]
-    """``(element count, topologies queued once that count was complete)`` per whole level."""
+    """``(level, topologies queued once that level was complete)`` per whole level, in whichever
+    currency :attr:`axis` counts -- elements, or free parameters."""
     floor: int
-    """Smallest element count enumerated. Above 1 there is no completeness claim to make."""
+    """Smallest level enumerated. Above 1 there is no completeness claim to make."""
+    axis: EnumerationAxis = "elements"
+    """Which currency :attr:`boundaries` counts in. ``"params"`` only when the caller passed a
+    parameter budget (docs/PARAM_BUDGET_PLAN.md section 6); the skeleton path is always
+    ``"elements"``, since :attr:`element_cost` is refused in combination with a skeleton."""
+    element_cost: int | None = None
+    """``m`` in the completeness lemma: the most expensive pool element, in free parameters.
+    Only set when :attr:`axis` is ``"params"`` -- it is what :meth:`element_coverage` divides by
+    to translate a parameter-axis level back into the element-axis claim every existing report
+    consumer reads. ``None`` on the element axis, where no translation is needed."""
 
     def coverage(self, n_scored: int) -> int | None:
-        """Largest element count whose topologies were *all* screened, from a screen that got
-        through ``n_scored`` of them.
+        """Largest level whose topologies were *all* screened, from a screen that got
+        through ``n_scored`` of them -- in :attr:`axis`'s own currency.
 
         Topologies are screened in size order, so a truncated screen -- out of time, or
         cancelled from a browser -- still covers whole levels, and this is what says how many.
@@ -2836,6 +2953,24 @@ class Enumeration(NamedTuple):
         if self.floor != 1:
             return None
         return next((n for n, end in reversed(self.boundaries) if end <= n_scored), None)
+
+    def element_coverage(self, n_scored: int) -> int | None:
+        """:meth:`coverage`, translated into elements -- the currency :attr:`DiscoveryResult
+        .complete_up_to` has always claimed, and keeps claiming regardless of :attr:`axis`.
+
+        On the element axis this *is* :meth:`coverage`. On the parameter axis it is
+        ``coverage() // element_cost``, the completeness lemma from
+        docs/PARAM_BUDGET_PLAN.md section 6: a parameter budget ``P`` contains every *n*-element
+        topology iff ``n <= P // m``. A result of 0 is passed through rather than turned into
+        ``None`` here -- ``DiscoveryResult.completeness`` already treats ``complete_up_to < 1``
+        as no completeness claim, so a second special case here would just be a second place for
+        that rule to drift out of sync with the first.
+        """
+        cov = self.coverage(n_scored)
+        if cov is None or self.axis == "elements":
+            return cov
+        assert self.element_cost is not None, "params axis must carry its element_cost"
+        return cov // self.element_cost
 
 
 def enumerate_candidates(
@@ -2849,6 +2984,7 @@ def enumerate_candidates(
     feasibility_filter: bool,
     feasibility_budget: int,
     extra: Sequence[str] | None = None,
+    max_params: int | None = None,
 ) -> Enumeration:
     """Everything the exhaustive stage will screen, and nothing about how to screen it.
 
@@ -2858,17 +2994,29 @@ def enumerate_candidates(
     stops being affordable, and what may then be claimed -- the last of which is the whole
     point of exhaustive discovery. It takes a spectrum only to derive the endpoint behaviour
     the feasibility filter tests against.
+
+    ``max_params`` switches the enumeration axis (docs/PARAM_BUDGET_PLAN.md section 6);
+    ``discover()`` refuses it in combination with a skeleton before this is ever reached, so
+    ``skeleton is not None`` and ``max_params is not None`` never hold together here.
     """
     behaviour = EndpointBehaviour.from_spectrum(spectrum) if feasibility_filter else None
 
     # Both level sources yield whole element counts in ascending order; the constrained one
     # grows the skeleton outwards and stops itself before materialising a level too large to
     # hold, which is the limit that binds first (docs/PARTIAL_TOPOLOGY_PLAN.md section 4.1).
+    axis: EnumerationAxis = "elements"
+    element_cost: int | None = None
     levels: Iterable[tuple[int, Iterable[Node]]]
-    if skeleton is None:
-        levels = ((n, enumerate_topologies(pool, n)) for n in range(floor, limit + 1))
-    else:
+    if skeleton is not None:
         levels = grow_up_to(skeleton, pool, limit, max_frontier=max_candidates * FRONTIER_HEADROOM)
+    elif max_params is not None:
+        axis = "params"
+        element_cost = _pool_max_params(pool)
+        levels = (
+            (p, enumerate_topologies_by_params(pool, p)) for p in range(floor, max_params + 1)
+        )
+    else:
+        levels = ((n, enumerate_topologies(pool, n)) for n in range(floor, limit + 1))
 
     texts: list[str] = []
     # (element count, how many topologies have been queued once that level is complete), used
@@ -2906,7 +3054,7 @@ def enumerate_candidates(
             seen.add(circuit.canonical_form())
             texts.append(circuit.to_string())
 
-    return Enumeration(tuple(texts), tuple(boundaries), floor)
+    return Enumeration(tuple(texts), tuple(boundaries), floor, axis, element_cost)
 
 
 def _exhaustive(
@@ -2932,11 +3080,15 @@ def _exhaustive(
     grow_to: int | None = None,
     growth_width: int = GROWTH_DEFAULT,
     screen_restarts: int = SCREEN_RESTARTS,
-) -> tuple[list[Candidate], int | None, int, int | None]:
+    max_params: int | None = None,
+) -> tuple[list[Candidate], int | None, int, int | None, int | None]:
     """Enumerate, screen, optionally grow past the limit, and refit.
 
-    Returns ``(candidates, complete_up_to, topologies seen, grown_to)``, where ``grown_to`` is
-    the largest element count the growth stage actually reached and ``None`` when it did not run.
+    Returns ``(candidates, complete_up_to, topologies seen, grown_to, complete_up_to_params)``,
+    where ``grown_to`` is the largest element count the growth stage actually reached (``None``
+    when it did not run) and ``complete_up_to_params`` is the raw parameter-axis coverage level
+    (``None`` unless ``max_params`` was given -- growth never runs under a parameter budget, so
+    there is no ambiguity about whether it is included).
 
     The growth stage sits **between** the two tiers rather than after them, and that placement is
     the point: it needs the tier-1 ranking of a completed level, which is exactly what
@@ -2954,6 +3106,7 @@ def _exhaustive(
         feasibility_filter=feasibility_filter,
         feasibility_budget=feasibility_budget,
         extra=extra,
+        max_params=max_params,
     )
     texts = list(plan.texts)
     budget = ScreenBudget(SCREEN_POPSIZE, SCREEN_MAXITER, max(screen_restarts, 1))
@@ -2978,7 +3131,8 @@ def _exhaustive(
             budget=budget,
             context=context,
         )
-        complete_up_to = plan.coverage(len(scored))
+        complete_up_to = plan.element_coverage(len(scored))
+        complete_up_to_params = plan.coverage(len(scored)) if plan.axis == "params" else None
         n_seen = len(scored)
 
         grown_to: int | None = None
@@ -3017,7 +3171,7 @@ def _exhaustive(
         candidates = _refit_shortlist(
             scored, spectrum, weighting, final_restarts, seed, n_refine, executor, criterion
         )
-    return candidates, complete_up_to, n_seen, grown_to
+    return candidates, complete_up_to, n_seen, grown_to, complete_up_to_params
 
 
 #: What the screen ranks by when the chosen criterion cannot be computed from a cost alone.
