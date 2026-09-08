@@ -1,6 +1,6 @@
 # PARAM_BUDGET_PLAN.md — should the exhaustive search be budgeted by free parameters instead of elements?
 
-**Status: Phase 0 and Phase 1 done. Phases run in order; each states in advance what result means
+**Status: Phases 0-2 done. Phases run in order; each states in advance what result means
 "do not ship" and a null result is an acceptable outcome of any phase after Phase 1.**
 
 ## 1. Why this needs an experiment before it needs an opinion
@@ -279,8 +279,46 @@ Each phase names, in advance, what would make it not ship.
    `benchmarks/ev5_fingerprint.py --mode exhaustive` is **byte-identical** before and after this
    phase's changes (same sha256, confirmed via `git stash`), as expected since nothing `discover`
    calls has changed. No null branch; nothing else observed.
-2. **Build E.1's controls and E.2's real-data arm**, before wiring, and baseline both on today's
-   element axis.
+2. **Build E.1's controls and E.2's real-data arm, before wiring. [done, 2026-09-08]**
+   Three parameter-dense truths added in `benchmarks/six_plus/param_dense_truths.py`, reusing
+   `truths.py`'s `Truth`/`screen`/`tune_until_screened` machinery (extended with a `ranges=`
+   argument to `tune`/`tune_until_screened`, since CPE's `Q` and SKINF's `A`/`n` need their own
+   tuning bounds rather than the R/C/L-shaped default): `cpe_triple`
+   (`p(R1,CPE1)-p(R2,CPE2)-CPE3`, 5 elements / 8 params, ratio 1.6), `cpe_c_mix`
+   (`p(R1,CPE1)-C1-p(R2,CPE2)`, 5/7, ratio 1.4), `skinf_cpe`
+   (`p(R1,SKINF1)-p(R2,SKINF2)-CPE1`, 5/8, ratio 1.6, the one exercising `SKINF`). All three
+   passed the four-part admission screen on the tuner's first seed (weakest leverage 8.79-9.90%
+   against 1% noise, 0 unresolved, 2.1-3.2% worst deviation, feasible).
+   **A latent bug surfaced and was fixed building these**: `Truth.time_constants()` matched
+   capacitor labels with `str.startswith("C")`, which also matches `"CPE1"` and `"CC1"` — invisible
+   as long as every truth in `truths.py` was R/C/L only, and a `KeyError` the moment a CPE-bearing
+   truth was added. Fixed with an exact `re.fullmatch(r"C\d+", ...)` match; `truths.py --check`
+   reproduces its existing 9-truth table identically after the fix (`git diff` on the fix is
+   the regex change plus the new `ranges` parameter, nothing else).
+   **Recovery baseline on today's element axis** (`benchmarks/six_plus/param_dense_baseline.py`,
+   `discover(pool=truth.pool, mode="exhaustive")`, seeds 1-3, `complete_up_to=5` on every run, so
+   each truth's own topology is enumerated exactly): `cpe_triple` 1/3, `cpe_c_mix` 2/3, `skinf_cpe`
+   1/3 recommended (`reported`/`on_front` track `recommended` on every row but one:
+   `skinf_cpe` seed 1 is reported and on the front but not recommended).
+   **This is itself a finding, independent of any parameter budget**: even where the topology is
+   exhaustively enumerated and there is no budget question at all, recovery of these
+   CPE/SKINF-dense five-element truths is seed-dependent and well under 100% — the same
+   basin-lottery mechanism `docs/TOPOLOGY_6PLUS_PLAN.md` §2(a) measured for tier-1 screening,
+   now seen on the parameter-dense class E.1 exists to build. Phase 3's recovery numbers under a
+   parameter budget must be read against *this* baseline, not against an assumed 100%.
+   **E.2, real-data baseline**: `benchmarks/measured/measured.py pipeline`/`split-half` re-run
+   on the element axis. **Operational finding first**: the first attempt used the script's default
+   `--time-limit` (none), and one dataset's `mode="auto"` fallback ran unbounded — killed after
+   ~2 h of continuous CPU time with zero output, a real hazard for anything in this repository
+   that calls `discover()` on real data without a wall-clock budget. Re-run at `--time-limit 60`
+   (seconds per `discover()` call): **R2 1/7 in-band** (`chi2_reduced` in `[0.5, 3]`) — reproduces
+   `docs/IMPACT_PLAN.md` §4's documented three-to-six-orders-of-magnitude-too-large pattern under
+   `weighting="auto"` rather than contradicting it; **R3 2/7 stable (29%)** against the 80% bar,
+   close to `IMPACT_PLAN.md`'s recorded 1/7 (the small difference is plausibly the 60 s bound
+   changing which local optimum `mode="auto"`'s fallback lands in, not a code regression — not
+   chased further, since both numbers are far below the bar either way). Both readings recorded
+   here as the "before" picture Phase 3 re-runs under a parameter budget, with the same
+   `--time-limit 60` so the two are comparable.
 3. **`discover(max_params=...)`, opt-in, default `None`.** §6's fields/sentences/refusals,
    `--max-params`. Gates: EV5 byte-identical on the element path (non-negotiable); G1 with and
    without the budget; F4's `R1-Ws1` re-measurement including the *recommendation*, not just the

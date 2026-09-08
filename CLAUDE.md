@@ -840,7 +840,7 @@ static-site Web UI running the same core via WASM (Pyodide).
 
 22. `docs/PARAM_BUDGET_PLAN.md` — whether the exhaustive search should be budgeted by free
     parameters rather than raw element count, since a `C` costs one and a `CPE` costs two.
-    **Phases 0-1 done, dark (no caller in `discover.py` yet).** The originally suspected mechanism does not exist: tier 1 and
+    **Phases 0-2 done, dark (no caller in `discover.py` yet).** The originally suspected mechanism does not exist: tier 1 and
     tier 2 already feed `n_params` to the chosen criterion, and `recommended`'s first key,
     `Circuit.complexity`, is a weighted sum rather than a count, so no code path lets a CPE win a
     comparison for being counted as one element. What *is* raw element count, unconditionally, is
@@ -864,6 +864,19 @@ static-site Web UI running the same core via WASM (Pyodide).
     unit-parameter-cost pools and agrees with an independent naive filter on mixed-cost pools;
     `tests/test_enumerate.py` is untouched byte-for-byte, and `ev5_fingerprint.py` is
     byte-identical before/after, since nothing in `discover.py` calls the new code yet.
+    **Phase 2 [measured]**: three parameter-dense negative-control truths built
+    (`benchmarks/six_plus/param_dense_truths.py`, ratio 1.4-1.6, all passing the same four-part
+    admission screen `six_plus/truths.py` uses) since F7 found none exist anywhere in this
+    repository. Even on today's element axis, with the truth's own topology exhaustively
+    enumerated, recovery of these CPE/SKINF-dense truths is seed-dependent and well under
+    100% (1/3, 2/3, 1/3 recommended across seeds) — the basin-lottery mechanism
+    `TOPOLOGY_6PLUS_PLAN.md` §2(a) already measured for tier-1 screening, now confirmed on the
+    class this plan's Phase 3 will budget. `benchmarks/measured/`'s real-data R2/R3 gates were
+    re-run as the "before" baseline (R2 1/7 in-band, R3 2/7 stable at 29% against an 80% bar,
+    both consistent with `IMPACT_PLAN.md` §4's existing numbers) — with a caveat worth carrying
+    forward: `measured.py`'s default `--time-limit` is unbounded, and one real dataset's
+    `mode="auto"` fallback ran for approximately two hours of continuous CPU time before being
+    killed, so every future run of that script needs an explicit `--time-limit`.
 
 Update these when decisions change.
 
