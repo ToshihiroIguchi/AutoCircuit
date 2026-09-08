@@ -840,7 +840,8 @@ static-site Web UI running the same core via WASM (Pyodide).
 
 22. `docs/PARAM_BUDGET_PLAN.md` — whether the exhaustive search should be budgeted by free
     parameters rather than raw element count, since a `C` costs one and a `CPE` costs two.
-    **Phases 0-2 done, dark (no caller in `discover.py` yet).** The originally suspected mechanism does not exist: tier 1 and
+    **Phases 0-3 done: `discover(max_params=...)` and `--max-params` ship as an opt-in lever,
+    default `None`, and no default has moved.** The originally suspected mechanism does not exist: tier 1 and
     tier 2 already feed `n_params` to the chosen criterion, and `recommended`'s first key,
     `Circuit.complexity`, is a weighted sum rather than a count, so no code path lets a CPE win a
     comparison for being counted as one element. What *is* raw element count, unconditionally, is
@@ -877,6 +878,16 @@ static-site Web UI running the same core via WASM (Pyodide).
     forward: `measured.py`'s default `--time-limit` is unbounded, and one real dataset's
     `mode="auto"` fallback ran for approximately two hours of continuous CPU time before being
     killed, so every future run of that script needs an explicit `--time-limit`.
+    **Phase 3 [measured]**: the budget is wired opt-in — `Enumeration` carries its own `axis` and
+    `element_cost`, `complete_up_to` keeps its exact meaning and is *derived* as
+    `complete_up_to_params // m` rather than repurposed, the parameter-budget path prints a
+    coverage sentence of its own that states which element count it does cover and why the next
+    one up is outside the budget, and `max_params` is refused outright with `skeleton` or
+    `growth_width > 0`. The non-negotiable gate — `ev5_fingerprint.py` byte-identical on the
+    element path — **passed only on the second attempt**, and the first is the part to remember:
+    adding the three new fields to `to_dict()` changed the fingerprint on every reference while
+    changing no number, because EV5 fingerprints that dict and an always-null key is still a key.
+    The wire schema keeps them out until phase 9; `completeness()`'s prose carries them meanwhile.
 
 Update these when decisions change.
 

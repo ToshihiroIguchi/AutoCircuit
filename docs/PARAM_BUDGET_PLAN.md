@@ -319,14 +319,62 @@ Each phase names, in advance, what would make it not ship.
    chased further, since both numbers are far below the bar either way). Both readings recorded
    here as the "before" picture Phase 3 re-runs under a parameter budget, with the same
    `--time-limit 60` so the two are comparable.
-3. **`discover(max_params=...)`, opt-in, default `None`.** §6's fields/sentences/refusals,
-   `--max-params`. Gates: EV5 byte-identical on the element path (non-negotiable); G1 with and
+3. **`discover(max_params=...)`, opt-in, default `None`. [code shipped, 2026-09-09; its
+   measurements are still being taken]** §6's fields/sentences/refusals, `--max-params`. Gates:
+   EV5 byte-identical on the element path (non-negotiable); G1 with and
    without the budget; F4's `R1-Ws1` re-measurement including the *recommendation*, not just the
    level reached; E.1's honesty reading; E.2's R2/R3; E.9's grid; E.10's rates. *Ships off by
    default, negative recorded, if:* (a) `reported` falls on any G1 reference; (b) the `R1-Ws1`
    recommendation at P=6 is no closer to the truth than today's stand-in; (c) F4 re-measures with
    the parameter axis completing a lower level on a widened pool; (d) E.1's honesty rule trips;
    (e) E.2's R3 falls.
+   **What shipped**: `Enumeration` gains `axis`/`element_cost` and a derived `element_coverage()`;
+   `enumerate_candidates(max_params=...)` switches its level source to
+   `enumerate_topologies_by_params`; `_exhaustive` returns a 5-tuple; `DiscoveryResult` gains the
+   three §6 fields; the parameter-budget coverage sentence; `--max-params`; and both refusals.
+   The lever is off unless asked for, so nothing about a default has moved and none of the
+   stop rules above can fire yet.
+   **The non-negotiable gate passed, on the second attempt, and the first attempt is the part
+   worth keeping.** `ev5_fingerprint.py --mode exhaustive,auto` is byte-identical before and
+   after (484,386 bytes, same sha256, all three references). It was *not*, at first: adding
+   `max_params`/`complete_up_to_params`/`base_complete_up_to_params` to `to_dict()` changed the
+   fingerprint on every reference, because EV5 fingerprints that dict and **an always-null key is
+   still a key**. No number had moved; the payload had. The three fields were removed from the
+   wire schema again and left as Python attributes only — `completeness()`'s prose carries them
+   for a `--json` reader until phase 9 wires the browser that needs them. A gate that can only be
+   passed by not writing the obvious line is worth more than one written loosely enough to pass
+   either way.
+   `tests/test_discover_params.py` (15 tests) covers the lemma on four pools, both coverage
+   sentences, the unchanged wire payload, both refusals and the `MAX_PARAM_BUDGET` clamp.
+   **G1, with and without the budget [measured, 2026-09-09]**, all three `REFERENCES`, two seeds
+   each, `mode="exhaustive"`, element axis at `exhaustive_limit=5` against `max_params=6`:
+
+   | reference | axis | reported | on front | recommended | screened | seconds | `complete_up_to` |
+   |---|---|---:|---:|---:|---:|---:|---:|
+   | capacitor (C-R-L + skin effect) | elements | 2/2 | 2/2 | 2/2 | 6,598 | 350, 361 | 5 |
+   | capacitor (C-R-L + skin effect) | params ≤ 6 | 2/2 | 2/2 | 2/2 | **2,318** | **82, 103** | 3 |
+   | Maxwell-Wagner (two blocks) | elements | 2/2 | 2/2 | 2/2 | 2,581 | 77, 81 | 5 |
+   | Maxwell-Wagner (two blocks) | params ≤ 6 | 2/2 | 2/2 | 2/2 | 2,220 | 78, 74 | 3 |
+   | Randles (with Warburg) | elements | 2/2 | 2/2 | 2/2 | 3,713 | 100, 101 | 5 |
+   | Randles (with Warburg) | params ≤ 6 | 2/2 | 2/2 | 2/2 | **4,775** | **113, 118** | 3 |
+
+   **Decision rule (a) does not fire: `reported` falls nowhere.** Recovery is 6/6 on both axes,
+   and so is `recommended` — each arm names the truth or the same exact reparameterisation of it
+   (the capacitor's `R1-C1-L1-SKINF1` and `SKINF1-R1-C1-L1` are one circuit written from two
+   traversals; the two Maxwell-Wagner seeds pick the same pair of class members on both axes).
+   These three truths cost 5, 4 and 4 parameters, so each sits *inside* a budget of 6 even where
+   the budget's own element-wise claim has dropped from 5 to 3 exactly as F5 said it would. That
+   distinction is the whole point of §6 and this is the first run to exercise it: a truth can be
+   enumerated in full while the report declines to claim completeness at its element count.
+   **F6's cost proxy is confirmed in direction and refined in size, now that it is real fits
+   rather than a topology count.** The capacitor reference — the widest pool here, five codes
+   with both `CPE` and `SKINF` at two parameters each — is **3.5-4.3x faster** under the budget
+   (350 s → 82 s) for identical recovery, which is a larger win than F6's 0.77x proxy predicted.
+   Maxwell-Wagner is a wash. Randles goes the *other way*, 15% slower on 29% more topologies,
+   and the reason is its pool: `("R", "C", "CPE", "W")` prices `W` at one parameter, so a budget
+   of 6 buys more of that pool's space than an element cap of 5 does. The proxy's sign was right
+   where the pool is expensive and wrong where it is cheap — worth stating, because it means the
+   ladder in phase 4 has to be read per pool and not as one number.
 4. **E.3's ladder over P, and E.4's data-derived cap.** E.4 may end in a null result.
 5. **X4 at P=7: does the budget make growth unnecessary?** `--max-params 7` on the `six_plus`
    R,C,L-only truths is exactly "every topology up to 7 elements", inside `max_candidates`.
