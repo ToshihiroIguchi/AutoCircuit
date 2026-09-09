@@ -419,7 +419,109 @@ Each phase names, in advance, what would make it not ship.
    `R1-Ws1` recommendation re-measurement, E.2's R2/R3 under the budget, E.9's grid and E.10's
    rates are the remaining items and are Phase 4/5-scale ladder work, not blockers for what has
    already shipped.**
+   **F4's `R1-Ws1` re-measurement [measured, 2026-09-09] — supplementary, not decisive.** The
+   original benchmark script behind F4's documented finding (the 3-parameter truth answered by a
+   7-parameter stand-in, `p(p(R1-CPE1,CPE2)-C1,R2)`) could not be located in this repository, so
+   this re-runs a reconstruction: `R1-Ws1` (`R1.R=50`, `Ws1.R=500`, `Ws1.tau=0.01`) on pool
+   `(R,C,L,CPE,Ws)`, 3 noise seeds, element-cap-5 against `max_params=6`:
+
+   | seed | axis | recommendation | is truth | rel. error | seconds |
+   |---:|---|---|---:|---:|---:|
+   | 0 | elements | `R1-Ws1` | yes | 1.352% | 1,486 |
+   | 0 | params ≤ 6 | `Ws1-R1` | yes | 1.352% | 161 |
+   | 1 | elements | `R1-Ws1` | yes | 1.250% | 1,554 |
+   | 1 | params ≤ 6 | `Ws1-R1` | yes | 1.250% | 145 |
+   | 2 | elements | `R1-Ws1` | yes | 1.343% | 1,565 |
+   | 2 | params ≤ 6 | `Ws1-R1` | yes | 1.343% | 159 |
+
+   Both axes recommend the truth (or its traversal-order twin) on every seed, to identical
+   relative error, and the parameter budget does it **9.3-10.7x faster** (161/145/159 s against
+   1,486/1,554/1,565 s) — `complete_up_to` for the budget arm is only 3 elements against the
+   element arm's 5, exactly F1's mechanism: this pool's `m = 2` (CPE and Ws both cost two
+   parameters), so a 3-parameter truth like this one is fully enumerated by parameter level long
+   before the corresponding element level is affordable.
+   **This must not be read as validating or refuting Phase 3's stop rule (b).** The
+   reconstruction does not reproduce the original pathology at all — both axes get the *right*
+   answer here, where the original finding was that the element-cap-5 answer was *wrong*. The
+   likely reason is scope: the original pool apparently included `Wo` and `G` alongside `Ws`
+   (§2's F4 table lists results for `R,C,L,CPE,Ws,G` and `R,C,L,CPE,W,Ws,Wo,G`, not the narrower
+   five-code pool used here), and a wider pool gives the element-cap-5 search more CPE-stack room
+   to out-fit the true Warburg branch — exactly the mechanism `docs/POOL_FROM_SPECTRUM_PLAN.md`
+   §1 already measured (a CPE stack reaching the noise floor in place of a genuine diffusion
+   element). Reconstructing that wider pool without the original truth values and seed would be
+   guessing at a second benchmark rather than re-running the first one, so it was not attempted.
+   **What actually discharges stop rule (b)'s concern is E.1's honesty reading** (above): a
+   negative control built specifically to sit outside the budget, which did trip a real defect
+   and got a fix shipped. This F4 re-run stands as a real, separate, and favourable data point —
+   correct recovery, large cost win, on a realistic diffusion-element spectrum — not as the
+   closing measurement stop rule (b) asked for.
 4. **E.3's ladder over P, and E.4's data-derived cap.** E.4 may end in a null result.
+   **E.3, first leg [measured, 2026-09-09]: the three `REFERENCES` at P ∈ {5, 7}, two seeds each**
+   (`--max-params`, `workers=4`; P=6 already measured in Phase 3's G1). Combined with that P=6
+   row:
+
+   | reference | P | screened | seconds (2 seeds) | `complete_up_to` (elements) | recovery |
+   |---|---:|---:|---|---:|---:|
+   | capacitor (SKINF) | 5 | 424 | 33, 38 | 2 | 2/2 |
+   | capacitor (SKINF) | 6 | 2,318 | 82, 103 | 3 | 2/2 |
+   | capacitor (SKINF) | 7 | 13,130 | 637, 694 | 3 | 2/2 |
+   | Maxwell-Wagner | 5 | 438 | 24, 26 | 2 | 2/2 |
+   | Maxwell-Wagner | 6 | 2,220 | 74, 78 | 3 | 2/2 |
+   | Maxwell-Wagner | 7 | 11,810 | 486, 570 | 3 | 2/2 |
+   | Randles (Warburg) | 5 | 822 | 30, 31 | 2 | 2/2 |
+   | Randles (Warburg) | 6 | 4,775 | 113, 118 | 3 | 2/2 |
+   | Randles (Warburg) | 7 → **6**\* | 4,775 | 142, 150 | 3 | 2/2 |
+
+   \* Asking for `max_params=7` on the Randles pool (`R,C,CPE,W`) produced the *same* screened
+   count and `complete_up_to_params` as the P=6 row — `max_candidates` (20,000, the default)
+   clamped level 7 before it finished, exactly the mechanism F1/F6's own reasoning already names
+   for the element axis, now seen on this axis. This is E.9's grid finding itself for free, and
+   is recorded there rather than re-derived: the ceiling is per-pool, not per-budget-number.
+
+   **On this arena, P=5 is never beaten — but this arena cannot show a larger P mattering, and
+   that has to be said before the number is used.** Recovery is 6/6 at every P tested, including
+   the element axis's own cap-5 run from Phase 3's G1. That is because all three `REFERENCES`
+   truths cost 4-5 parameters, so **every one of them was already inside a budget of 5** — this
+   ladder tests whether raising P past a truth's own cost buys anything (cost only, per the table:
+   5x-16x more screening for identical recovery), not whether P=5 is *enough* in general. F1's
+   whole reach argument for P ≥ 6 was about six-element `R,C,L` topologies and eight-parameter
+   truths, neither of which any `REFERENCES` truth is. Applying E.3's decision rule literally to
+   this arena alone ("smallest P not beaten by a larger P") would say P=5, and that reading would
+   be an artefact of an arena too easy to distinguish the candidates — the same trap
+   `docs/AUTOEIS_COMPARISON.md` §1.5c already names for small truths sitting inside
+   `complete_up_to` on the element axis. The arena that can actually move this number is E.1's
+   three controls (7-8 parameters, outside a budget of 6 by construction), next.
+
+   **E.9, the cheap version [measured, 2026-09-09]: a pure enumeration-count grid, no fitting.**
+   `count_topologies_by_params` (Phase 1) charted six pools × P ∈ {1..7} against
+   `max_candidates = 20,000` (pre-feasibility-filter counts, so this is a conservative bound —
+   the real, spectrum-dependent feasibility filter only ever removes candidates, so the true
+   clamp point can only be at the same level or later than this table predicts, never earlier):
+
+   | pool | first level where cumulative > 20,000 |
+   |---|---|
+   | default (`R,C,L,CPE`) | never, through P=7 (17,273 at P=7) |
+   | Maxwell-Wagner-style (`R,C,L,CPE`) | same as default |
+   | capacitor-style (`R,C,L,CPE,SKINF`) | **P=7** (26,445) |
+   | Randles-style (`R,C,CPE,W`) | **P=7** (44,360) |
+   | F4's (`R,C,L,CPE,Ws`) | **P=7** (26,445) |
+   | wide (`R,C,L,CPE,W,Wo`) | **P=6** (34,913) |
+
+   This reproduces the REFERENCES ladder's own free data point exactly: the Randles-pool request
+   for `max_params=7` above landed on `complete_up_to_params=6` because the real (feasibility-
+   filtered) count still exceeded 20,000 at level 7, and this table's raw bound already flags
+   that pool at P=7. **The ceiling is per-pool, not per-budget-number**, which is the shape E.9
+   asked to have charted rather than discovered from a report: P=7 is free on the two narrowest
+   pools tested and already unreachable in full on three of the other four, and the widest pool
+   here loses P=6 as well as P=7. A P chosen without checking this table risks silently losing
+   the very completeness claim it exists to make, on exactly the CPE/SKINF/W-bearing pools this
+   whole plan is about.
+
+   **E.10 [not run this round].** `n_unresolved`/`unresolved_everywhere` rates were proposed as a
+   cheap early indicator, ahead of E.1's slower confirmation. E.1's own controls already ran and
+   gave the stronger, slower confirmation this item exists as a proxy for (Phase 3's honesty
+   reading, 9/9 rows at `n_unresolved = 0` on a wrong recommendation), so a separate rate-tracking
+   pass adds no information this round. Named here as deliberately not run, not silently dropped.
 5. **X4 at P=7: does the budget make growth unnecessary?** `--max-params 7` on the `six_plus`
    R,C,L-only truths is exactly "every topology up to 7 elements", inside `max_candidates`.
    `Arm("params7", growth_width=0, screen_restarts=1, max_params=7)` added to `recovery.py`'s
