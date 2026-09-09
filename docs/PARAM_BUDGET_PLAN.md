@@ -320,9 +320,10 @@ Each phase names, in advance, what would make it not ship.
    here as the "before" picture Phase 3 re-runs under a parameter budget, with the same
    `--time-limit 60` so the two are comparable.
 3. **`discover(max_params=...)`, opt-in, default `None`. [shipped, 2026-09-09: EV5, G1 and
-   E.1's honesty reading all measured and passing, the last only after a fix; F4 measured
-   2026-09-09 (supplementary); **E.2 measured 2026-09-10 — stop rule (e) fires, negative
-   recorded, see below**; E.9/E.10 remain]** §6's fields/sentences/refusals, `--max-params`. Gates:
+   E.1's honesty reading all measured and passing, the last only after a fix; F4 and E.9 also
+   measured 2026-09-09 (both below, within item 4), E.10 deliberately not run (below); E.2
+   measured 2026-09-10 — stop rule (e) fires, negative recorded, see below]**
+   §6's fields/sentences/refusals, `--max-params`. Gates:
    EV5 byte-identical on the element path (non-negotiable); G1 with and
    without the budget; F4's `R1-Ws1` re-measurement including the *recommendation*, not just the
    level reached; E.1's honesty reading; E.2's R2/R3; E.9's grid; E.10's rates. *Ships off by
@@ -417,8 +418,9 @@ Each phase names, in advance, what would make it not ship.
    silent at or below it) on a real parameter-dense spectrum; and the full suite is
    1120 passed / 19 skipped / 0 failed. **With the fix in place, Phase 3's status is: shipped,
    off by default, and every gate run so far — EV5, G1, and E.1's honesty reading — passed. F4's
-   `R1-Ws1` recommendation re-measurement is supplementary (below); E.9's grid and E.10's rates
-   remain Phase 4/5-scale ladder work; E.2's R2/R3 under the budget is now measured and tripped
+   `R1-Ws1` recommendation re-measurement is supplementary and E.9's grid is measured (both
+   below); E.10's rates were deliberately not run (below); E.2's R2/R3 under the budget is now
+   measured and tripped
    the lever's own stop rule (e) — see below.**
    **F4's `R1-Ws1` re-measurement [measured, 2026-09-09] — supplementary, not decisive.** The
    original benchmark script behind F4's documented finding (the 3-parameter truth answered by a
