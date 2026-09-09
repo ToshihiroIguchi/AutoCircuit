@@ -375,6 +375,40 @@ Each phase names, in advance, what would make it not ship.
    of 6 buys more of that pool's space than an element cap of 5 does. The proxy's sign was right
    where the pool is expensive and wrong where it is cheap — worth stating, because it means the
    ladder in phase 4 has to be read per pool and not as one number.
+   **E.1's honesty reading tripped its own stop rule (d), unanimously, and the fix is the most
+   useful thing this phase produced [measured, 2026-09-09].** The three parameter-dense truths of
+   §8's E.1 cost 7-8 parameters, so a budget of 6 puts all three *outside* the space by
+   construction — the arm exists for no other purpose. On every row (3 truths × 3 seeds, ~2-5 min
+   each) the search behaved correctly and the *report* did not:
+
+   | reading | result |
+   |---|---|
+   | truth `reported` / `on_front` / `recommended` | **0/9** — correct: it is outside the budget |
+   | recommendation's own size | **5 elements, 6 parameters, on every row** |
+   | recommendation's `n_unresolved` | **0, on every row** |
+   | `complete_up_to` | **3, on every row** |
+
+   So the reader was handed a five-element circuit, recommended, every parameter of it resolved,
+   under a coverage sentence whose only completeness claim was about *three* elements — and
+   nothing in the report connected those two numbers. Every clause of that sentence was true.
+   That is precisely the pre-registered trip condition, and precisely the failure shape
+   `docs/HANDOFF.md` §3 is a list of.
+   **What the rule's own wording then required was a fix, not an abandonment** ("does not ship at
+   any default *until the sentence is fixed*"), and the fix is `DiscoveryResult
+   ._with_recommendation_note`: when the recommendation's element count exceeds `complete_up_to`,
+   the report now says so and says what it means — "it was evaluated, but its own size was not
+   searched exhaustively, so a better topology of that size may simply never have been tried.
+   That part of the report is a find, not a completeness claim." The wording deliberately mirrors
+   `_with_growth_note`, which has made the same distinction for the growth stage since
+   `TOPOLOGY_6PLUS_PLAN.md` §4.7.
+   **The gap was never parameter-specific, which is the part worth carrying forward.** On the
+   element axis the enumeration cannot produce it — everything enumerated is inside the cap — but
+   two other routes can and always could: a `seeds=` circuit larger than the cap, and the genetic
+   fallback under `mode="auto"`, whose candidates `complete_up_to` does not bound at all. Neither
+   said anything before this. A new axis did not introduce the defect; it made it routine enough
+   to be caught. `_with_recommendation_note` therefore applies on both axes rather than being
+   scoped to the budget that found it, and `ev5_fingerprint.py` is re-checked byte-identical on
+   the element path to show that doing so changed no existing report.
 4. **E.3's ladder over P, and E.4's data-derived cap.** E.4 may end in a null result.
 5. **X4 at P=7: does the budget make growth unnecessary?** `--max-params 7` on the `six_plus`
    R,C,L-only truths is exactly "every topology up to 7 elements", inside `max_candidates`.

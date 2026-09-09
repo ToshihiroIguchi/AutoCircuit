@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import pytest
 
+from autocircuit.core.circuit import count_elements
 from autocircuit.core.discover import (
     MAX_PARAM_BUDGET,
     discover,
@@ -196,6 +197,52 @@ def test_the_coverage_sentence_says_parameters_and_shows_its_arithmetic() -> Non
     assert "6 free parameters" in sentence
     assert "a budget in parameters, not elements" in sentence
     assert "CPE costs 2 parameters on its own" in sentence
+
+
+def test_a_recommendation_above_the_covered_size_is_flagged_as_such() -> None:
+    """E.1's honesty reading, as a test rather than as a benchmark run.
+
+    [measured, ``docs/PARAM_BUDGET_PLAN.md`` phase 3] Under a budget of 6 on a truth costing 8,
+    the search correctly fails to find the truth and recommends a five-element circuit instead,
+    every parameter of it resolved, while the coverage sentence claims completeness only to three
+    elements. Every clause of that sentence was true and the report still misled, because nothing
+    connected the two numbers. The note this asserts is what connects them.
+    """
+    # A truth outside the budget: 5 elements, 8 parameters, against a budget of 6.
+    spectrum = simulate(
+        "p(R1,CPE1)-p(R2,CPE2)-CPE3",
+        log_frequencies(1e-1, 1e6, 6),
+        {
+            "R1.R": 0.470506,
+            "CPE1.Q": 2.47434e-06,
+            "CPE1.n": 0.899557,
+            "R2.R": 173.044,
+            "CPE2.Q": 0.000132465,
+            "CPE2.n": 0.9,
+            "CPE3.Q": 0.0103155,
+            "CPE3.n": 0.9,
+        },
+        noise=0.01,
+        seed=1,
+    )
+    result = discover(
+        spectrum,
+        pool=("R", "C", "L", "CPE"),
+        mode="exhaustive",
+        max_params=6,
+        max_candidates=600,
+        seed=0,
+    )
+    assert result.recommended is not None
+    assert result.complete_up_to is not None
+    size = count_elements(result.recommended.circuit.root)
+    sentence = result.completeness()
+    if size > result.complete_up_to:
+        assert f"the recommended circuit has {size} elements" in sentence
+        assert "not a completeness claim" in sentence
+    else:
+        # The note must not fire when the recommendation is inside the covered size.
+        assert "the recommended circuit has" not in sentence
 
 
 def test_the_element_path_keeps_its_own_sentence_untouched() -> None:

@@ -852,10 +852,12 @@ class DiscoveryResult:
             )
         if self.skeleton is not None:
             return self._with_refit_note(
-                f"Coverage: every plausible topology with up to {self.complete_up_to} "
-                f"elements that contains {self.skeleton} was evaluated, with the added "
-                "elements taken from this pool. Topologies without that skeleton were never "
-                "considered, so this report is not evidence against them."
+                self._with_recommendation_note(
+                    f"Coverage: every plausible topology with up to {self.complete_up_to} "
+                    f"elements that contains {self.skeleton} was evaluated, with the added "
+                    "elements taken from this pool. Topologies without that skeleton were never "
+                    "considered, so this report is not evidence against them."
+                )
             )
         if self.max_params is not None:
             # A parameter budget earns a different sentence, not a bigger number in the same
@@ -867,18 +869,57 @@ class DiscoveryResult:
             worst = _pool_costliest_code(self.pool)
             m = _pool_max_params(self.pool)
             return self._with_refit_note(
-                f"Coverage: every plausible topology with up to {self.max_params} free "
-                "parameters from this pool was evaluated. That is a budget in parameters, not "
-                f"elements: it covers every topology of up to {self.complete_up_to} elements "
-                f"in full, and no more, because {worst} costs {m} parameters on its own -- a "
-                f"{self.complete_up_to + 1}-element circuit built from it carries "
-                f"{(self.complete_up_to + 1) * m}, past the budget, so it was never considered."
+                self._with_recommendation_note(
+                    f"Coverage: every plausible topology with up to {self.max_params} free "
+                    "parameters from this pool was evaluated. That is a budget in parameters, "
+                    f"not elements: it covers every topology of up to {self.complete_up_to} "
+                    f"elements in full, and no more, because {worst} costs {m} parameters on "
+                    f"its own -- a {self.complete_up_to + 1}-element circuit built from it "
+                    f"carries {(self.complete_up_to + 1) * m}, past the budget, so it was never "
+                    "considered."
+                )
             )
         return self._with_refit_note(
-            self._with_growth_note(
-                f"Coverage: every plausible topology with up to {self.complete_up_to} elements "
-                f"from this pool was evaluated."
+            self._with_recommendation_note(
+                self._with_growth_note(
+                    f"Coverage: every plausible topology with up to {self.complete_up_to} "
+                    f"elements from this pool was evaluated."
+                )
             )
+        )
+
+    def _with_recommendation_note(self, coverage: str) -> str:
+        """The coverage sentence, plus a warning when the recommendation is bigger than it.
+
+        **[measured, docs/PARAM_BUDGET_PLAN.md phase 3, E.1's honesty reading] Without this the
+        report is exactly the shape this project keeps failing in.** Under a parameter budget of
+        6 on a truth costing 8, the truth is correctly not found -- and what the reader gets
+        instead is a *five*-element circuit, recommended, with every one of its parameters
+        resolved, under a coverage sentence whose only completeness claim is about three
+        elements. Every clause of that sentence is true and the report still misleads, because
+        nothing connects the size of the recommendation to the size the claim covers.
+
+        On the element axis this cannot arise from the enumeration itself -- everything
+        enumerated is inside the cap -- which is why the gap went unnoticed until an axis existed
+        that makes it routine. It can still arise there by two other routes, and this note covers
+        both: a ``seeds=`` circuit larger than the cap, and the genetic fallback under
+        ``mode="auto"``, whose candidates are not bounded by ``complete_up_to`` at all.
+
+        Growth is the one case deliberately left out: ``_with_growth_note`` has already said, in
+        more detail than this could, that above the completed level the search grew rather than
+        enumerated.
+        """
+        recommended = self.recommended
+        if recommended is None or self.complete_up_to is None or self.grown_to is not None:
+            return coverage
+        size = count_elements(recommended.circuit.root)
+        if size <= self.complete_up_to:
+            return coverage
+        return (
+            f"{coverage} Note that the recommended circuit has {size} elements, above the "
+            f"{self.complete_up_to} this run covers in full: it was evaluated, but its own size "
+            "was not searched exhaustively, so a better topology of that size may simply never "
+            "have been tried. That part of the report is a find, not a completeness claim."
         )
 
     def _with_growth_note(self, coverage: str) -> str:

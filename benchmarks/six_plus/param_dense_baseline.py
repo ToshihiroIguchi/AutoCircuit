@@ -42,12 +42,19 @@ SEEDS: tuple[int, ...] = (1, 2, 3)
 NOISE = 0.01
 
 
-def run_one(truth: Truth, seed: int, workers: int) -> dict[str, Any]:
+def run_one(truth: Truth, seed: int, workers: int, max_params: int | None = None) -> dict[str, Any]:
     spectrum = spectrum_for(truth, noise=NOISE, seed=seed)
     referee = Referee(truth, spectrum)
 
     started = time.perf_counter()
-    result = discover(spectrum, pool=truth.pool, mode="exhaustive", workers=workers, seed=0)
+    result = discover(
+        spectrum,
+        pool=truth.pool,
+        mode="exhaustive",
+        workers=workers,
+        seed=0,
+        max_params=max_params,
+    )
     elapsed = time.perf_counter() - started
 
     reported = any(referee.matches(c) for c in result.candidates)
@@ -61,9 +68,11 @@ def run_one(truth: Truth, seed: int, workers: int) -> dict[str, Any]:
         "n_elements": truth.n_elements,
         "ratio": round(ratio(truth), 2),
         "seed": seed,
+        "max_params": max_params,
         "seconds": round(elapsed, 1),
         "n_evaluated": result.n_evaluated,
         "complete_up_to": result.complete_up_to,
+        "complete_up_to_params": result.complete_up_to_params,
         "reported": reported,
         "on_front": on_front,
         "recommended": recommended,
@@ -71,6 +80,18 @@ def run_one(truth: Truth, seed: int, workers: int) -> dict[str, Any]:
             None if result.recommended is None else result.recommended.circuit.to_string()
         ),
         "recommended_n_elements": rec_size,
+        # The honesty reading (docs/PARAM_BUDGET_PLAN.md section 8, item E.1). A budget that
+        # excludes the truth may say so; what it may not do is recommend a wrong in-budget
+        # circuit with every parameter resolved *under a sentence claiming completeness*. All
+        # three numbers are recorded rather than reduced to a verdict, because which of them is
+        # doing the work is exactly what a later reader will want to check.
+        "recommended_n_params": (
+            None if result.recommended is None else result.recommended.result.statistics.n_params
+        ),
+        "recommended_n_unresolved": (
+            None if result.recommended is None else result.recommended.n_unresolved
+        ),
+        "unresolved_everywhere": result.unresolved_everywhere,
         "coverage_sentence": result.summary().splitlines()[
             next(
                 i
@@ -85,6 +106,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seeds", type=str, default=None, help="comma-separated seed list")
     parser.add_argument("--workers", type=int, default=1)
+    parser.add_argument(
+        "--max-params",
+        type=int,
+        default=None,
+        help="run the parameter-budget arm instead of the element-axis baseline. Every truth "
+        "here costs 7-8 parameters, so a budget of 6 puts all three *outside* the space -- "
+        "which is the point: it is the only arm that can exercise E.1's honesty reading",
+    )
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args()
     seeds = SEEDS if args.seeds is None else tuple(int(s) for s in args.seeds.split(","))
@@ -92,14 +121,21 @@ def main() -> None:
     rows: list[dict[str, Any]] = []
     for truth in TRUTHS:
         for seed in seeds:
-            row = run_one(truth, seed, args.workers)
+            row = run_one(truth, seed, args.workers, args.max_params)
             rows.append(row)
             print(
                 f"{row['truth']:12s} seed={seed} reported={row['reported']} "
                 f"on_front={row['on_front']} recommended={row['recommended']} "
-                f"({row['seconds']}s, complete_up_to={row['complete_up_to']})"
+                f"({row['seconds']}s, complete_up_to={row['complete_up_to']})",
+                flush=True,
             )
-            print(f"    {row['coverage_sentence']}")
+            print(
+                f"    recommended: {row['recommended_circuit']} "
+                f"({row['recommended_n_params']} params, "
+                f"{row['recommended_n_unresolved']} unresolved)",
+                flush=True,
+            )
+            print(f"    {row['coverage_sentence']}", flush=True)
 
     print()
     for truth in TRUTHS:
