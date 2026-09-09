@@ -522,6 +522,33 @@ Each phase names, in advance, what would make it not ship.
    gave the stronger, slower confirmation this item exists as a proxy for (Phase 3's honesty
    reading, 9/9 rows at `n_unresolved = 0` on a wrong recommendation), so a separate rate-tracking
    pass adds no information this round. Named here as deliberately not run, not silently dropped.
+
+   **E.3, second leg [measured, 2026-09-09/10]: E.1's three controls at P ∈ {5, 7}** (P=6 already
+   measured in Phase 3's honesty reading). This is the arena the REFERENCES ladder itself named
+   as the one that could actually move the number, because these three truths straddle real
+   budget boundaries instead of sitting inside every P tested:
+
+   | truth | cost | P=5 | P=6 | P=7 |
+   |---|---:|---|---|---|
+   | `cpe_triple` | 8 params | 0/3 | 0/3 | 0/3 |
+   | `cpe_c_mix` | 7 params | 0/3 | 0/3 | **3/3 reported, 2/3 recommended** |
+   | `skinf_cpe` | 8 params | 0/3 | 0/3 | 0/3 |
+
+   **This is the cleanest confirmation in the whole plan that the parameter axis behaves exactly
+   as designed on both sides of a cost boundary.** `cpe_triple` and `skinf_cpe` (8 parameters)
+   stay outside every budget tested, including P=7, and the honesty note fires correctly on
+   every one of the 15 relevant rows (3 truths × 3 seeds × {P=5, P=7} minus `cpe_c_mix`'s
+   now-recovered cells) — never a silent miss. `cpe_c_mix` (exactly 7 parameters) is invisible to
+   the search at P=5 and P=6, and the moment the budget reaches its own cost at P=7 the search
+   finds it on **every** seed (`reported` 3/3) and prefers it on two of three (`recommended` 2/3;
+   seed 3 finds it but a different candidate wins the front that seed — a real, ordinary ranking
+   outcome, not a coverage failure, since `complete_up_to_params = 7` for this run and the truth
+   was evaluated). No honesty-note false negative anywhere in 27 rows across both legs.
+   **Cost, for the record**: P=5 stayed cheap (27-44 s per row, `benchmarks/six_plus/
+   param_dense_budget5.json`); P=7 was expensive on the CPE-pool truths (752-1,250 s) and
+   markedly cheaper on the SKINF pool (296-309 s, `param_dense_budget7.json`) — consistent with
+   `SEARCH_ALGORITHM_SCREENING.md`'s finding that CPE, not element count, is the dominant cost
+   driver, since `skinf_cpe`'s pool carries only one CPE code against `cpe_triple`'s three.
 5. **X4 at P=7: does the budget make growth unnecessary?** `--max-params 7` on the `six_plus`
    R,C,L-only truths is exactly "every topology up to 7 elements", inside `max_candidates`.
    `Arm("params7", growth_width=0, screen_restarts=1, max_params=7)` added to `recovery.py`'s
