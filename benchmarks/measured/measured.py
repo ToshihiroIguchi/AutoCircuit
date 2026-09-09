@@ -95,7 +95,10 @@ def run_readers() -> bool:
 
 
 def run_pipeline(
-    weighting: str = "auto", pool: str | None = None, time_limit: float | None = None
+    weighting: str = "auto",
+    pool: str | None = None,
+    time_limit: float | None = None,
+    max_params: int | None = None,
 ) -> bool:
     print(f"R2: pipeline finishes and its numbers mean something (weighting={weighting!r})")
     ok = True
@@ -104,7 +107,12 @@ def run_pipeline(
         kk = lin_kk(spectrum, weighting=weighting)  # type: ignore[arg-type]
         pool_arg = tuple(pool.split(",")) if pool else None
         result = discover(  # type: ignore[arg-type]
-            spectrum, pool=pool_arg, weighting=weighting, seed=0, time_limit=time_limit
+            spectrum,
+            pool=pool_arg,
+            weighting=weighting,
+            seed=0,
+            time_limit=time_limit,
+            max_params=max_params,
         )
         rec = result.recommended
         if rec is None:
@@ -130,7 +138,9 @@ def _split_half(spectrum: Spectrum) -> tuple[Spectrum, Spectrum]:
     return odd, even
 
 
-def run_split_half(weighting: str = "auto", time_limit: float | None = None) -> bool:
+def run_split_half(
+    weighting: str = "auto", time_limit: float | None = None, max_params: int | None = None
+) -> bool:
     print("R3: split-half stability (stricter than equivalence-class-aware -- see docstring)")
     n_stable = 0
     n_checked = 0
@@ -140,8 +150,12 @@ def run_split_half(weighting: str = "auto", time_limit: float | None = None) -> 
             print(f"  skip {ds.id}: only {spectrum.n} points, too few to split meaningfully")
             continue
         odd, even = _split_half(spectrum)
-        odd_result = discover(odd, weighting=weighting, seed=0, time_limit=time_limit)  # type: ignore[arg-type]
-        even_result = discover(even, weighting=weighting, seed=0, time_limit=time_limit)  # type: ignore[arg-type]
+        odd_result = discover(  # type: ignore[arg-type]
+            odd, weighting=weighting, seed=0, time_limit=time_limit, max_params=max_params
+        )
+        even_result = discover(  # type: ignore[arg-type]
+            even, weighting=weighting, seed=0, time_limit=time_limit, max_params=max_params
+        )
         odd_rec = odd_result.recommended
         even_rec = even_result.recommended
         n_checked += 1
@@ -197,14 +211,21 @@ def main() -> int:
         default=None,
         help="wall-clock budget per discover() call, seconds (default: no limit)",
     )
+    parser.add_argument(
+        "--max-params",
+        type=int,
+        default=None,
+        help="budget the exhaustive stage by free parameters instead of raw element count "
+        "(docs/PARAM_BUDGET_PLAN.md); applies to pipeline and split-half only",
+    )
     args = parser.parse_args()
 
     if args.gate in ("readers", "all"):
         run_readers()
     if args.gate in ("pipeline", "all"):
-        run_pipeline(args.weighting, args.pool, args.time_limit)
+        run_pipeline(args.weighting, args.pool, args.time_limit, args.max_params)
     if args.gate in ("split-half", "all"):
-        run_split_half(args.weighting, args.time_limit)
+        run_split_half(args.weighting, args.time_limit, args.max_params)
     if args.gate in ("literature", "all"):
         run_literature(args.weighting, args.time_limit)
     return 0

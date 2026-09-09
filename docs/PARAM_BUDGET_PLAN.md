@@ -320,8 +320,9 @@ Each phase names, in advance, what would make it not ship.
    here as the "before" picture Phase 3 re-runs under a parameter budget, with the same
    `--time-limit 60` so the two are comparable.
 3. **`discover(max_params=...)`, opt-in, default `None`. [shipped, 2026-09-09: EV5, G1 and
-   E.1's honesty reading all measured and passing, the last only after a fix; F4/E.2/E.9/E.10
-   remain]** §6's fields/sentences/refusals, `--max-params`. Gates:
+   E.1's honesty reading all measured and passing, the last only after a fix; F4 measured
+   2026-09-09 (supplementary); **E.2 measured 2026-09-10 — stop rule (e) fires, negative
+   recorded, see below**; E.9/E.10 remain]** §6's fields/sentences/refusals, `--max-params`. Gates:
    EV5 byte-identical on the element path (non-negotiable); G1 with and
    without the budget; F4's `R1-Ws1` re-measurement including the *recommendation*, not just the
    level reached; E.1's honesty reading; E.2's R2/R3; E.9's grid; E.10's rates. *Ships off by
@@ -416,9 +417,9 @@ Each phase names, in advance, what would make it not ship.
    silent at or below it) on a real parameter-dense spectrum; and the full suite is
    1120 passed / 19 skipped / 0 failed. **With the fix in place, Phase 3's status is: shipped,
    off by default, and every gate run so far — EV5, G1, and E.1's honesty reading — passed. F4's
-   `R1-Ws1` recommendation re-measurement, E.2's R2/R3 under the budget, E.9's grid and E.10's
-   rates are the remaining items and are Phase 4/5-scale ladder work, not blockers for what has
-   already shipped.**
+   `R1-Ws1` recommendation re-measurement is supplementary (below); E.9's grid and E.10's rates
+   remain Phase 4/5-scale ladder work; E.2's R2/R3 under the budget is now measured and tripped
+   the lever's own stop rule (e) — see below.**
    **F4's `R1-Ws1` re-measurement [measured, 2026-09-09] — supplementary, not decisive.** The
    original benchmark script behind F4's documented finding (the 3-parameter truth answered by a
    7-parameter stand-in, `p(p(R1-CPE1,CPE2)-C1,R2)`) could not be located in this repository, so
@@ -455,6 +456,35 @@ Each phase names, in advance, what would make it not ship.
    and got a fix shipped. This F4 re-run stands as a real, separate, and favourable data point —
    correct recovery, large cost win, on a realistic diffusion-element spectrum — not as the
    closing measurement stop rule (b) asked for.
+   **E.2's R2/R3 under the budget [measured, 2026-09-10] — stop rule (e) fires.**
+   `benchmarks/measured/measured.py pipeline`/`split-half --max-params 6 --time-limit 60`, the
+   same budget G1 and E.1 use and the same `--time-limit 60` the element-axis baseline (above)
+   was measured at, so the two are comparable:
+
+   | gate | element axis (baseline) | params ≤ 6 |
+   |---|---:|---:|
+   | R2 in-band | 1/7 | **1/7 — unchanged** |
+   | R3 stable | 2/7 (29%) | **0/7 (0%)** |
+
+   R2 does not move: the same single dataset (`impedancepy-biologic`) is the only one landing in
+   `chi2_reduced ∈ [0.5, 3]` on either axis, and every other row fails in the same direction
+   (`chi2_reduced` ranging from 3.49 to 1.6e4) under the budget too. **R3 falls, from 2/7 to
+   0/7** — literally stop rule (e) as written. Both numbers sit far below the 80% bar and the
+   swing is two datasets out of seven, so this is not a large-sample result and is not chased
+   further this round; it is recorded as a trip rather than waved past on sample size alone,
+   because that is exactly what the rule was written to catch. A plausible mechanism, not
+   confirmed further: `--pool auto` on real data reaches for a wider, CPE/W-heavy candidate set
+   than any `REFERENCES` truth uses, and G1 already measured that pool shape driving
+   `complete_up_to` down to as little as 3 elements under a budget of 6 (above) — so odd/even
+   halves of a noisy real spectrum are being compared inside a smaller, differently-shaped
+   exhaustive region than the element-cap-5 baseline explores, more of it reached by screening
+   than by enumeration, which is the same basin-lottery mechanism `TOPOLOGY_6PLUS_PLAN.md` §2(a)
+   and E.1's own controls already measured elsewhere in this plan. **This does not change Phase
+   3's shipped status** — the lever is already off by default, and this result is an argument for
+   keeping it that way, not a reason to touch the code — but it retires the "not yet a blocker"
+   framing E.2 carried above: the stop rule has now fired once, on the gate closest to this
+   project's actual use case, and any future move toward promoting `max_params` past an opt-in
+   default (item 8 below) has to address this finding rather than cite E.2 as still pending.
 4. **E.3's ladder over P, and E.4's data-derived cap.** E.4 may end in a null result.
    **E.3, first leg [measured, 2026-09-09]: the three `REFERENCES` at P ∈ {5, 7}, two seeds each**
    (`--max-params`, `workers=4`; P=6 already measured in Phase 3's G1). Combined with that P=6
@@ -566,9 +596,12 @@ Each phase names, in advance, what would make it not ship.
    only, so the three axes coincide and the check would be vacuous.
 7. **§7's surcharge measurement.** Independent. Arm B must clear the `best_cost` fingerprint
    first.
-8. **Move the default and the user-facing knob.** Only if 3, 4 and 5 all passed. E.6 resolved
-   first. `--exhaustive-limit` kept as a deprecated alias. Requires a re-baselined EV5, fresh G1,
-   fresh X4, and a date beside every number in `docs/` describing the old space.
+8. **Move the default and the user-facing knob.** Only if 3, 4 and 5 all passed — **item 3 has
+   not**: E.2 tripped its stop rule (e) on 2026-09-10 (above), which this item's own condition
+   already treats as disqualifying rather than a soft note. Not attempted until that finding is
+   addressed, not merely re-read as acceptable. E.6 resolved first. `--exhaustive-limit` kept as
+   a deprecated alias. Requires a re-baselined EV5, fresh G1, fresh X4, and a date beside every
+   number in `docs/` describing the old space.
 9. **Browser**, last. `BRIDGE_VERSION` bump with a changelog line; "Element limit" becomes
    "Parameter limit"; growth controls hidden under a parameter budget rather than computing on
    the wrong axis.

@@ -903,7 +903,20 @@ static-site Web UI running the same core via WASM (Pyodide).
     `complete_up_to`, worded like the growth stage's own equivalent note, and — the detail worth
     keeping — the gap was never parameter-specific (a `seeds=` circuit or the genetic fallback
     could always have triggered it on the element axis; nothing ever checked), so the fix applies
-    on both axes. Re-verified byte-identical on the element path after the fix.
+    on both axes. Re-verified byte-identical on the element path after the fix. **E.2 [measured,
+    2026-09-10] tripped the lever's own stop rule.** Re-running `benchmarks/measured/measured.py`
+    pipeline/split-half at `--max-params 6 --time-limit 60` against the element-axis baseline
+    above: R2 is unchanged (1/7 in-band either way, the same dataset), but R3 falls from 2/7
+    (29%) to **0/7 (0%)** — stop rule (e), "E.2's R3 falls," as written. Both numbers sit far
+    below the 80% bar and the swing is two datasets out of seven, so this is not chased further
+    as a mechanism this round, but it is recorded as the trip it is rather than read past on
+    sample size — a plausible cause is the same one G1 already measured for this pool shape,
+    `--pool auto`'s wider CPE/W-heavy candidates pushing `complete_up_to` down to as little as 3
+    elements under a budget of 6, so odd/even halves are compared inside a smaller, more
+    screening-dependent region than the element-cap-5 baseline explores. This changes nothing
+    about the shipped, off-by-default status, but it means `docs/PARAM_BUDGET_PLAN.md`'s item 8
+    (moving the default) is now explicitly blocked on addressing this finding rather than merely
+    pending E.2's measurement.
 
 Update these when decisions change.
 
