@@ -888,6 +888,22 @@ static-site Web UI running the same core via WASM (Pyodide).
     adding the three new fields to `to_dict()` changed the fingerprint on every reference while
     changing no number, because EV5 fingerprints that dict and an always-null key is still a key.
     The wire schema keeps them out until phase 9; `completeness()`'s prose carries them meanwhile.
+    **G1 passed on both axes** (all three `REFERENCES`, two seeds: `reported`/`on_front`/
+    `recommended` 6/6 either way), and the cost proxy F6 predicted from topology counts held in
+    direction but not in size once it was real fits — 3.5-4.3x faster on the widest pool, a wash
+    on one, 15% *slower* on the one whose pool prices `W` at one parameter, so a later ladder over
+    `P` has to be read per pool. **E.1's honesty reading tripped its own pre-registered stop rule,
+    unanimously (9/9 runs), and that is the most useful result the phase produced**: under a
+    budget outside a truth's own cost, the search correctly failed to find it and *every* run
+    instead recommended a wrong five-element circuit with `n_unresolved = 0`, under a coverage
+    sentence claiming completeness only to three elements — true in every clause, misleading
+    regardless, the exact shape `docs/HANDOFF.md` §3 already lists several of. Fixed rather than
+    shelved, since the rule's own wording asked for a fix: `DiscoveryResult
+    ._with_recommendation_note` now says so whenever a recommendation's size exceeds
+    `complete_up_to`, worded like the growth stage's own equivalent note, and — the detail worth
+    keeping — the gap was never parameter-specific (a `seeds=` circuit or the genetic fallback
+    could always have triggered it on the element axis; nothing ever checked), so the fix applies
+    on both axes. Re-verified byte-identical on the element path after the fix.
 
 Update these when decisions change.
 

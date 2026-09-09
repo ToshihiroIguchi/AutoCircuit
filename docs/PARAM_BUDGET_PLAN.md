@@ -319,8 +319,9 @@ Each phase names, in advance, what would make it not ship.
    chased further, since both numbers are far below the bar either way). Both readings recorded
    here as the "before" picture Phase 3 re-runs under a parameter budget, with the same
    `--time-limit 60` so the two are comparable.
-3. **`discover(max_params=...)`, opt-in, default `None`. [code shipped, 2026-09-09; its
-   measurements are still being taken]** §6's fields/sentences/refusals, `--max-params`. Gates:
+3. **`discover(max_params=...)`, opt-in, default `None`. [shipped, 2026-09-09: EV5, G1 and
+   E.1's honesty reading all measured and passing, the last only after a fix; F4/E.2/E.9/E.10
+   remain]** §6's fields/sentences/refusals, `--max-params`. Gates:
    EV5 byte-identical on the element path (non-negotiable); G1 with and
    without the budget; F4's `R1-Ws1` re-measurement including the *recommendation*, not just the
    level reached; E.1's honesty reading; E.2's R2/R3; E.9's grid; E.10's rates. *Ships off by
@@ -409,6 +410,15 @@ Each phase names, in advance, what would make it not ship.
    to be caught. `_with_recommendation_note` therefore applies on both axes rather than being
    scoped to the budget that found it, and `ev5_fingerprint.py` is re-checked byte-identical on
    the element path to show that doing so changed no existing report.
+   **Fix verified, 2026-09-09**: `ev5_fingerprint.py --mode exhaustive,auto` is byte-identical
+   to the pre-fix baseline on all three references (same 484,386 bytes); a new test in
+   `tests/test_discover_params.py` drives the note both ways (fires above `complete_up_to`,
+   silent at or below it) on a real parameter-dense spectrum; and the full suite is
+   1120 passed / 19 skipped / 0 failed. **With the fix in place, Phase 3's status is: shipped,
+   off by default, and every gate run so far — EV5, G1, and E.1's honesty reading — passed. F4's
+   `R1-Ws1` recommendation re-measurement, E.2's R2/R3 under the budget, E.9's grid and E.10's
+   rates are the remaining items and are Phase 4/5-scale ladder work, not blockers for what has
+   already shipped.**
 4. **E.3's ladder over P, and E.4's data-derived cap.** E.4 may end in a null result.
 5. **X4 at P=7: does the budget make growth unnecessary?** `--max-params 7` on the `six_plus`
    R,C,L-only truths is exactly "every topology up to 7 elements", inside `max_candidates`.
