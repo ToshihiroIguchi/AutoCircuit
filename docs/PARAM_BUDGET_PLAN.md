@@ -589,6 +589,49 @@ Each phase names, in advance, what would make it not ship.
    6- and 7-element truths on every shape **and** matches `base` on the control. `ser6`/`ser7`
    expected to stay at 0 — written down before the numbers arrive, and not a regression if so.
    Scope the first pass to `--only par5,par6,ser6,mix6 --seeds 1` before the full grid.
+   **[measured, 2026-09-10] — does not supersede growth.** Full grid, all nine `six_plus` truths
+   × 3 seeds, `benchmarks/six_plus/x4_params7.json`, against `base`/`grow` from the
+   existing `x4_recovery.json`:
+
+   | | `base` | `grow` | `params7` |
+   |---|---:|---:|---:|
+   | six/seven-element `reported` (18 cells) | 0/18 | 14/18 | **15/18** |
+   | six/seven-element `recommended` (18 cells) | 0/18 | 12/18 | 12/18 |
+   | five-element control, recommended correctly (9 cells) | 9/9 | 9/9 | 9/9 |
+   | five-element control, over-grown | 0/9 | 0/9 | 0/9 |
+   | median seconds, six/seven-element | 20 | 46 | **131** |
+   | median seconds, control | 13 | 57 | 118 |
+
+   Aggregates look close, and the per-truth breakdown is why the decision rule reads them apart
+   rather than pooling:
+
+   | truth | `grow` reported/recommended | `params7` reported/recommended |
+   |---|---:|---:|
+   | `par6` | 3/3, 3/3 | 3/3, 3/3 — tie |
+   | `mix6` | 3/3, 3/3 | 3/3, 3/3 — tie |
+   | `par7` | 3/3, 3/3 | 3/3, 3/3 — tie |
+   | `mix7` | 3/3, 3/3 | 3/3, 3/3 — tie |
+   | `ser6` | **2/3**, 0/3 | **0/3**, 0/3 — `params7` loses |
+   | `ser7` | 0/3, 0/3 | **3/3**, 0/3 — `params7` wins on `reported` only |
+
+   **The pre-registered rule fires on the first line that breaks it: `params7` loses to `grow` on
+   `ser6`'s `reported`, so it does not beat `grow` on every shape, so it does not supersede
+   growth.** The control is a clean tie (9/9 either way, no over-growing), which is the half of
+   the rule that *did* hold. `ser7` moves the other way — `params7` finds a truth-equivalent on
+   every seed where `grow` finds none — but the final `recommended` column stays 0/3 for both, so
+   it changes nothing the report says. Both single-truth swings (`ser6` down, `ser7` up) are most
+   likely the tier-1 screening lottery `TOPOLOGY_6PLUS_PLAN.md` §2(a) already measured and
+   `SEARCH_TIME_PLAN.md` §4.3 already caught flipping `ser6`'s own `reported` flag between two
+   otherwise-identical runs — both arms here run at `screen_restarts=1`, a single seed draw per
+   topology, and `ser6`/`ser7` are exactly the shape that grid already named as the one every
+   basin-lottery and identifiability measurement in this repository agrees is thinnest. Not
+   chased further, because the rule does not need the mechanism resolved to give its verdict:
+   full parameter-axis enumeration to seven elements is **more expensive** than growth (2.3-2.8x
+   on the six/seven-element cells, ~2x on the control) for a **tied-at-best** recovery rate, so
+   item 5's question is answered — no, the budget does not make growth unnecessary, and `grow`
+   stays the cheaper, no-worse mechanism for reaching past `complete_up_to` on an `R,C,L`-only
+   pool. This does not touch `GROWTH_DEFAULT` (still `0`, for `TOPOLOGY_6PLUS_PLAN.md`'s own
+   reasons) or anything about `max_params`'s shipped, off-by-default status.
 6. **Re-key the quota (§5). Independent of 1–5; shippable alone.** Gates: G1 no truth lost on any
    seed; Q1 `recovered` not fallen; Q3 `by_criterion_overfits` not risen; the tier-1 inertness
    corollary asserted as a unit test; `REFINE_DEFAULT` re-derived for the new bucket count; EV5

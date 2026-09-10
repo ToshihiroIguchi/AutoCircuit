@@ -916,7 +916,22 @@ static-site Web UI running the same core via WASM (Pyodide).
     screening-dependent region than the element-cap-5 baseline explores. This changes nothing
     about the shipped, off-by-default status, but it means `docs/PARAM_BUDGET_PLAN.md`'s item 8
     (moving the default) is now explicitly blocked on addressing this finding rather than merely
-    pending E.2's measurement.
+    pending E.2's measurement. **Item 5 (X4 at P=7) [measured, 2026-09-10]: the parameter budget
+    does not make `TOPOLOGY_6PLUS_PLAN.md`'s growth stage unnecessary.** `--max-params 7` on an
+    `R,C,L`-only pool enumerates exhaustively to exactly seven elements, the same reach `grow`
+    gets from growth; scored against the pre-registered rule ("supersedes growth iff it beats
+    `grow` on `reported` for the six/seven-element truths on every shape and matches `base` on
+    the control") on the same nine `six_plus` truths × 3 seeds `TOPOLOGY_6PLUS_PLAN.md` X4 used.
+    The rule fails on its first tested shape: `params7` **loses** to `grow` on `ser6`'s
+    `reported` (0/3 against 2/3), so it does not beat `grow` on every shape, regardless of tying
+    or even winning elsewhere (`par6`/`mix6`/`par7`/`mix7` tie 3/3=3/3; `ser7`'s `reported` goes
+    0/3 → 3/3 but its `recommended` stays 0/3 either way, so nothing the report says changes) —
+    and it costs 2.3-2.8x more than growth on the six/seven-element cells for a recovery rate
+    that is, at best, tied. Both single-truth swings are most likely the same tier-1
+    screening-lottery noise `TOPOLOGY_6PLUS_PLAN.md` §2(a) and `SEARCH_TIME_PLAN.md` §4.3 already
+    measured for this exact shape at a single screening seed, not chased further because the
+    decision rule does not need the mechanism resolved to give its verdict. `GROWTH_DEFAULT`
+    stays `0` and nothing about `max_params`'s shipped, off-by-default status changes.
 
 Update these when decisions change.
 
