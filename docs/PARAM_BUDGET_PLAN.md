@@ -639,6 +639,52 @@ Each phase names, in advance, what would make it not ship.
    caught the last shortlist bug while 744 tests passed). *Null rule:* any failure reverts to
    `n_elements`. `recovery.py` (X4) is explicitly not a gate here — its nine truths are `R,C,L`
    only, so the three axes coincide and the check would be vacuous.
+   **[shipped, code and cheap gates 2026-09-11; G1/Q1/Q3's full-cost runs still pending.]**
+   `Ranked.n_elements` → `Ranked.n_params`; `_shortlist`/`_shortlist_candidates`/`_refit_order`
+   re-keyed; `_quota_by_size` kept its name (renaming would have touched a large number of
+   historical `docs/` entries that describe what happened at the time, for no behavioural
+   reason) but its docstring and every caller's now say parameter count, not element count.
+   **The constant, from a free replay, before any code changed**: `benchmarks/screening_round/
+   quota_replay.py` (new) replays `_shortlist` over the frozen 21,057-topology
+   `land_rclcpe6.json` landscape with no fitting at all, sweeping `MIN_REFINE_PER_SIZE` under
+   both keys. The decision rule ("largest floor keeping every arena's refit-count multiplier at
+   or under 1.25×, checked against `land_rclcpe6`'s replay and a parameter-count-only structural
+   estimate on the three `REFERENCES` pools") landed on **`MIN_REFINE_PER_SIZE = 5 → 3`**: at 5
+   the multiplier is 1.66–1.93× across the four arenas checked, at 3 it is 1.03–1.22×, and the
+   truth's own 18-member equivalence class survives the shortlist at every setting tried (ranked
+   81st of 21,057 by screening cost, regardless of key or floor). `REFINE_DEFAULT`'s docstring
+   now states the corollary this forces: at 3, the floor binds on every parameter-count bucket
+   count of 10 or more, which is every CPE-bearing pool this project actually searches, so
+   `REFINE_DEFAULT` is inert there by construction rather than by the old, narrower "below
+   `MIN_REFINE_PER_SIZE * buckets`" statement.
+   **The tier-1 inertness corollary, gated as two unit tests** rather than asserted from the
+   docstring alone (`tests/test_discover_exhaustive.py`): a positive one showing
+   `_shortlist`'s output is byte-identical across all seven `CRITERIA` on a CPE-bearing fixture
+   spanning several parameter-count buckets, and a negative one showing the *mechanism* the old
+   key was exposed to — two same-element-count, different-parameter-count circuits
+   (`p(R1-CPE1,R2)`, four parameters; `CPE1-CPE2-CPE3`, six) whose relative `_screening_score`
+   ranking flips between AIC and BIC at a chosen cost pair, which is exactly what a single
+   element-count bucket used to expose a criterion choice to and a parameter-count bucket never
+   does (each stands in its own bucket). Both pass; `pytest -q` (full suite) is **1122 passed,
+   19 skipped, 0 failed**; `ruff check`/`ruff format --check`/`mypy --strict` clean on every
+   touched file (the one pre-existing `discover.py` mypy error, an unexported `Weighting`
+   re-export, reproduces identically with the change stashed out).
+   **EV5** (`--mode exhaustive,auto`, all three `REFERENCES`, run before/after in an isolated
+   `git worktree` rather than an in-place `git stash` after the first attempt at that raced a
+   concurrently-running background test suite and had to be aborted and recovered): differs, as
+   expected, and characterised rather than merely diffed. `recommended` and `complete_up_to` are
+   **byte-identical on all six (reference × mode) rows**. The Pareto front is identical on two of
+   three references and gains exactly one member on the capacitor reference (`R1-C1-L1`, a
+   three-element candidate that the old element-count-4 bucket had been losing to CPE/SKINF
+   competitors it now no longer shares a bucket with) — a strict improvement in what the front
+   shows, not a regression. Candidate counts shift in the direction F6's cost proxy predicted:
+   down on the two references where CPE-stack duplicates previously crowded the shortlist
+   (Maxwell-Wagner 39→35, Randles 39→37) and up on the widest pool (capacitor 37→40), with the
+   "only-before" sets dominated by CPE-pair topologies (`CPE1-CPE2`, `p(CPE1,CPE2)`, ...) giving
+   way to "only-after" sets of more parameter-diverse ones. This mini-arena spot check (4-element
+   cap, not the full 5-element G1) is not gate G1 itself — the full-cost `discovery_v2.py gate`
+   run and `criterion_selection.py`'s Q1/Q3 slice are still pending, per the staged order of work
+   agreed with the user — but it is a favourable, structurally-consistent early read.
 7. **§7's surcharge measurement.** Independent. Arm B must clear the `best_cost` fingerprint
    first.
 8. **Move the default and the user-facing knob.** Only if 3, 4 and 5 all passed — **item 3 has

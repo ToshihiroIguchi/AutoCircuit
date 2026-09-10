@@ -184,10 +184,16 @@ PERFECT_COST = 1e-9
 #: (docs/EVOLVE_SEARCH_PLAN.md section 3.2).
 #:
 #: Note what this number does *not* do. The quota is ``max(MIN_REFINE_PER_SIZE, n_refine //
-#: sizes)``, and a genetic archive spans about seven element counts, so 8, 16 and 30 all reduce
-#: to the same quota of 5: below ``MIN_REFINE_PER_SIZE * sizes`` this constant has no effect at
-#: all, and the floor is the knob. That is arithmetic rather than a measurement, and it is
-#: recorded here so nobody sweeps this value looking for a difference that cannot appear.
+#: buckets)``, where a bucket is a parameter count, not an element count
+#: (docs/PARAM_BUDGET_PLAN.md section 6 -- see :func:`_quota_by_size`'s docstring for why the
+#: axis changed). A CPE-bearing pool at the exhaustive cap spans about 10-12 parameter-count
+#: buckets rather than the 5-7 element counts the old key gave, so at :data:`MIN_REFINE_PER_SIZE`
+#: = 3 the floor binds on every such pool this project actually searches (``30 // 12 = 2 < 3``,
+#: ``30 // 10 = 3``): **this constant is inert there, on purpose, and the floor is the knob.**
+#: It stays non-inert only on pools narrow enough to have fewer than ten parameter buckets --
+#: an ``R,C,L``-only pool, where element count and parameter count coincide. That is arithmetic
+#: rather than a measurement, and it is recorded here so nobody sweeps this value looking for a
+#: difference that cannot appear on the pools it matters for.
 REFINE_DEFAULT = {"evolve": 30, "exhaustive": 30, "auto": 30}
 
 #: Every candidate within this factor of the best screening cost is refitted at full budget,
@@ -198,9 +204,18 @@ REFINE_COST_FACTOR = 10.0
 #: is unbounded, and on noisy data it selects hundreds of candidates (see `_shortlist`).
 REFINE_CEILING_FACTOR = 2
 
-#: Floor on the per-element-count refit quota, so that a size class is never represented by one
-#: or two candidates just because the run happened to span many sizes.
-MIN_REFINE_PER_SIZE = 5
+#: Floor on the per-parameter-count refit quota, so that a size class is never represented by
+#: one or two candidates just because the run happened to span many sizes.
+#:
+#: [measured, docs/PARAM_BUDGET_PLAN.md section 6, ``benchmarks/screening_round/quota_replay.py``]
+#: Re-keying the quota from element count to parameter count roughly doubles the bucket count on
+#: a CPE-bearing pool (5-7 element buckets become 10-12 parameter buckets at the exhaustive cap),
+#: so the old floor of 5 would have raised the tier-2 refit count 1.66-1.93x across the three
+#: ``REFERENCES`` pools and a 21,057-topology frozen landscape (``land_rclcpe6.json``) with no
+#: change in which topologies survive. Lowered to 3, which is the largest floor that stays within
+#: a 1.25x cost multiplier on every arena checked (1.03-1.22x measured) -- a decision rule written
+#: down before the replay was run, not fitted to it afterwards.
+MIN_REFINE_PER_SIZE = 3
 
 #: How far past ``time_limit`` the genetic search's refit may run, as a multiple of it.
 #:
@@ -2033,8 +2048,9 @@ def discover(
             parameter inheritance off. See :data:`WARM_ACCEPT_FACTOR`.
         final_restarts: Restart count for the final refit of the reported candidates.
         n_refine: Refit budget for the full-budget second tier. In **both** searches it is a
-            *total* that is split into a quota per element count, so that every complexity
-            reaches the Pareto front; see :func:`_quota_by_size`. :data:`REFINE_DEFAULT` holds
+            *total* that is split into a quota per parameter count, so that a wide slice of the
+            Pareto front is reached rather than a cluster at one end; see :func:`_quota_by_size`.
+            :data:`REFINE_DEFAULT` holds
             the default, and says why raising it below a threshold changes nothing.
         time_limit: Wall-clock budget in seconds; the search stops cleanly when exceeded.
         criterion: Which model-selection rule ranks the candidates, draws the Pareto front and
@@ -3248,9 +3264,22 @@ class Ranked[T](NamedTuple):
     stage's screen, a :class:`Candidate` for the genetic search's archive.
     """
 
-    n_elements: int
+    n_params: int
+    """Free parameter count -- the quota's bucket key (docs/PARAM_BUDGET_PLAN.md section 6).
+
+    Not element count. A ``C`` and a ``CPE`` are one element each but one and two parameters;
+    bucketing on element count let a CPE-heavy topology's extra parameters go unpenalised by the
+    *quota* even though :attr:`score` already penalises them by the *criterion* -- and it left
+    the bucket count itself wrong, [measured] 5 element-count buckets guarding a 19-value
+    :attr:`~autocircuit.core.circuit.Circuit.complexity` axis on the default pool's cap-5 space,
+    so the docstring's own promise ("the Pareto front has candidates at each complexity") was met
+    on a minority of it. Parameter count is not :attr:`~Circuit.complexity` either -- that axis
+    carries four surcharges (docs/PARAM_BUDGET_PLAN.md section 7) nobody had measured yet when
+    this was re-keyed, so keying the *quota* on it would have handed those surcharges control
+    over which topologies reach tier 2 at all before they had earned that.
+    """
     score: float
-    """Model-selection value, smaller better. Ranks *within* a size class."""
+    """Model-selection value, smaller better. Ranks *within* a bucket."""
     cost: float
     """Weighted sum of squared residuals. Only the near-tie rule reads this."""
     tiebreak: str
@@ -3265,21 +3294,30 @@ class Ranked[T](NamedTuple):
 
 
 def _quota_by_size[T](items: Sequence[Ranked[T]], n_refine: int) -> list[T]:
-    """Split ``n_refine`` into a per-element-count quota and take the best of each size.
+    """Split ``n_refine`` into a per-parameter-count quota and take the best of each bucket.
 
-    **The quota is per element count, and that is not a detail.** [measured] Ranking the whole
-    pool by cost puts nothing but the largest circuits on the shortlist: raw residual always
+    **The quota is per parameter count, and that is not a detail.** [measured] Ranking the whole
+    pool by cost puts nothing but the biggest circuits on the shortlist: raw residual always
     improves with parameters, so on the capacitor reference every one of the 60 best-scoring
     candidates had five elements and the four-element truth -- the circuit that generated the
     data -- never reached tier 2 at all. Two corrections, both needed:
 
-    * rank *within* a size by an information criterion rather than raw cost, so an extra CPE has
-      to earn its two parameters even against its own size class;
-    * give every size its own quota, so the Pareto front has candidates at each complexity
-      instead of a cluster at the top.
+    * rank *within* a bucket by an information criterion rather than raw cost, so an extra CPE
+      has to earn its two parameters even against its own bucket;
+    * give every bucket its own quota, so the Pareto front has candidates across the axis it is
+      actually drawn on instead of a cluster at the top.
 
-    Within a size the list is the score-best ``quota``, plus every candidate whose cost is
-    within :data:`REFINE_COST_FACTOR` of that size's best -- the near-tie rule, which is what
+    [measured, docs/PARAM_BUDGET_PLAN.md section 6] The bucket used to be element count, which
+    conflated two different axes: :func:`_screening_score` already charges for parameters, and
+    :attr:`~autocircuit.core.circuit.Circuit.complexity` (what the Pareto front actually
+    dominates on) is neither element count nor parameter count once ``W``/``CPE``/``SKINF``/
+    ``SKINW`` carry a surcharge. Bucketing on parameter count instead does not fully close that
+    gap -- :attr:`Ranked.n_params`'s docstring says why it stops short of ``complexity`` -- but it
+    turns the docstring's own promise from true on 26% of a real 19-value axis into a bucket
+    scheme with no unmeasured surcharge inside it.
+
+    Within a bucket the list is the score-best ``quota``, plus every candidate whose cost is
+    within :data:`REFINE_COST_FACTOR` of that bucket's best -- the near-tie rule, which is what
     stops an exact equivalent from being dropped because a sloppy fit ranked it one place too
     low. [measured] That rule needs a ceiling: at 1% noise a factor 10 in cost is only a factor
     3.2 in relative error, so hundreds of candidates land inside it and refitting them all cost
@@ -3289,15 +3327,15 @@ def _quota_by_size[T](items: Sequence[Ranked[T]], n_refine: int) -> list[T]:
     search making the same kind of claim as the exhaustive one; a second copy of it is a second
     thing that can drift (docs/EVOLVE_SEARCH_PLAN.md section 3.2).
     """
-    by_size: dict[int, list[Ranked[T]]] = {}
+    by_params: dict[int, list[Ranked[T]]] = {}
     for item in items:
-        by_size.setdefault(item.n_elements, []).append(item)
-    if not by_size:
+        by_params.setdefault(item.n_params, []).append(item)
+    if not by_params:
         return []
 
-    quota = max(MIN_REFINE_PER_SIZE, n_refine // len(by_size))
+    quota = max(MIN_REFINE_PER_SIZE, n_refine // len(by_params))
     keep: list[T] = []
-    for group in by_size.values():
+    for group in by_params.values():
         group.sort(key=lambda item: (item.score, item.cost, item.tiebreak))
         best_cost = min(item.cost for item in group)
         threshold = best_cost * REFINE_COST_FACTOR if best_cost > 0.0 else math.inf
@@ -3327,7 +3365,7 @@ def _shortlist(
         circuit = Circuit.parse(text)
         ranked.append(
             Ranked(
-                len(circuit.leaves),
+                circuit.n_params,
                 _screening_score(cost, circuit.n_params, n_data, criterion),
                 cost,
                 text,
@@ -3340,7 +3378,7 @@ def _shortlist(
 def _refit_order(
     candidates: Sequence[Candidate], criterion: Criterion = DEFAULT_CRITERION
 ) -> list[Candidate]:
-    """The shortlist in the order a *bounded* tier 2 should walk it: best of every size first.
+    """The shortlist in the order a *bounded* tier 2 should walk it: best of every bucket first.
 
     :func:`_quota_by_size` chooses *which* candidates are worth a full-budget refit and says
     nothing about the order, because the exhaustive stage refits all of them. The genetic
@@ -3348,23 +3386,24 @@ def _refit_order(
     wherever it has got to, so for that caller the order decides what is reported.
 
     [measured, docs/SEARCH_ALGORITHM_SCREENING.md section 4.6] Walking it in the order the
-    quota happens to build -- grouped by element count, the groups in whatever order the
-    archive first mentioned them -- lost the answer. At element cap 9, seed 0, the truth's
-    equivalence class was ranked **1 of 270** in the archive and sat at position 53 of a
-    73-candidate shortlist whose deadline cut fell at 40; sizes 6 and 8 were never attempted at
-    all, and the report contained no six-element row while the best thing the search had found
-    was one. Nothing was wrong with the search or with the shortlist. The report simply walked
-    away from the answer.
+    quota happens to build -- grouped by bucket, the groups in whatever order the archive first
+    mentioned them -- lost the answer. At element cap 9, seed 0, the truth's equivalence class
+    was ranked **1 of 270** in the archive and sat at position 53 of a 73-candidate shortlist
+    whose deadline cut fell at 40; two whole sizes were never attempted at all, and the report
+    contained no row for one of them while the best thing the search had found was there. Nothing
+    was wrong with the search or with the shortlist. The report simply walked away from the
+    answer.
 
-    So the order is a round robin over the size groups, taking each group's best before any
+    So the order is a round robin over the bucket groups, taking each group's best before any
     group's second, and ordering within a round by the score itself. Two properties follow, and
     they are the two the quota exists for: the archive's best-scoring candidate is always
-    attempted first, and any cut that leaves room for one refit per size leaves a Pareto front
-    that still spans the complexities -- rather than however many sizes fitted inside the clock.
+    attempted first, and any cut that leaves room for one refit per bucket leaves a Pareto front
+    that still spans a wide slice of the parameter axis -- rather than however many buckets
+    fitted inside the clock.
     """
-    by_size: dict[int, list[Candidate]] = {}
+    by_params: dict[int, list[Candidate]] = {}
     for candidate in candidates:
-        by_size.setdefault(len(candidate.circuit.leaves), []).append(candidate)
+        by_params.setdefault(candidate.circuit.n_params, []).append(candidate)
 
     def key(candidate: Candidate) -> tuple[float, float, str]:
         score = candidate.score(criterion)
@@ -3375,7 +3414,7 @@ def _refit_order(
         )
 
     ordered: list[tuple[int, tuple[float, float, str], Candidate]] = []
-    for group in by_size.values():
+    for group in by_params.values():
         group.sort(key=key)
         ordered.extend((rank, key(candidate), candidate) for rank, candidate in enumerate(group))
     ordered.sort(key=lambda item: (item[0], item[1]))
@@ -3399,7 +3438,7 @@ def _shortlist_candidates(
     return _quota_by_size(
         [
             Ranked(
-                len(candidate.circuit.leaves),
+                candidate.circuit.n_params,
                 candidate.score(criterion),
                 candidate.result.statistics.ssr,
                 candidate.circuit.canonical_form(),
@@ -3532,7 +3571,7 @@ def refit_plan(
 
     The reason this exists is the same as for the screen: the decisions must have exactly one
     implementation. Which topologies are worth a full-budget refit is :func:`_shortlist`, and
-    gate G1 rests on its per-element-count quota; what happens to a topology that cannot be
+    gate G1 rests on its per-parameter-count quota; what happens to a topology that cannot be
     fitted, and the ordering of what comes out, are decisions too. A browser driving this from
     JavaScript fans out the fits and nothing else.
 
@@ -3894,7 +3933,7 @@ def screen_plan(
     driver is :func:`_screen_all`; across processes it is :func:`_screen_parallel`; in a
     browser it is JavaScript fanning batches across Web Workers, and none of those get to hold
     their own opinion about ordering or abandonment. Gate G1 rests on this stage feeding the
-    per-element-count quota in :func:`_shortlist` correctly, and a second implementation of it
+    per-parameter-count quota in :func:`_shortlist` correctly, and a second implementation of it
     in another language is a second thing that can be wrong.
 
     ``chunk=1`` reproduces a strictly sequential screen, where every candidate is judged
@@ -4359,8 +4398,8 @@ def _refine(
     a second way to say it.
 
     A tier that can stop early owes an order to stop *in*, which is :func:`_refit_order`: the
-    shortlist arrives grouped by element count and is walked best-of-each-size first. Without
-    it a deadline drops whichever sizes the archive happened to mention last, first-ranked
+    shortlist arrives grouped by parameter count and is walked best-of-each-bucket first. Without
+    it a deadline drops whichever buckets the archive happened to mention last, first-ranked
     candidate included.
 
     ``executor`` parallelises this tier exactly as :func:`_refit_shortlist` already does for the
