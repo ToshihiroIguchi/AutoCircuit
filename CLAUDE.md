@@ -840,10 +840,13 @@ static-site Web UI running the same core via WASM (Pyodide).
 
 22. `docs/PARAM_BUDGET_PLAN.md` — whether the exhaustive search should be budgeted by free
     parameters rather than raw element count, since a `C` costs one and a `CPE` costs two.
-    **Phases 0-3 done: `discover(max_params=...)` and `--max-params` ship as an opt-in lever,
-    default `None`, and no default has moved.** The originally suspected mechanism does not exist: tier 1 and
+    **Phases 0-7 done (all seven items of that plan's §9); phase 8 (moving the default) is
+    blocked on E.2's stop rule below, phase 9 (browser) not attempted.**
+    `discover(max_params=...)` and `--max-params` ship as an opt-in lever, default `None`, and no
+    default has moved. The originally suspected mechanism does not exist: tier 1 and
     tier 2 already feed `n_params` to the chosen criterion, and `recommended`'s first key,
-    `Circuit.complexity`, is a weighted sum rather than a count, so no code path lets a CPE win a
+    `Circuit.complexity`, **was** a weighted sum rather than a count — see item 6/7 below for why
+    that is now stated in the past tense — so no code path lets a CPE win a
     comparison for being counted as one element. What *is* raw element count, unconditionally, is
     the budget, the `complete_up_to` coverage claim and the tier-2 refit quota, and those are
     measurably distorted — at element cap 5 on the default pool, 79% of the enumerated space
@@ -932,6 +935,40 @@ static-site Web UI running the same core via WASM (Pyodide).
     measured for this exact shape at a single screening seed, not chased further because the
     decision rule does not need the mechanism resolved to give its verdict. `GROWTH_DEFAULT`
     stays `0` and nothing about `max_params`'s shipped, off-by-default status changes.
+    **Item 6 (re-key the tier-2 quota) [shipped, all gates measured 2026-09-11].** `_quota_by_size`
+    bucketed the tier-2 refit shortlist on element count while `_screening_score` already charged
+    for parameters and the Pareto front dominates on `Circuit.complexity` — 5 buckets guarding a
+    19-value axis on the default pool's cap-5 space. Re-keyed to `n_params`; `MIN_REFINE_PER_SIZE`
+    lowered `5 → 3` by a pre-registered rule read off a free, no-fitting replay of a frozen
+    21,057-topology landscape before any code changed. Ships a provable, tested corollary: inside
+    a fixed-parameter-count bucket every scored criterion is `deviance(cost)` plus a constant, so
+    the tier-1 shortlist is now criterion-invariant, voiding `docs/CRITERION_SELECTION_PLAN.md`
+    §2(a)'s mechanism by construction rather than merely by low measured rate (updated there in
+    the same commit). Full-cost G1 (`discovery_v2.py gate`, 3 references × 2 seeds, before/after)
+    is 6/6 both before and after with **byte-identical recommended circuits on every cell**;
+    `criterion_selection.py`'s Q1/Q3 slice (24 cells, before/after) shows `recovered` unfallen at
+    100%/100% and `by_criterion_overfits` not risen (aic falls 83.3%→75.0%, bic unchanged), with
+    23 of 24 cells identical on every field and the one that differs moving only the secondary
+    `by_criterion` line, never `recommended`.
+    **Item 7 (the `Circuit.complexity` surcharges) [measured and shipped 2026-09-12: a clean
+    tie].** Four elements (`W`, `CPE`, `SKINF`, `SKINW`) carried a surcharge above their own
+    parameter count; `Element.complexity`'s comment called this "deliberately expensive" for
+    elements that "absorb a lot of unexplained behaviour", a rationale `HN`'s own value (`4.0`,
+    no surcharge at all) already contradicted. An arm A (today's table) / arm B
+    (`complexity = n_params`) comparison, run against the pre-registered rule from item 6's own
+    §7, tied on every cell that could move it: 0 of 12 `criterion_selection.py` negative-control
+    cells differ on `recovered`/`recommended_correct`/`by_criterion_overfits`, and 0 of 9
+    `param_dense_truths.py` cells differ on `reported`/`on_front`/`recommended` — the param-dense
+    `reported` total (4/9) reproduces Phase 2's own basin-lottery baseline (1/3, 2/3, 1/3) exactly
+    on both arms. Neither clause of the rule fired, so the surcharge collapsed:
+    `Element.complexity` is now a property returning `float(self.n_params)` for every element,
+    replacing twelve per-class constants that could drift out of sync with `n_params` on their
+    own; `Circuit.complexity` keeps its own name so a future weighting has one place to be
+    reintroduced if a measurement ever justifies one. EV5 before/after (all three `REFERENCES`):
+    `n_evaluated`, `complete_up_to` and `recommended` byte-identical on all six rows; the Pareto
+    front's *membership* shifts on two of three references in the direction the mechanism
+    predicts (a surcharged element's complexity falling to match a plain R/C/L candidate's changes
+    which one dominates) — explicable, not a regression, and `recommended` never moved.
 
 Update these when decisions change.
 
