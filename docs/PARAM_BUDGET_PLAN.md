@@ -1,7 +1,9 @@
 # PARAM_BUDGET_PLAN.md — should the exhaustive search be budgeted by free parameters instead of elements?
 
-**Status: Phases 0-2 done. Phases run in order; each states in advance what result means
-"do not ship" and a null result is an acceptable outcome of any phase after Phase 1.**
+**Status: Phases 0-7 done (items 1-7 of §9); phase 8 (moving the default) is blocked on E.2's
+stop rule (below) and phase 9 (browser) is not attempted. Phases run in order; each states in
+advance what result means "do not ship" and a null result is an acceptable outcome of any phase
+after Phase 1.**
 
 ## 1. Why this needs an experiment before it needs an opinion
 
@@ -726,8 +728,66 @@ Each phase names, in advance, what would make it not ship.
    voided under this key by the tier-1 inertness corollary above, and its §2(a) mechanism (same
    element count, different parameter count, different criterion ranking) no longer applies to
    the *shortlist*; that document is updated accordingly in the same commit as this entry.
-7. **§7's surcharge measurement.** Independent. Arm B must clear the `best_cost` fingerprint
-   first.
+7. **§7's surcharge measurement. [measured and shipped, 2026-09-12: a clean tie, `complexity`
+   collapsed to `n_params`.]** Independent. Arm B must clear the `best_cost` fingerprint first.
+   **The confound clearance (a 2x2 of arm x `ABANDON_FACTOR` on the three `REFERENCES` at
+   `exhaustive_limit=4`, `benchmarks/complexity_confound.py`) came back clean**: arm A and arm B
+   recommend the identical circuit on all three references whether or not early abandon can fire
+   (`ABANDON_FACTOR` finite or `math.inf`), and abandon itself changed nothing on this arena
+   either — so the `best_cost`/`abandon_above` bucketing mechanism F8 flagged as a hazard is not
+   what any arm A/B difference below would be measuring.
+   **The arm run** (`benchmarks/complexity_surcharge.py`, reusing `criterion_selection.py`'s
+   `run_reference_cell`/`run_six_plus_cell` and `six_plus/param_dense_baseline.run_one` rather
+   than a new fixture): 12 `criterion_selection.py` negative-control cells (the three
+   `REFERENCES` plus `par5`/`ser5`/`mix5`, one seed, `{aic, bic}`) and 9 `param_dense_truths.py`
+   cells (3 truths x 3 seeds, the same arena Phase 2 built) — **a clean tie on every axis that
+   could move**:
+
+   | reading | arm A (today's table) | arm B (`complexity = n_params`) |
+   |---|---|---|
+   | `by_criterion_overfits`, aic | 5/6 | 5/6 |
+   | `by_criterion_overfits`, bic | 0/6 | 0/6 |
+   | `recommended_correct`, aic | 6/6 | 6/6 |
+   | `recommended_correct`, bic | 6/6 | 6/6 |
+   | param_dense `reported` | 4/9 | 4/9 |
+   | param_dense `on_front` | 4/9 | 4/9 |
+   | param_dense `recommended` | 3/9 | 3/9 |
+
+   Read cell by cell rather than trusting the pooled rate, per this project's own convention:
+   **0 of the 12 criterion-control cells differ on `recovered`/`recommended_correct`/
+   `by_criterion_overfits`, and 0 of the 9 param-dense cells differ on
+   `reported`/`on_front`/`recommended`/`recommended_circuit`.** The param-dense `reported` total
+   (4/9) reproduces Phase 2's own basin-lottery baseline (1/3, 2/3, 1/3 = 4/9) exactly, on both
+   arms — the surcharge was not hiding a recovery difference the pooled Phase 2 number had
+   smoothed over.
+   **§7's pre-registered rule** ("ships only if arm A's `recommended_correct` is strictly
+   better, or arm B's `by_criterion_overfits` is strictly worse") does not fire either clause, so
+   the tie collapses `complexity` to `n_params` as the rule requires. **Shipped**:
+   `Element.complexity` (`core/elements.py`) is now a `@property` returning `float(self.n_params)`
+   for every element, replacing the twelve per-class `ClassVar[float]` overrides (all of which
+   duplicated their own class's parameter count except `W +0.5`, `CPE +0.5`, `SKINF +0.5`,
+   `SKINW +1.0`, per F3) — collapsing the identity structurally rather than copying a number that
+   could drift out of sync with `n_params` again. `Circuit.complexity` (`core/circuit.py`) is
+   unchanged in behaviour and keeps its own name and docstring, stated as the identity, per §7's
+   own instruction: "there is one place to reintroduce a weighting later, should a future
+   measurement find one that earns itself." Both docstrings correct the retired
+   `Element.complexity` comment, which claimed CPE and HN were "deliberately expensive" — HN's
+   surcharge was always `0`, contradicting its own rationale, as F3 first measured.
+   **Gates**: complexity-touching tests (`tests/test_discover.py`, `tests/test_criteria.py`,
+   `tests/test_web_bridge.py`, 109 tests) pass unchanged — no test hard-coded a per-element
+   surcharge value, only relative comparisons, which the collapse does not disturb. Full suite:
+   **1122 passed, 19 skipped, 0 failed.** `ruff check`/`ruff format --check`/`mypy --strict` clean
+   on both touched files (the two pre-existing unformatted spots and twelve pre-existing
+   `no-any-return` mypy errors in `elements.py` reproduce identically with the change stashed
+   out — unrelated to this change). **EV5** (`--mode exhaustive,auto`, all three `REFERENCES`,
+   before/after in an isolated worktree): `n_evaluated`, `complete_up_to` and `recommended` are
+   **byte-identical on all six (reference x mode) rows** — collapsing the surcharge changes
+   nothing the report's headline claims. The Pareto front's *membership* shifts on two of three
+   references in the direction the mechanism predicts: `R1-C1-L1` drops off the capacitor front
+   and `p(R1,C1)` drops off the Randles front, in both cases because a surcharged element's
+   complexity fell to match a plain R/C/L candidate's, making the surcharged one dominate where
+   it previously tied or lost — a real, explicable consequence of the identity now holding, not a
+   regression, and the value every report actually leads with (`recommended`) never moved.
 8. **Move the default and the user-facing knob.** Only if 3, 4 and 5 all passed — **item 3 has
    not**: E.2 tripped its stop rule (e) on 2026-09-10 (above), which this item's own condition
    already treats as disqualifying rather than a soft note. Not attempted until that finding is

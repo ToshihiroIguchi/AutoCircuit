@@ -104,9 +104,6 @@ class Element(ABC):
     code: ClassVar[str]
     name: ClassVar[str]
     params: ClassVar[tuple[ParamSpec, ...]]
-    #: Structural cost used by the topology search; elements that can absorb a lot of
-    #: unexplained behaviour (CPE, HN) are deliberately expensive.
-    complexity: ClassVar[float] = 1.0
     #: How this element is realised in a SPICE netlist.
     #: ``primitive`` - a native R/C/L device;
     #: ``rc`` - a passive RC ladder (capacitive fractional elements);
@@ -124,6 +121,27 @@ class Element(ABC):
     @property
     def n_params(self) -> int:
         return len(self.params)
+
+    @property
+    def complexity(self) -> float:
+        """Structural cost used by the topology search: identically this element's `n_params`.
+
+        [measured, docs/PARAM_BUDGET_PLAN.md section 7, 2026-09-12] Four elements (W, CPE,
+        SKINF, SKINW) used to carry a surcharge above their own parameter count, on the theory
+        that "elements which can absorb a lot of unexplained behaviour are deliberately
+        expensive" -- a theory HN's own value (4.0, no surcharge at all) already contradicted.
+        The surcharge earned nothing it was measured against: an arm A (with the surcharge) /
+        arm B (`complexity = n_params`) comparison tied exactly on every cell it could move --
+        `by_criterion_overfits` and `recommended_correct` identical on all 12
+        `criterion_selection.py` negative-control cells, `reported`/`on_front`/`recommended`
+        identical on all 9 `six_plus/param_dense_truths.py` cells -- so the pre-registered rule
+        ("ships only if arm A wins outright") collapsed it to this identity rather than keep an
+        unmeasured constant. :class:`~autocircuit.core.circuit.Circuit.complexity` stays a named
+        property in its own right (not simply read as `n_params` everywhere it is used) so there
+        is one place to reintroduce a weighting later, should a future measurement find one that
+        earns itself.
+        """
+        return float(self.n_params)
 
     @abstractmethod
     def impedance(self, omega: Float, values: Float) -> Complex:
@@ -164,7 +182,6 @@ class Resistor(Element):
     code = "R"
     name = "Resistor"
     params = (ParamSpec("R", "ohm", True, *_R_LIMITS),)
-    complexity = 1.0
     spice_form = "primitive"
     dc_exponent = (0.0, 0.0)
     hf_exponent = (0.0, 0.0)
@@ -180,7 +197,6 @@ class Capacitor(Element):
     code = "C"
     name = "Capacitor"
     params = (ParamSpec("C", "F", True, *_C_LIMITS),)
-    complexity = 1.0
     spice_form = "primitive"
     dc_exponent = (-1.0, -1.0)
     hf_exponent = (-1.0, -1.0)
@@ -196,7 +212,6 @@ class Inductor(Element):
     code = "L"
     name = "Inductor"
     params = (ParamSpec("L", "H", True, *_L_LIMITS),)
-    complexity = 1.0
     spice_form = "primitive"
     dc_exponent = (1.0, 1.0)
     hf_exponent = (1.0, 1.0)
@@ -217,7 +232,6 @@ class ConstantPhaseElement(Element):
         ParamSpec("Q", "S*s^n", True, 1e-18, 1e6),
         ParamSpec("n", "-", False, *_EXP_LIMITS),
     )
-    complexity = 2.5
     # |Z| ~ omega^-n with n over its hard limits, at both ends.
     dc_exponent = (-_EXP_LIMITS[1], -_EXP_LIMITS[0])
     hf_exponent = (-_EXP_LIMITS[1], -_EXP_LIMITS[0])
@@ -242,7 +256,6 @@ class Warburg(Element):
     code = "W"
     name = "Warburg (semi-infinite)"
     params = (ParamSpec("A", "ohm*s^-0.5", True, 1e-9, 1e15),)
-    complexity = 1.5
     dc_exponent = (-0.5, -0.5)
     hf_exponent = (-0.5, -0.5)
 
@@ -264,7 +277,6 @@ class WarburgShort(Element):
         ParamSpec("R", "ohm", True, *_R_LIMITS),
         ParamSpec("tau", "s", True, *_TAU_LIMITS),
     )
-    complexity = 2.0
     # tanh(x)/x -> 1 as x -> 0, so Z -> R; at high frequency tanh -> 1 and Z -> R/sqrt(j w t).
     dc_exponent = (0.0, 0.0)
     hf_exponent = (-0.5, -0.5)
@@ -286,7 +298,6 @@ class WarburgOpen(Element):
         ParamSpec("R", "ohm", True, *_R_LIMITS),
         ParamSpec("tau", "s", True, *_TAU_LIMITS),
     )
-    complexity = 2.0
     # coth(x)/x ~ 1/x^2 as x -> 0, so Z ~ R/(j w tau): capacitive at DC, 45 degrees at HF.
     dc_exponent = (-1.0, -1.0)
     hf_exponent = (-0.5, -0.5)
@@ -308,7 +319,6 @@ class Gerischer(Element):
         ParamSpec("R", "ohm", True, *_R_LIMITS),
         ParamSpec("tau", "s", True, *_TAU_LIMITS),
     )
-    complexity = 2.0
     dc_exponent = (0.0, 0.0)
     hf_exponent = (-0.5, -0.5)
 
@@ -329,7 +339,6 @@ class ColeCole(Element):
         ParamSpec("tau", "s", True, *_TAU_LIMITS),
         ParamSpec("alpha", "-", False, *_EXP_LIMITS),
     )
-    complexity = 3.0
     # Resistive plateau at DC; |Z| ~ omega^-alpha once (j w tau)^alpha dominates.
     dc_exponent = (0.0, 0.0)
     hf_exponent = (-_EXP_LIMITS[1], -_EXP_LIMITS[0])
@@ -356,7 +365,6 @@ class HavriliakNegami(Element):
         ParamSpec("alpha", "-", False, *_EXP_LIMITS),
         ParamSpec("beta", "-", False, *_EXP_LIMITS),
     )
-    complexity = 4.0
     # High-frequency slope is -alpha*beta, so the extremes are the products of the limits.
     dc_exponent = (0.0, 0.0)
     hf_exponent = (-_EXP_LIMITS[1] * _EXP_LIMITS[1], -_EXP_LIMITS[0] * _EXP_LIMITS[0])
@@ -387,7 +395,6 @@ class SkinFractional(Element):
         ParamSpec("A", "ohm*s^n", True, 1e-15, 1e12),
         ParamSpec("n", "-", False, 0.05, 0.95),
     )
-    complexity = 2.5
     spice_form = "rl"
     # |Z| ~ omega^n, inductive at both ends over the whole allowed exponent range.
     dc_exponent = (0.05, 0.95)
@@ -422,7 +429,6 @@ class SkinRoundWire(Element):
         ParamSpec("Rdc", "ohm", True, *_R_LIMITS),
         ParamSpec("tau_s", "s", True, *_TAU_LIMITS),
     )
-    complexity = 3.0
     spice_form = "rl"
     # DC limit is the plain R_dc; the high-frequency limit is the sqrt(f) skin asymptote.
     dc_exponent = (0.0, 0.0)

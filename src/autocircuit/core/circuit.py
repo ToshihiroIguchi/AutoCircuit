@@ -151,7 +151,16 @@ class Circuit:
 
     @property
     def complexity(self) -> float:
-        """Structural cost used to rank candidates in the topology search."""
+        """Structural cost used to rank candidates in the topology search.
+
+        [measured, docs/PARAM_BUDGET_PLAN.md section 7, 2026-09-12] Identically :attr:`n_params`
+        under today's element weights: every :class:`~autocircuit.core.elements.Element` charges
+        its own parameter count and nothing more, after a per-element surcharge on four elements
+        (W, CPE, SKINF, SKINW) was measured and found to earn nothing it was tested against. Kept
+        as its own named property rather than folded into `n_params` everywhere it is used, so a
+        future weighting has one place to be reintroduced if a measurement ever justifies one --
+        see :attr:`~autocircuit.core.elements.Element.complexity` for the measurement.
+        """
         return float(sum(el.complexity for _, el in self._specs))
 
     def param_specs(self) -> list[elements.ParamSpec]:
