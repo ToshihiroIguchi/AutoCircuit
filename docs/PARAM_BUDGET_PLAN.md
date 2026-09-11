@@ -639,7 +639,7 @@ Each phase names, in advance, what would make it not ship.
    caught the last shortlist bug while 744 tests passed). *Null rule:* any failure reverts to
    `n_elements`. `recovery.py` (X4) is explicitly not a gate here — its nine truths are `R,C,L`
    only, so the three axes coincide and the check would be vacuous.
-   **[shipped, code and cheap gates 2026-09-11; G1/Q1/Q3's full-cost runs still pending.]**
+   **[shipped, all gates measured 2026-09-11.]**
    `Ranked.n_elements` → `Ranked.n_params`; `_shortlist`/`_shortlist_candidates`/`_refit_order`
    re-keyed; `_quota_by_size` kept its name (renaming would have touched a large number of
    historical `docs/` entries that describe what happened at the time, for no behavioural
@@ -682,9 +682,50 @@ Each phase names, in advance, what would make it not ship.
    (Maxwell-Wagner 39→35, Randles 39→37) and up on the widest pool (capacitor 37→40), with the
    "only-before" sets dominated by CPE-pair topologies (`CPE1-CPE2`, `p(CPE1,CPE2)`, ...) giving
    way to "only-after" sets of more parameter-diverse ones. This mini-arena spot check (4-element
-   cap, not the full 5-element G1) is not gate G1 itself — the full-cost `discovery_v2.py gate`
-   run and `criterion_selection.py`'s Q1/Q3 slice are still pending, per the staged order of work
-   agreed with the user — but it is a favourable, structurally-consistent early read.
+   cap, not the full 5-element G1) is not gate G1 itself, and the full-cost gates below confirm
+   what it predicted.
+
+   **G1, full run** (`discovery_v2.py gate --seeds 2 --limit 5 --workers 8`, before/after in an
+   isolated `git worktree`, run sequentially after two concurrent-worktree attempts crashed with
+   a Windows `multiprocessing` handle error — `WinError 5`, from two 8-worker pools spawning at
+   once on a 12-core machine, an environment artifact rather than a code defect): **6/6 on every
+   axis, before and after** — `reported`, `on_front` and `recommended` all `True` on all three
+   `REFERENCES` × 2 seeds, `n_evaluated` unchanged (6,598 / 2,581 / 3,713, confirming the
+   enumeration itself is untouched), and **the recommended circuit string is byte-identical on
+   every one of the six cells** (`R1-C1-L1-SKINF1` × 2; `p(p(R1,C1)-C2,R2)` /
+   `p(p(R1,C1)-R2,C2)` across the two seeds, same both before and after; `p(R1-W1,C1)-R2` × 2).
+   Wall-clock is real but secondary: the capacitor reference (the widest pool, CPE and SKINF
+   both present) runs 1.28× slower under the re-key (mean 5.5 min against 4.3 min), Maxwell-Wagner
+   1.8× and Randles 1.33× — higher than the 1.03–1.22× *shortlist-size* multiplier §6.2's replay
+   predicted, because wall-clock also reflects which candidates are refitted, not only how many;
+   recorded as the real cost rather than reconciled to the structural estimate.
+
+   **Q1/Q3** (`criterion_selection.py --only ref_capacitor,ref_mw,ref_randles,par5,ser5,mix5
+   --criteria aic,bic --seeds 2 --noise 0.01 --ppd 10`, 24 cells, before/after, ~43–53 min each):
+
+   | criterion | recovered | recommended_correct | by_criterion_disagrees | by_criterion_overfits |
+   |---|---|---|---|---|
+   | aic, before | 100.0% (12/12) | 91.7% (11/12) | 83.3% (10/12) | 83.3% (10/12) |
+   | aic, after  | 100.0% (12/12) | 91.7% (11/12) | 75.0% (9/12)  | 75.0% (9/12) |
+   | bic, before | 100.0% (12/12) | 91.7% (11/12) | 8.3% (1/12)   | 8.3% (1/12) |
+   | bic, after  | 100.0% (12/12) | 91.7% (11/12) | 8.3% (1/12)   | 8.3% (1/12) |
+
+   Q1 holds (`recovered` unfallen at 100% both criteria) and Q3 holds (`by_criterion_overfits`
+   not risen — aic actually *falls*, bic unchanged). Read cell by cell rather than trusting the
+   pooled rate, per this project's own convention: **23 of 24 cells are identical on every
+   field including the exact `recommended_circuit` string; the one cell that differs**
+   (`six_plus/par5` seed 0, criterion `aic`) flips `by_criterion_disagrees`/
+   `by_criterion_overfits` from `True` to `False` — the secondary `by_criterion` line, which
+   depends on exactly which candidates the re-keyed shortlist hands to tier 2 and is documented
+   (§6.6) as legitimately free to move — while `recommended` on that same cell is untouched.
+   `recommended_circuit` differs on **zero** of the 24 cells.
+
+   All of §6's stated gates are satisfied; nothing reverted.
+   **§6.6's record**: `docs/CRITERION_SELECTION_PLAN.md` §1's scoping premise — that the
+   criterion used to rank tier-1→tier-2 promotion could change which topologies survive — is
+   voided under this key by the tier-1 inertness corollary above, and its §2(a) mechanism (same
+   element count, different parameter count, different criterion ranking) no longer applies to
+   the *shortlist*; that document is updated accordingly in the same commit as this entry.
 7. **§7's surcharge measurement.** Independent. Arm B must clear the `best_cost` fingerprint
    first.
 8. **Move the default and the user-facing knob.** Only if 3, 4 and 5 all passed — **item 3 has
