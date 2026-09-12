@@ -1029,17 +1029,40 @@ static-site Web UI running the same core via WASM (Pyodide).
 23. `docs/EVOLVE_COMPUTE_SKIP_PLAN.md` — what the genetic fallback already skips (a persistent
     best-wins canonical-form cache, propose-until-unique breeding dedup, two-tier screening, and
     warm-start inheritance with a "close enough" skip — but no early-abandon in tier 1, unlike the
-    exhaustive path), and four proposed additions. **Written 2026-09-12; the early-abandon
-    extension (§3.2) was built, measured, and reverted the same week; the cheap proxy count (§3.4)
-    ran 2026-09-12; idea 2c integration (§3.1) and the dispatch-order proxy (§3.3, which depends on
-    §3.1) are still plan-only** — §3.1 needs a genuine architecture change to `_evolve`'s
-    dispatch/population model (parent selection moved from a generation boundary to proposal time)
-    that was deliberately scoped out of the same session as the other three items rather than
-    attempted under time pressure. Idea 2c's underlying mechanism is nonetheless the strongest,
-    cheapest candidate once attempted: it already measured a 33.6% dispatch-mechanism speedup from
-    replacing a generation's synchronous `executor.map` barrier with continuous dispatch, in
-    isolation (`docs/SEARCH_SPEEDUP_PLAN.md`), but never inside `_evolve`'s real population/
-    selection loop. **§3.2 [measured, 2026-09-12]**: `fit()` gained an `abandon_above` parameter
+    exhaustive path), and four proposed additions. **Written 2026-09-12; §3.1 (idea 2c
+    integration) built, measured and shipped 2026-09-13 -- the broad, steady-state scope; §3.2
+    built, measured and reverted 2026-09-12; §3.4's cheap proxy count also ran 2026-09-12; §3.3
+    still plan-only.** **§3.1 [measured, shipped, 2026-09-13]**: `evolve_plan` is now a true
+    steady-state (overlapping-generation) proposer rather than a discrete-generation loop --
+    parent selection at proposal time against a live-updated archive, not at a fixed generation
+    boundary, which is what `docs/SEARCH_SPEEDUP_PLAN.md`'s own idea 2c write-up said the real win
+    needed. A new `_SteadyState` class proposes one individual at a time (elite repeats first,
+    against the *true* `population`'s own quota rather than a dispatch window's width, then
+    tournament-bred children via `_propose_child`, factored out of `_next_generation`'s own body
+    so both share one implementation, verified behaviour-preserving before anything else changed);
+    `evolve_plan`'s protocol became a **sliding window** (`EvolveBatch.tasks:
+    list[_EvolveTask | None]`, a fixed-length window continuously refilled slot-by-slot as
+    outcomes return) rather than a whole-generation batch. Both gates passed decisively:
+    **`workers=1` byte-identity held exactly** (four real `discover(mode="evolve")` configurations,
+    compared field-for-field including the full candidate list, against the unmodified code in a
+    disposable `git worktree`), the 480-seed McNemar quality gate found no hit-rate drop on either
+    frozen arena (`land_rcl6.json` 245/480 vs 247/480, p = 0.9007; `land_series_rcl6.json` 253/480
+    vs 254/480, p = 1.0000), and the `workers=8`/300s throughput gate **roughly doubled**
+    `n_evaluated` on both truths (`par6` 1366 → 2835, `ser6` 1095 → 2310) against the post-T4
+    baseline. The CLI driver moved to `concurrent.futures.ProcessPoolExecutor` +
+    `wait(FIRST_COMPLETED)`; the browser gained an `evolve_chunk` constructor parameter (default
+    `REFIT_CHUNK`) so it dispatches its own worker-pool width instead of exactly one offspring at a
+    time regardless of how many Web Workers it has -- four JS/Python test drivers that unpacked
+    every window slot unconditionally needed the same one-line fix (skip a `None` slot, report
+    `None` back). Full suite green: `pytest` 1125 passed/19 skipped/0 failed (one test that spied
+    on `_next_generation` directly was updated to spy on `_breeding_pool` instead, since the
+    steady-state path no longer calls `_next_generation` at all), `mypy --strict`/`ruff` clean,
+    `npm run check`/`npm run smoke` clean including the browser's own genetic-fallback check at
+    its new default width. `_next_generation` itself is untouched and still real, shipped code for
+    every other caller. Idea 2c's underlying dispatch-mechanism speedup was already measured in
+    isolation before this: 33.6% from replacing a generation's synchronous `executor.map` barrier
+    with continuous dispatch (`docs/SEARCH_SPEEDUP_PLAN.md`), never inside the real loop until now.
+    **§3.2 [measured, 2026-09-12]**: `fit()` gained an `abandon_above` parameter
     mirroring `screen()`'s own (an abandoned candidate keeps a real, finite-AICc `FitResult`, its
     Jacobian from a cheap finite difference, rather than a degenerate one), wired into
     `_evolve_one`'s search-stage call at `ABANDON_FACTOR * reference`. Correctness held at reduced

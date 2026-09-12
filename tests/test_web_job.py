@@ -118,18 +118,24 @@ class Driver:
             ]
 
     def evolve(self) -> None:
-        """Run the genetic fallback's own tier 1, one offspring per round trip.
+        """Run the genetic fallback's own tier 1, a sliding window of offspring at a time.
 
         Mirrors what ``web/src/core/search.ts`` drives through ``client.evolveTask`` -- a
-        batch of tasks out, one wire-form ``(polish, search)`` outcome per task back in.
+        window of tasks out, one wire-form ``(polish, search)`` outcome per non-empty slot
+        back in. A slot is ``None`` when there is nothing left to propose for it (the search
+        is winding down); it is dispatched to nobody and reported back as ``None`` too, exactly
+        what ``evolve_plan``'s own sliding-window protocol expects for an empty slot.
         """
-        outcomes: list[list[Any]] | None = None
+        outcomes: list[list[Any] | None] | None = None
         while True:
             step = _call("discover_evolve", job=self.id, outcomes=outcomes)
             if step["tasks"] is None:
                 return
             outcomes = []
             for task in step["tasks"]:
+                if task is None:
+                    outcomes.append(None)
+                    continue
                 result = _call("evolve_task", spectrum=self.wire, task=task)
                 outcomes.append([result["polish"], result["search"]])
 
@@ -1130,6 +1136,12 @@ def test_the_genetic_fallback_in_the_browser_matches_discover_mode_auto() -> Non
         pool=["R", "C"],
         exhaustive_limit=3,
         screen_chunk=1,
+        # `evolve_chunk=1` matches the reference's own default `workers=1` below: the sliding
+        # window's width changes which offspring see which others' outcomes before they
+        # themselves are proposed (`docs/EVOLVE_COMPUTE_SKIP_PLAN.md` section 3.1), so an
+        # exact field-for-field match needs the same width on both sides, the same way the CLI's
+        # own `workers=1` and `workers>1` are not expected to agree candidate-for-candidate.
+        evolve_chunk=1,
         seed=0,
         generations=3,
         population=6,

@@ -475,11 +475,14 @@ export type EvolveTaskWire = [
 /** One offspring's outcome: its polish, its search, either the fit's wire form or null. */
 export type EvolveOutcomeWire = [FitResultWire | null, FitResultWire | null];
 
-/** A batch of the genetic fallback's own tier-1 work. `tasks` is null when it is done, at
- *  which point the search's tier 2 answers from `discover_refit` again, on the fallback's own
- *  shortlist. */
+/** A batch of the genetic fallback's own tier-1 work: a fixed-length sliding window, not a
+ *  whole generation (`evolve_plan`'s own docstring has the full protocol). `tasks` is null
+ *  when the fallback is done, at which point the search's tier 2 answers from `discover_refit`
+ *  again, on the fallback's own shortlist. A slot inside a non-null `tasks` is null when there
+ *  is nothing left to propose for it -- dispatch nothing there, and report that slot's outcome
+ *  back as null too. */
 export interface EvolveStepWire {
-  tasks: EvolveTaskWire[] | null;
+  tasks: (EvolveTaskWire | null)[] | null;
   /** The fallback's own progress counter: a generation is the only honest denominator this
    *  stage has, mirroring `core.discover._evolve`'s `on_progress` calls on the command line. */
   generation: number;

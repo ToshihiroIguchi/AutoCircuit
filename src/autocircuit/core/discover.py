@@ -23,6 +23,7 @@ et al., J. Electrochem. Soc. 170, 086502, 2023).
 
 from __future__ import annotations
 
+import concurrent.futures
 import contextlib
 import csv
 import io
@@ -1831,6 +1832,19 @@ _EvolveTask = tuple[
     str, int, "dict[str, float] | None", "float | None", float, bool, int, int, int, float
 ]
 
+#: What `_evolve_one`/`_evolve_polish_then_search_worker` return for one task: a
+#: `(polish, search)` pair of wire-form `FitResult`s, either of which may be `None`.
+type _EvolveOutcome = tuple[dict[str, Any] | None, dict[str, Any] | None]
+
+
+class _WindowSlot(NamedTuple):
+    """One slot of :func:`evolve_plan`'s sliding dispatch window: what was proposed, and the
+    task built from it. Paired so a later outcome can be merged back against the exact
+    :class:`_Prepared` it belongs to, by index, without re-deriving it."""
+
+    prepared: _Prepared
+    task: _EvolveTask
+
 
 def _evolve_one(
     task: _EvolveTask,
@@ -2631,28 +2645,125 @@ def _is_underfitted(candidates: Sequence[Candidate]) -> bool:
 
 
 class EvolveBatch(NamedTuple):
-    """One window of offspring to evaluate, and every candidate scored before it.
+    """The current sliding dispatch window, and every candidate scored before this yield.
 
-    Mirrors :class:`RefitBatch`'s shape and for the same reason: a caller that stops early --
-    out of time, or cancelled from a browser -- can report exactly what ``scored`` already
-    holds, without needing the generator to run to completion to learn it. A generation is never
-    reported as finished until every one of its windows has been sent back: ``generation`` only
-    changes on the first window of the next one, so a caller deciding whether to keep going can
-    do it exactly where :func:`_evolve` always has -- between generations, never inside one.
+    Unlike a discrete-generation batch, ``tasks`` is a **fixed-length window** (length
+    ``item_chunk``) that stays open across many yields: a slot holds ``None`` once there is
+    nothing left to propose for it (the search is winding down), and otherwise always holds the
+    task currently assigned to it -- unchanged across a yield if the caller has not yet reported
+    that slot's outcome, replaced with a fresh one the instant the caller does. This is what
+    lets several offspring be genuinely in flight at once without ever waiting for the slowest
+    of them before proposing the next: :func:`evolve_plan`'s docstring explains the protocol,
+    and see ``docs/EVOLVE_COMPUTE_SKIP_PLAN.md`` section 3.1 for why (idea 2c: continuous rather
+    than fixed-batch dispatch, integrated into the real search rather than measured only in
+    isolation). ``generation`` is a *virtual* generation -- population-many proposals handed
+    out, not necessarily completed -- kept under the same name because every existing reader
+    (``on_progress``, :attr:`DiscoveryResult.generations`, ``_with_evolve_note``) needs nothing
+    else to stay correct.
     """
 
-    tasks: list[_EvolveTask]
+    tasks: list[_EvolveTask | None]
     scored: list[Candidate]
     generation: int
     cache_size: int
 
 
 class EvolvePlanResult(NamedTuple):
-    """What :func:`evolve_plan` returns once its generation loop ends."""
+    """What :func:`evolve_plan` returns once its proposal budget is exhausted."""
 
     scored: list[Candidate]
     cache_size: int
     generations_run: int
+
+
+@dataclass
+class _SteadyState:
+    """Continuous proposal state for :func:`evolve_plan`'s sliding window.
+
+    Where :func:`_next_generation` proposes a whole ``population``-sized batch from a *frozen*
+    parent set, this proposes one individual at a time from whatever is in ``scored`` *right
+    now* -- parent selection at proposal time rather than at a fixed generation boundary, which
+    is the population-model change ``docs/SEARCH_SPEEDUP_PLAN.md``'s idea 2c write-up says the
+    real win requires. A **virtual generation** is exactly ``population`` proposals handed out;
+    the Pareto front used to select elites and parents is recomputed once per virtual
+    generation, from :func:`_unique_best`/:func:`_breeding_pool` over ``scored`` as it stands at
+    that moment -- which may not yet include every member of the *previous* virtual generation,
+    since dispatch never waits for stragglers. That is a real, disclosed change from
+    :func:`_next_generation`'s own semantics (there, the next generation always sees every one
+    of the last), and it is exactly what the quality gate in ``docs/EVOLVE_COMPUTE_SKIP_PLAN.md``
+    section 3.1 exists to check.
+
+    The elite quota (``max(2, population // 6)``, :func:`_next_generation`'s own fraction) is
+    spent against the *true* ``population``, never against a dispatch window's width -- sizing it
+    against ``item_chunk`` instead would silently inflate the elite fraction in a small window,
+    the pitfall this plan's own design phase already named.
+    """
+
+    rng: np.random.Generator
+    pool: tuple[str, ...]
+    max_elements: int
+    min_elements: int
+    population: int
+    criterion: Criterion
+    weights: Sequence[float]
+    #: Consumed first, in order -- the same seeded-then-random initial population
+    #: :func:`evolve_plan` has always built. Virtual generation 0 covers exactly these.
+    initial: list[_Offspring]
+    #: Virtual generations whose proposal quota has been fully handed out. Starts at 0 (the
+    #: initial population is generation 0, matching :func:`evolve_plan`'s historical numbering
+    #: exactly) and is bumped by :meth:`_start_vgen` the instant the *next* population-sized
+    #: quota is needed.
+    vgen: int = field(default=0, init=False)
+    _proposals_this_vgen: int = field(default=0, init=False)
+    _alive: list[Candidate] = field(default_factory=list, init=False)
+    _front: list[Candidate] = field(default_factory=list, init=False)
+    _elite_queue: list[Candidate] = field(default_factory=list, init=False)
+    _frequencies: dict[float, float] | None = field(default=None, init=False)
+    _seen: set[str] = field(default_factory=set, init=False)
+
+    def _start_vgen(self, cache: dict[str, Candidate | None], scored: Sequence[Candidate]) -> None:
+        self._alive = _unique_best(scored, self.criterion)
+        self._front = _breeding_pool(self._alive, criterion=self.criterion)
+        self._elite_queue = list(self._front[: max(2, self.population // 6)])
+        # Same short-circuit as `evolve_plan`'s own `if PARSIMONY_SCALING` check -- computed
+        # only when it can change something.
+        self._frequencies = _complexity_frequencies(self._alive) if PARSIMONY_SCALING else None
+        self._seen = set(cache.keys())
+        self._proposals_this_vgen = 0
+        self.vgen += 1
+
+    def propose(
+        self, cache: dict[str, Candidate | None], scored: Sequence[Candidate]
+    ) -> _Offspring:
+        """One tree to evaluate next."""
+        if self.initial:
+            self._proposals_this_vgen += 1
+            return self.initial.pop(0)
+        if self._proposals_this_vgen >= self.population:
+            self._start_vgen(cache, scored)
+        self._proposals_this_vgen += 1
+        if not self._front:
+            # Mirrors `evolve_plan`'s own historical fallback when nothing has fitted yet at
+            # all: breed from nothing, seed a fresh random individual instead.
+            n = int(self.rng.integers(self.min_elements, self.max_elements + 1))
+            return (random_topology(self.rng, self.pool, n), None)
+        if self._elite_queue:
+            candidate = self._elite_queue.pop(0)
+            return (candidate.circuit.root, candidate)
+        offspring: _Offspring | None = None
+        while offspring is None:
+            offspring = _propose_child(
+                self._front,
+                self.rng,
+                self.pool,
+                self.max_elements,
+                self.criterion,
+                frequencies=self._frequencies,
+                parsimony=PARSIMONY_SCALING,
+                weights=self.weights,
+                seen=self._seen,
+            )
+        return offspring
 
 
 def evolve_plan(
@@ -2672,35 +2783,39 @@ def evolve_plan(
     criterion: Criterion = DEFAULT_CRITERION,
     item_chunk: int = 1,
 ) -> Generator[
-    EvolveBatch, Sequence[tuple[dict[str, Any] | None, dict[str, Any] | None]], EvolvePlanResult
+    EvolveBatch,
+    Sequence[_EvolveOutcome | None],
+    EvolvePlanResult,
 ]:
     """The genetic search's tier 1, with the *running* of it left to the caller.
 
     Same inversion as :func:`screen_plan`, and no ``spectrum`` for the same reason that function
-    takes none: fitting is the caller's job, not this generator's. It yields a window of
-    offspring to evaluate and expects each one's ``(polish, search)`` wire-form outcome -- what
-    :func:`_evolve_one` returns -- back through ``send``. Every decision that has to be made
-    *between* windows lives here: whether a topology needs a fresh fit at all, what warm start to
-    offer it, and (once a generation finishes) how to breed the next one. In-process this is
-    driven by :func:`_evolve`; in a browser it is driven the same way exhaustive search already
-    is, and neither gets to hold its own opinion about any of that.
+    takes none: fitting is the caller's job, not this generator's.
 
-    ``item_chunk`` controls how many offspring are grouped into one window, which is also how
-    often the cache and the per-complexity best cost are allowed to go stale *within* a single
-    generation:
+    **Steady-state protocol.** This yields a fixed-length sliding window (``EvolveBatch.tasks``,
+    length ``item_chunk``) rather than a whole generation. A slot is ``None`` once there is
+    nothing left to propose (the proposal budget is exhausted and the slot has nothing more to
+    give); otherwise it holds whatever task is currently assigned there. ``send()`` back a
+    same-length sequence where a slot is ``None`` if that task has not completed yet -- leave it
+    alone, it stays assigned -- or its ``(polish, search)`` wire-form outcome (what
+    :func:`_evolve_one` returns) if it has. Every newly-reported outcome is merged immediately
+    and its slot is refilled with a fresh proposal (or left ``None`` if nothing remains to
+    propose), and the updated window is yielded straight back. This lets ``item_chunk`` offspring
+    be genuinely in flight at once -- the caller holds up to that many futures outstanding and
+    only ever reports the ones that have actually finished -- without the generator itself ever
+    doing anything but strictly sequential bookkeeping between one reported outcome and the next.
 
-    * ``item_chunk=1`` reproduces the fully sequential evaluation this search has always used
-      single-process -- every offspring judged against the cache and best cost exactly as
-      updated by everything evaluated before it, this generation included.
-    * ``item_chunk`` at least ``population`` reproduces the whole-generation batch a
-      :class:`multiprocessing.pool.Pool` dispatch has always used, where every offspring in a
-      generation reads the cache and best cost as of the *start* of that generation -- the
-      staleness :meth:`_Evaluator.evaluate_all`'s executor branch already documents and
-      :func:`_screen_parallel` already accepts for tier 1's screen.
+    * ``item_chunk=1`` is the fully sequential case: exactly one slot, always resolved before the
+      next is proposed, which reproduces this search's original one-topology-at-a-time
+      behaviour byte-for-byte (there is never a "still pending" slot to distinguish).
+    * ``item_chunk>1`` is what a caller with a process pool or a browser's worker pool uses to
+      keep several offspring in flight, refilling each one as it completes rather than waiting
+      for the whole window. See :class:`_SteadyState` for the population-model change this
+      makes possible: parent selection at proposal time, not at a fixed generation boundary.
 
-    Neither choice is decided here, for the same reason it is not decided in :func:`screen_plan`:
-    whoever runs the fits -- one process, a pool of them, or a browser's Web Workers -- is the
-    only party that knows what it can parallelise.
+    In-process this is driven by :func:`_evolve`; in a browser it is driven the same way
+    exhaustive search already is, and neither gets to hold its own opinion about the window
+    width -- whoever runs the fits is the only party that knows what it can parallelise.
     """
     rng = np.random.default_rng(seed)
     cache: dict[str, Candidate | None] = {}
@@ -2709,115 +2824,112 @@ def evolve_plan(
 
     # The initial population has no parents: seeds come from the caller and the rest is random,
     # so every one of these is fitted by the global stage. That is also what fills ``best_cost``,
-    # which the warm starts are later judged against.
-    trees: list[_Offspring] = []
+    # which the warm starts are later judged against. Unchanged from this search's original
+    # construction -- only how it is *consumed* (one at a time, via `_SteadyState`) is new.
+    initial: list[_Offspring] = []
     for text in seeds or ():
-        trees.append((Circuit.parse(text).root, None))
-    while len(trees) < population:
+        initial.append((Circuit.parse(text).root, None))
+    while len(initial) < population:
         n = int(rng.integers(min_elements, max_elements + 1))
-        trees.append((random_topology(rng, pool, n), None))
+        initial.append((random_topology(rng, pool, n), None))
 
-    generation = 0
-    for generation in range(generations):
-        step = max(item_chunk, 1)
-        for start in range(0, len(trees), step):
-            window = trees[start : start + step]
-            prepared: list[_Prepared | None] = []
-            for node, parent in window:
-                try:
-                    circuit = Circuit(simplify(node))
-                except CircuitError:
-                    prepared.append(None)
-                    continue
-                key = circuit.canonical_form()
-                seen = key in cache
-                known = cache.get(key)
-                if seen and known is None:
-                    prepared.append(None)
-                    continue
-                if not seen and not is_plausible(circuit):
-                    cache[key] = None
-                    prepared.append(None)
-                    continue
-                warm = _warm_start_for(parent, circuit, known, warm_accept)
-                prepared.append(_Prepared(circuit, key, seen, known, warm))
+    state = _SteadyState(
+        rng=rng,
+        pool=pool,
+        max_elements=max_elements,
+        min_elements=min_elements,
+        population=population,
+        criterion=criterion,
+        weights=MUTATION_WEIGHTS,
+        initial=initial,
+    )
 
-            indices: list[int] = []
-            tasks: list[_EvolveTask] = []
-            for i, p in enumerate(prepared):
-                if p is None:
-                    continue
-                need_search = not p.seen
-                if p.warm is None and not need_search:
-                    continue
-                reference = best_cost.get(p.circuit.complexity)
-                indices.append(i)
-                tasks.append(
-                    (
-                        p.circuit.to_string(),
-                        seed,
-                        p.warm,
-                        reference,
-                        warm_accept,
-                        need_search,
-                        search_restarts,
-                        search_popsize,
-                        search_maxiter,
-                        search_tol,
-                    )
-                )
+    #: Total proposals across the whole run -- the same total work `generations * population`
+    #: has always meant, now spent continuously instead of one population-sized batch at a time.
+    max_proposals = generations * population
+    proposed = 0
 
-            outcomes: dict[int, tuple[Candidate | None, Candidate | None]] = {}
-            if tasks:
-                sent = yield EvolveBatch(tasks, list(scored), generation, len(cache))
-                for i, (polish_wire, search_wire) in zip(indices, sent, strict=True):
-                    p = prepared[i]
-                    assert p is not None
-                    outcomes[i] = (
-                        None
-                        if polish_wire is None
-                        else Candidate(p.circuit, FitResult.from_wire(polish_wire), generation),
-                        None
-                        if search_wire is None
-                        else Candidate(p.circuit, FitResult.from_wire(search_wire), generation),
-                    )
+    def _next_slot() -> _WindowSlot | None:
+        nonlocal proposed
+        while proposed < max_proposals:
+            node, parent = state.propose(cache, scored)
+            proposed += 1
+            try:
+                circuit = Circuit(simplify(node))
+            except CircuitError:
+                continue
+            key = circuit.canonical_form()
+            seen = key in cache
+            known = cache.get(key)
+            if seen and known is None:
+                continue
+            if not seen and not is_plausible(circuit):
+                cache[key] = None
+                continue
+            warm = _warm_start_for(parent, circuit, known, warm_accept)
+            need_search = not seen
+            if warm is None and not need_search:
+                continue
+            reference = best_cost.get(circuit.complexity)
+            task: _EvolveTask = (
+                circuit.to_string(),
+                seed,
+                warm,
+                reference,
+                warm_accept,
+                need_search,
+                search_restarts,
+                search_popsize,
+                search_maxiter,
+                search_tol,
+            )
+            return _WindowSlot(_Prepared(circuit, key, seen, known, warm), task)
+        return None
 
-            for i, p in enumerate(prepared):
-                if p is None:
-                    continue
-                polished, searched = outcomes.get(i, (None, None))
-                best = _cheaper(_cheaper(polished, searched), p.known)
-                cache[p.key] = best
-                if best is not None:
-                    cost = _fit_cost(best.result)
-                    if cost < best_cost.get(best.complexity, math.inf):
-                        best_cost[best.complexity] = cost
-                    scored.append(best)
-
-        alive = _unique_best(scored, criterion)
-        if not alive:
-            trees = []
-            for _ in range(population):
-                size = int(rng.integers(min_elements, max_elements + 1))
-                trees.append((random_topology(rng, pool, size), None))
-            continue
-
-        trees = _next_generation(
-            _breeding_pool(alive, criterion=criterion),
-            rng,
-            pool,
-            max_elements,
-            population,
-            criterion,
-            # Crowding is a property of the whole archive, not of the front the pool is
-            # (:func:`_complexity_frequencies`). Computed only when it can change something:
-            # the default scaling is zero and the count would otherwise walk the archive once
-            # per generation to be multiplied away.
-            frequencies=(_complexity_frequencies(alive) if PARSIMONY_SCALING else None),
-            known=cache.keys(),
+    def _merge(
+        slot: _WindowSlot, outcome: _EvolveOutcome
+    ) -> None:
+        p = slot.prepared
+        polish_wire, search_wire = outcome
+        polished = (
+            None
+            if polish_wire is None
+            else Candidate(p.circuit, FitResult.from_wire(polish_wire), state.vgen)
         )
+        searched = (
+            None
+            if search_wire is None
+            else Candidate(p.circuit, FitResult.from_wire(search_wire), state.vgen)
+        )
+        best = _cheaper(_cheaper(polished, searched), p.known)
+        cache[p.key] = best
+        if best is not None:
+            cost = _fit_cost(best.result)
+            if cost < best_cost.get(best.complexity, math.inf):
+                best_cost[best.complexity] = cost
+            scored.append(best)
 
-    return EvolvePlanResult(scored, len(cache), generation + 1)
+    window: list[_WindowSlot | None] = [_next_slot() for _ in range(max(item_chunk, 1))]
+    while any(window):
+        sent = yield EvolveBatch(
+            [slot.task if slot is not None else None for slot in window],
+            list(scored),
+            state.vgen,
+            len(cache),
+        )
+        for i, (slot, outcome) in enumerate(zip(window, sent, strict=True)):
+            if outcome is None:
+                continue
+            assert slot is not None, "an outcome was reported for a slot that had no task"
+            _merge(slot, outcome)
+            window[i] = _next_slot()
+
+    # `+1`: `state.vgen` is the 0-based index of the *last* virtual generation reached (matching
+    # `EvolveBatch.generation`'s own numbering, which by the same 0-indexing coincidence already
+    # equals "generations completed so far" at every yield -- see `_evolve`'s boundary check).
+    # This mirrors the original loop's own `generation + 1`: a report of "how many generations
+    # ran" is a count, not the last index.
+    return EvolvePlanResult(scored, len(cache), state.vgen + 1)
 
 
 def _best_text(scored: Sequence[Candidate], criterion: Criterion) -> str | None:
@@ -2867,15 +2979,17 @@ def _evolve(
     Tier 1 is driven from :func:`evolve_plan` -- the same generator a browser will eventually
     drive too -- rather than owning the generation loop itself. This function is now a thin
     dispatcher over it, exactly as :func:`_screen_all` is over :func:`screen_plan`: pick a
-    process pool or none, and for each yielded window either ``executor.map`` it or compute it
-    in this process, one topology at a time.
+    process pool or none, and keep its sliding window full -- one task at a time, single
+    process, or up to ``workers`` genuinely in flight at once, each refilled the instant it
+    completes rather than waiting for the rest of the window
+    (``docs/EVOLVE_COMPUTE_SKIP_PLAN.md`` section 3.1).
     """
     # Built unconditionally, exactly as `_exhaustive` builds one shared `FitContext` for its own
     # single-process path -- used only when `executor is None` below; a Pool's own workers build
     # and reuse their own via `_init_worker` regardless.
     context = FitContext.build(spectrum, weighting, None, 3.0)
-    with _worker_pool(workers, spectrum, weighting) as executor:
-        item_chunk = population if executor is not None else 1
+    with _evolve_worker_pool(workers, spectrum, weighting) as executor:
+        item_chunk = workers if executor is not None else 1
         plan = evolve_plan(
             pool=pool,
             generations=generations,
@@ -2899,41 +3013,91 @@ def _evolve(
         try:
             batch = next(plan)
             current_generation = batch.generation
-            while True:
-                # A generation, once begun, always finishes -- exactly as the loop this replaces
-                # always ran a whole `evaluate_all` before checking the clock. The check happens
-                # only where a *new* generation's first window arrives, so ``item_chunk=1``
-                # (many windows per generation) cannot stop mid-generation any more than
-                # ``item_chunk=population`` (one window per generation, where the two checks
-                # already coincide) could.
-                if batch.generation != current_generation:
-                    current_generation = batch.generation
-                    # `batch.scored` is "every candidate scored before this window" -- at a
-                    # generation boundary that is exactly everything the just-finished
-                    # generation produced, so this is the one place in the loop that can report
-                    # a *completed* generation rather than a partial one.
-                    if on_progress is not None:
-                        on_progress(
-                            current_generation, generations, _best_text(batch.scored, criterion)
-                        )
-                    if time_limit is not None and time.perf_counter() - started > time_limit:
-                        scored, cache_size, generations_run = (
-                            batch.scored,
-                            batch.cache_size,
-                            batch.generation,
-                        )
-                        plan.close()
-                        break
-                if executor is not None:
-                    outcomes = list(executor.map(_evolve_polish_then_search_worker, batch.tasks))
-                else:
-                    outcomes = [
-                        _evolve_one(task, spectrum, weighting=weighting, context=context)
-                        for task in batch.tasks
-                    ]
-                batch = plan.send(outcomes)
-        except StopIteration as done:
-            result = done.value
+            if executor is None:
+                # Sequential path: `item_chunk == 1`, so `batch.tasks` always has exactly one
+                # slot. This is strictly one-in-one-out -- nothing is ever "still pending" when
+                # this loop calls back -- so it reproduces this search's original
+                # one-topology-at-a-time behaviour byte-for-byte.
+                while True:
+                    if batch.generation != current_generation:
+                        current_generation = batch.generation
+                        if on_progress is not None:
+                            on_progress(
+                                current_generation,
+                                generations,
+                                _best_text(batch.scored, criterion),
+                            )
+                        if time_limit is not None and time.perf_counter() - started > time_limit:
+                            scored, cache_size, generations_run = (
+                                batch.scored,
+                                batch.cache_size,
+                                batch.generation,
+                            )
+                            plan.close()
+                            break
+                    task = batch.tasks[0]
+                    outcome: _EvolveOutcome | None = (
+                        None
+                        if task is None
+                        else _evolve_one(task, spectrum, weighting=weighting, context=context)
+                    )
+                    batch = plan.send([outcome])
+            else:
+                # Parallel path: keep up to `item_chunk` (= `workers`) futures outstanding at
+                # once, refilling a slot the instant it completes rather than waiting for the
+                # rest of the window -- the barrier idea 2c's own isolated benchmark measured a
+                # 33.6% win from removing (`docs/SEARCH_SPEEDUP_PLAN.md`).
+                futures: dict[int, concurrent.futures.Future[_EvolveOutcome]] = {}
+                for i, task in enumerate(batch.tasks):
+                    if task is not None:
+                        futures[i] = executor.submit(_evolve_polish_then_search_worker, task)
+                while futures:
+                    done, _ = concurrent.futures.wait(
+                        futures.values(), return_when=concurrent.futures.FIRST_COMPLETED
+                    )
+                    outcomes: list[_EvolveOutcome | None] = [None] * len(batch.tasks)
+                    finished: list[int] = []
+                    for i, fut in list(futures.items()):
+                        if fut in done:
+                            outcomes[i] = fut.result()
+                            finished.append(i)
+                            del futures[i]
+                    if batch.generation != current_generation:
+                        current_generation = batch.generation
+                        if on_progress is not None:
+                            on_progress(
+                                current_generation,
+                                generations,
+                                _best_text(batch.scored, criterion),
+                            )
+                        if time_limit is not None and time.perf_counter() - started > time_limit:
+                            # Drain whatever is still in flight -- at most `item_chunk`
+                            # individuals, a strictly smaller overshoot than waiting for up to
+                            # `population` stragglers the way a whole-generation batch would.
+                            concurrent.futures.wait(
+                                futures.values(), return_when=concurrent.futures.ALL_COMPLETED
+                            )
+                            drain: list[_EvolveOutcome | None] = [None] * len(batch.tasks)
+                            for i, fut in futures.items():
+                                drain[i] = fut.result()
+                            futures.clear()
+                            batch = plan.send(drain)
+                            scored, cache_size, generations_run = (
+                                batch.scored,
+                                batch.cache_size,
+                                batch.generation,
+                            )
+                            plan.close()
+                            break
+                    batch = plan.send(outcomes)
+                    for i in finished:
+                        task = batch.tasks[i]
+                        if task is not None:
+                            futures[i] = executor.submit(
+                                _evolve_polish_then_search_worker, task
+                            )
+        except StopIteration as done_iter:
+            result = done_iter.value
             scored, cache_size, generations_run = (
                 result.scored,
                 result.cache_size,
@@ -3783,6 +3947,32 @@ def _worker_pool(
         yield executor
 
 
+@contextlib.contextmanager
+def _evolve_worker_pool(
+    workers: int, spectrum: Spectrum, weighting: Weighting
+) -> Iterator[concurrent.futures.ProcessPoolExecutor | None]:
+    """:func:`_worker_pool`'s twin for :func:`_evolve`'s steady-state dispatch.
+
+    A :class:`concurrent.futures.ProcessPoolExecutor` rather than a bare
+    :class:`multiprocessing.pool.Pool`, because the steady-state driver needs individually
+    trackable :class:`~concurrent.futures.Future` objects to know *which* of several in-flight
+    tasks just completed (:func:`concurrent.futures.wait` with
+    ``return_when=FIRST_COMPLETED``) -- a ``Pool.map`` call cannot report a single completion
+    without waiting for the whole batch, which is exactly the barrier this driver removes. Same
+    ``workers<=1`` contract as :func:`_worker_pool`: nothing is created at all, the Pyodide-safe
+    path.
+    """
+    if not workers or workers <= 1:
+        yield None
+        return
+    with concurrent.futures.ProcessPoolExecutor(
+        max_workers=workers,
+        initializer=_init_worker,
+        initargs=(spectrum.f, spectrum.z, weighting),
+    ) as executor:
+        yield executor
+
+
 def _screen_all(
     texts: Sequence[str],
     spectrum: Spectrum,
@@ -4328,6 +4518,53 @@ def _breeding_key(node: Node) -> str | None:
         return None
 
 
+def _propose_child(
+    alive: list[Candidate],
+    rng: np.random.Generator,
+    pool: tuple[str, ...],
+    max_elements: int,
+    criterion: Criterion,
+    *,
+    frequencies: Mapping[float, float] | None,
+    parsimony: float,
+    weights: Sequence[float],
+    seen: set[str],
+) -> _Offspring | None:
+    """One bred child -- tournament selection, optional crossover, mutation -- retried up to
+    :data:`PROPOSE_RETRY_CAP` times against ``seen`` (mutated in place: a successful key is
+    added to it, exactly the dedup discipline :func:`_next_generation`'s docstring describes).
+
+    Returns ``None`` only when every retry produced an oversize child; the caller loops again
+    with a fresh draw, which is what makes an unbounded outer retry safe -- see
+    :func:`_next_generation` and :class:`_SteadyState` for the two loops built on top of this.
+    Factored out from :func:`_next_generation`'s own body so :func:`evolve_plan`'s steady-state
+    proposer (:class:`_SteadyState`) can share the identical per-child logic rather than a copy
+    of it -- this function's own behaviour is unchanged by that split.
+    """
+    child = parent = None
+    for _ in range(PROPOSE_RETRY_CAP):
+        parent = _tournament(
+            alive, rng, criterion=criterion, frequencies=frequencies, parsimony=parsimony
+        )
+        if rng.random() < 0.3 and len(alive) > 1:
+            other = _tournament(
+                alive, rng, criterion=criterion, frequencies=frequencies, parsimony=parsimony
+            )
+            child = crossover(parent.circuit.root, other.circuit.root, rng)
+        else:
+            child = parent.circuit.root
+        child = mutate(child, rng, pool, max_elements, weights=weights)
+        if count_elements(child) > max_elements:
+            child = None
+            continue
+        key = _breeding_key(child)
+        if key is None or key not in seen:
+            if key is not None:
+                seen.add(key)
+            break
+    return None if child is None else (child, parent)
+
+
 def _next_generation(
     alive: list[Candidate],
     rng: np.random.Generator,
@@ -4365,29 +4602,19 @@ def _next_generation(
 
     seen = set(known)
     while len(trees) < population:
-        child = parent = None
-        for _ in range(PROPOSE_RETRY_CAP):
-            parent = _tournament(
-                alive, rng, criterion=criterion, frequencies=frequencies, parsimony=parsimony
-            )
-            if rng.random() < 0.3 and len(alive) > 1:
-                other = _tournament(
-                    alive, rng, criterion=criterion, frequencies=frequencies, parsimony=parsimony
-                )
-                child = crossover(parent.circuit.root, other.circuit.root, rng)
-            else:
-                child = parent.circuit.root
-            child = mutate(child, rng, pool, max_elements, weights=weights)
-            if count_elements(child) > max_elements:
-                child = None
-                continue
-            key = _breeding_key(child)
-            if key is None or key not in seen:
-                if key is not None:
-                    seen.add(key)
-                break
-        if child is not None:
-            trees.append((child, parent))
+        offspring = _propose_child(
+            alive,
+            rng,
+            pool,
+            max_elements,
+            criterion,
+            frequencies=frequencies,
+            parsimony=parsimony,
+            weights=weights,
+            seen=seen,
+        )
+        if offspring is not None:
+            trees.append(offspring)
     return trees
 
 

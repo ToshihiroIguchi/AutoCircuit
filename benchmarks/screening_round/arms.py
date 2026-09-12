@@ -41,6 +41,7 @@ from autocircuit.core.discover import (
     _complexity_frequencies,
     _next_generation,
     _screening_score,
+    _SteadyState,
     _unique_best,
     crossover,
     mutate,
@@ -306,6 +307,43 @@ def arm_ga_bounded(table: Table, rng: np.random.Generator, pool: tuple[str, ...]
             known=table.cache.keys() if dedup else frozenset(),
         )
         generation += 1
+    return Trace(table.hit_at, table.fits, table.best, pressure, table.sizes)
+
+
+def arm_ga_steady(
+    table: Table, rng: np.random.Generator, pool: tuple[str, ...], max_elements: int,
+    population: int,
+) -> Trace:
+    """The real steady-state proposer (`discover._SteadyState`) against the frozen table.
+
+    Same discipline as `arm_ga_bounded`: this calls the library rather than restating it. Every
+    proposal, every virtual-generation front recomputation and every elite-quota decision is
+    `_SteadyState`'s real production code -- `docs/EVOLVE_COMPUTE_SKIP_PLAN.md` section 3.1's
+    own quality gate. `Table` has no notion of time or concurrency, so what this measures is the
+    *quality* side of the population-model change (parent selection at proposal time rather
+    than at a fixed generation boundary) in isolation from the throughput side, which is
+    measured separately, on a real search, by `benchmarks/six_plus/x6_workers.py`.
+    """
+    initial = [
+        (random_topology(rng, pool, int(rng.integers(2, max_elements + 1))), None)
+        for _ in range(population)
+    ]
+    state = _SteadyState(
+        rng=rng, pool=pool, max_elements=max_elements, min_elements=2, population=population,
+        criterion=CRITERION, weights=MUTATION_WEIGHTS, initial=initial,
+    )
+    scored: list[Ind] = []
+    pressure: list[float] = []
+    last_vgen = state.vgen
+    while not table.exhausted:
+        node, _parent = state.propose(table.cache, scored)
+        ind = table.evaluate(node, state.vgen)
+        if ind is not None:
+            scored.append(ind)
+        if state.vgen != last_vgen:
+            last_vgen = state.vgen
+            if state._front:
+                pressure.append(1.0 - (1.0 - 1.0 / len(state._front)) ** 3)
     return Trace(table.hit_at, table.fits, table.best, pressure, table.sizes)
 
 
@@ -779,6 +817,9 @@ ARMS: dict[str, Callable[..., Trace]] = {
     # turned on, nothing else different -- the control for the dedup change now shipped in
     # `discover._evolve`.
     "ga_front_dedup": lambda *a, **k: arm_ga_bounded(*a, pool_bound=0, dedup=True, **k),
+    # `docs/EVOLVE_COMPUTE_SKIP_PLAN.md` section 3.1's own quality gate: the real steady-state
+    # proposer against `ga_front`/`ga_front_dedup`.
+    "ga_steady": arm_ga_steady,
     "islands2_front": lambda *a, **k: arm_islands(*a, islands=2, migration=0.5,
                                                   pool_bound=0, **k),
     "islands4_front": lambda *a, **k: arm_islands(*a, islands=4, migration=0.5,

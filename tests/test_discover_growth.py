@@ -359,6 +359,11 @@ def test_the_browser_grows_the_same_way_the_command_line_does() -> None:
         growth_width=GROWTH_WIDTH,
         seed=0,
         screen_chunk=1,
+        # Matches the CLI reference's own default `workers=1` below: the sliding window's width
+        # changes which offspring see which others' outcomes before they are proposed
+        # (`docs/EVOLVE_COMPUTE_SKIP_PLAN.md` section 3.1), so an exact candidate-list match
+        # needs the same width on both sides.
+        evolve_chunk=1,
     )
     while True:
         batch = driven.next_screen()
@@ -395,7 +400,15 @@ def test_the_browser_grows_the_same_way_the_command_line_does() -> None:
             tasks = driven.next_evolve()
             if tasks is None:
                 break
-            driven.submit_evolve([run_evolve(task, data, weighting="modulus") for task in tasks])
+            # A `None` slot -- evolve_plan's sliding-window protocol, see its docstring -- has
+            # nothing to dispatch and is reported back unchanged, exactly gate W-EV1's own
+            # driving loop (`docs/EVOLVE_WEB_PLAN.md`) does for the real bridge.
+            driven.submit_evolve(
+                [
+                    None if task is None else run_evolve(task, data, weighting="modulus")
+                    for task in tasks
+                ]
+            )
         while True:
             tasks = driven.next_refit()
             if tasks is None:

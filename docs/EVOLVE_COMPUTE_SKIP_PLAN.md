@@ -1,15 +1,20 @@
 # Computation-skipping in the genetic fallback
 
-Status: **section 3.2 built, measured, and rejected (2026-09-12); section 3.4's cheap proxy count
-also ran (2026-09-12); sections 3.1 and 3.3 remain plan-only.** Section 3.2 (early-abandon
-extension) was implemented, verified correct at reduced scale (3-seed A/B, byte-identical
-`recommended`/Pareto front), measured for speed on a real 99-call batch (3.5% wall-clock
-reduction, far short of a meaningful win), and **reverted** rather than shipped unused, per its
-own pre-registered rule — see section 3.2 below for the numbers. Section 3.1 (idea 2c
-integration) is the one item of the original four still needing a genuine architecture change to
-`_evolve`'s dispatch/population model, deferred as its own, larger-scoped piece of work rather
-than attempted alongside the other three in the same session; section 3.3 (the dispatch-order
-proxy) depends on 3.1 per its own text and was not attempted either. Section 1 is a
+Status: **section 3.1 (idea 2c integration) built, measured, and shipped (2026-09-13) — the
+broad, steady-state scope; section 3.2 built, measured, and rejected (2026-09-12); section 3.4's
+cheap proxy count also ran (2026-09-12); section 3.3 remains plan-only.** Section 3.2
+(early-abandon extension) was implemented, verified correct at reduced scale (3-seed A/B,
+byte-identical `recommended`/Pareto front), measured for speed on a real 99-call batch (3.5%
+wall-clock reduction, far short of a meaningful win), and **reverted** rather than shipped unused,
+per its own pre-registered rule — see section 3.2 below for the numbers. Section 3.1 is the one
+item of the original four that needed a genuine architecture change to `_evolve`'s dispatch/
+population model, deliberately given its own session rather than attempted alongside the other
+three: `evolve_plan` is now a true steady-state (overlapping-generation) proposer, both CLI and
+browser drivers rebuilt on the new sliding-window protocol, both gates (480-seed McNemar quality,
+`workers=8`/300s throughput) passed decisively (`par6`/`ser6` roughly doubled `n_evaluated`) — see
+section 3.1 below for the full numbers. Section 3.3 (the dispatch-order proxy) still depends on
+3.1's continuous-dispatch prototype per its own text, which now exists in production rather than
+only as an isolated benchmark, and was not attempted this round either. Section 1 is a
 survey of what already ships, verified against `src/autocircuit/core/discover.py` and
 `src/autocircuit/core/fit.py` as they stand today (line numbers may drift further; re-locate by
 symbol name if they no longer match). Section 2 restates, without re-measuring, what
@@ -302,6 +307,97 @@ different part of this same codebase for a different reason. Any RNG-stream side
 individual `reported` flags (the kind `docs/SEARCH_TIME_PLAN.md` §4.3 recorded for `ser6` at
 `workers=1`) is recorded, not treated as part of this decision rule, unless it also moves
 `recommended`.
+
+**[measured, 2026-09-13] Shipped — both halves pass, decisively.** Built as the **broad** scope
+the user chose over a narrower dispatch-only fix: `evolve_plan` is now a true steady-state
+(overlapping-generation) proposer, not a discrete-generation loop with a faster dispatch call
+bolted on. A new `_SteadyState` class (`discover.py`) proposes one individual at a time —
+elite repeats first (the same `max(2, population // 6)` quota `_next_generation` already uses,
+spent against the *true* `population` rather than the dispatch window's own width, which would
+otherwise silently inflate the elite fraction in a small window) then tournament-bred children via
+`_propose_child` (factored out of `_next_generation`'s own body so both share one implementation,
+verified behaviour-preserving on its own before anything else changed) — recomputing the Pareto
+front once per **virtual generation** (`population`-many proposals *handed out*, not necessarily
+completed) rather than once per discrete batch. `evolve_plan`'s wire protocol changed to a
+**sliding window**: `EvolveBatch.tasks` is now `list[_EvolveTask | None]`, a fixed-length window
+where a slot is `None` once nothing remains to propose for it and otherwise holds whatever task
+is currently assigned there; `send()` reports a slot's outcome as `None` to mean "still pending,
+leave it assigned" or "already empty, nothing to report" — both mean the same thing to the
+generator. Field names (`tasks`, `scored`, `generation`, `cache_size`) are unchanged, so
+`on_progress`, `DiscoveryResult.generations` and `_with_evolve_note` needed no code changes at
+all — only `generation`'s underlying meaning shifted, from "generations fully completed" to
+"virtual generations whose proposal quota was exhausted," which coincides with the old meaning by
+the same 0-indexing arithmetic the original loop's own `generation + 1` already relied on (traced
+and fixed once: the first cut returned the bare vgen index and under-reported `generations` by
+exactly one).
+
+- **`workers=1` byte-identity — the non-negotiable gate — passed exactly.** Real `discover
+  (mode="evolve")` calls at `workers=1`, four different `(max_elements, generations, population,
+  seed)` combinations, compared field-for-field (including the full sorted candidate-text list)
+  against the unmodified code at the prior commit (via a disposable `git worktree`, not a
+  same-tree `git stash`, after an in-place stash was found to hang the process on an unrelated
+  fingerprint script earlier the same session): identical on every field once the `generations`
+  off-by-one above was fixed.
+- **Quality gate**: a new `arm_ga_steady` in `benchmarks/screening_round/arms.py`, calling
+  `_SteadyState` directly (the same discipline `arm_ga_bounded` already uses for
+  `_breeding_pool`/`_next_generation` — an arm may not reimplement the library), 480 seeds against
+  `ga_front`/`ga_front_dedup`. `land_rcl6.json` (budget 60): 245/480 hits against `ga_front`'s
+  247/480, McNemar p = 0.9007. `land_series_rcl6.json` (budget 40): 253/480 against 254/480,
+  p = 1.0000. Neither arena shows a hit-rate drop in either direction.
+- **Throughput gate, `workers=8` / 300 s, `benchmarks/six_plus/x6_workers.py`, re-run on a
+  quiescent machine**: `par6` 1366 → **2835** (+107.5%), `ser6` 1095 → **2310** (+111.0%) —
+  both truths roughly doubled, far past "rises on at least one without falling on the other."
+  `ser6`'s `reported` flag is `false` at `workers=8` in this run (it was `true` at `workers=1` in
+  the same run and at both worker counts in the pre-change T4 baseline); `recommended` is `false`
+  at every worker count in both the old and new measurement, so per the decision rule's own
+  carve-out this is recorded, not treated as a rejection — the same single-draw RNG sensitivity
+  this codebase already has on record for `ser6` specifically (`TOPOLOGY_6PLUS_PLAN.md`'s
+  basin-lottery finding, `SEARCH_TIME_PLAN.md` §4.3's own `workers=1` flip for this exact truth).
+
+**The CLI driver** (`_evolve`) was rebuilt on `concurrent.futures.ProcessPoolExecutor` +
+`concurrent.futures.wait(..., return_when=FIRST_COMPLETED)` behind a new `_evolve_worker_pool`
+(mirroring `_worker_pool`'s own `workers<=1` contract) — a `multiprocessing.Pool` cannot report a
+single completion without a `.map()` call waiting for the whole batch, which is exactly the
+barrier this removes. The sequential (`workers=1`) branch is a separate, deliberately
+dead-simple one-in-one-out loop, not a one-worker special case of the concurrent one, precisely
+so the byte-identity gate above has the smallest possible surface to trust. On a `time_limit`
+firing, the driver drains whatever is already in flight (at most `item_chunk` = `workers`
+individuals) before closing the generator — a strictly smaller overshoot than the old "wait for
+up to `population` stragglers."
+
+**The browser was moved to the same protocol, not left on `item_chunk=1`.** `DiscoveryJob`
+gained an `evolve_chunk` constructor parameter (default `REFIT_CHUNK`, the same worker-pool-width
+concept `refit_chunk` already uses for this job's other per-topology parallel stage) — before
+this, the fallback dispatched exactly one offspring at a time regardless of how many Web Workers
+the browser had, leaving every worker past the first idle for the whole stage. `next_evolve`/
+`submit_evolve`'s existing pull/push shape needed no structural change — it already handed out
+and collected a *list*, just always of length one — only its type widened to allow a `None` slot
+and `bridge.py`'s `_op_discover_evolve` gained the pass-through for it. Scoped deliberately to
+*functional correctness plus using the whole worker pool*, not the CLI driver's finer-grained
+per-completion resubmission (`docs/EVOLVE_COMPUTE_SKIP_PLAN.md`'s own scope decision, unchanged
+from the plan): the browser dispatches and awaits a whole window together (`pool.map`/
+`Promise.all`, mirroring how `screen`/`refit` already batch), refilling only the slots that
+returned. Three JS/Python test drivers that pre-dated the sliding window
+(`tests/test_web_job.py`'s `Driver.evolve`, `tests/test_discover_growth.py`'s inline loop,
+`web/scripts/smoke.mjs`'s `driveWithEvolve`, and `web/src/core/search.ts`'s own production
+`evolve()`) all unpacked every slot unconditionally and crashed the instant one came back `None`
+— fixed identically in all four: skip a `None` slot, report `None` back for it. Two gate tests
+(`test_web_job.py`'s W-EV1, `test_discover_growth.py`'s growth-parity test) that assert an exact
+candidate-list match against a CLI reference needed `evolve_chunk=1` added explicitly, for the
+same reason the CLI's own `workers=1` and `workers>1` are not expected to agree
+candidate-for-candidate: window width changes which offspring see which others' outcomes before
+they are themselves proposed, so an exact match needs a matched width, not just a matched
+algorithm.
+
+**Full verification, all green**: the complete `pytest` suite (1125 passed, 19 skipped, 0
+failed — one pre-existing test that spied on `_next_generation` directly was updated to spy on
+`_breeding_pool` instead, since the steady-state path no longer calls `_next_generation` at all,
+preserving the test's own invariant rather than deleting it), `mypy --strict` and `ruff check`
+clean on every touched file (against the same pre-existing, unrelated `Weighting`-export errors
+this codebase already carries), `npm run check` clean, and `npm run smoke` clean end-to-end
+including its own "genetic fallback actually ran" check at the browser's new default
+`evolve_chunk=8`. `_next_generation` itself is untouched and still real, shipped code — every
+other caller (`arms.py`'s remaining arms, and any future non-steady-state use) is unaffected.
 
 ### 3.2 Extend early-abandon to evolve's tier-1 search sub-call
 

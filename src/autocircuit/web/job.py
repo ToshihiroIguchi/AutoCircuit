@@ -113,7 +113,10 @@ type RefitGenerator = Generator[RefitBatch, Sequence[RefitOutcome], list[Candida
 type ExcludedGenerator = Generator[ExcludedBatch, Sequence[float], ExcludedEquivalents]
 #: One offspring's outcome: its polish, its search, either as a wire dict or None.
 type EvolveOutcome = tuple[dict[str, Any] | None, dict[str, Any] | None]
-type EvolveGenerator = Generator[EvolveBatch, Sequence[EvolveOutcome], EvolvePlanResult]
+#: A slot's outcome, or ``None`` if that slot's task has not completed yet (leave it assigned)
+#: or was already empty (nothing to report). ``evolve_plan``'s own sliding-window protocol --
+#: see its docstring -- treats both cases identically: do nothing, the slot stays as it is.
+type EvolveGenerator = Generator[EvolveBatch, Sequence[EvolveOutcome | None], EvolvePlanResult]
 
 
 class DiscoveryJob:
@@ -144,6 +147,14 @@ class DiscoveryJob:
         growth_width: int = GROWTH_DEFAULT,
         screen_chunk: int = SCREEN_CHUNK,
         refit_chunk: int = REFIT_CHUNK,
+        # How many of the genetic fallback's own offspring may be genuinely in flight at once
+        # -- `evolve_plan`'s sliding-window width (`docs/EVOLVE_COMPUTE_SKIP_PLAN.md` section
+        # 3.1). Defaults to `REFIT_CHUNK`, the same worker-pool-width concept `refit_chunk`
+        # already uses for this job's other per-topology parallel stage. Before this, the
+        # fallback always dispatched exactly one offspring at a time regardless of how many
+        # Web Workers the browser had -- every worker past the first sat idle for the whole
+        # stage.
+        evolve_chunk: int = REFIT_CHUNK,
         # The genetic fallback's own knobs, defaults matching `discover()`'s own signature
         # exactly -- this is that same default becoming reachable here, not a second one.
         generations: int = 30,
@@ -202,6 +213,7 @@ class DiscoveryJob:
         self.stopped = False
         self.screen_chunk = max(1, screen_chunk)
         self.refit_chunk = max(1, refit_chunk)
+        self.evolve_chunk = max(1, evolve_chunk)
 
         self._screen: ScreenGenerator = screen_plan(
             self.enumeration.texts, chunk=self.screen_chunk
@@ -274,7 +286,7 @@ class DiscoveryJob:
         self._evolve_open = False
         self._evolve_batch: EvolveBatch | None = None
         self._evolve_issued = 0
-        self._evolve_outcomes: list[EvolveOutcome] | None = None
+        self._evolve_outcomes: list[EvolveOutcome | None] | None = None
         self._evolve_generation = 0
         self._evolve_generations_run = 0
         self._evolve_cache_size = 0
@@ -556,9 +568,16 @@ class DiscoveryJob:
         """
         return self._evolve_open
 
-    def next_evolve(self) -> list[_EvolveTask] | None:
-        """The genetic fallback's next batch of offspring, or None once its own tier 1 has
+    def next_evolve(self) -> list[_EvolveTask | None] | None:
+        """The genetic fallback's current dispatch window, or None once its own tier 1 has
         finished -- successfully, or because :meth:`_consider_evolve` decided not to run it.
+
+        The window is a fixed-length **sliding** one (:func:`~autocircuit.core.discover.
+        evolve_plan`'s own protocol, see its docstring): a slot is ``None`` once there is
+        nothing left to propose for it, otherwise it holds whatever task is currently assigned
+        there -- unchanged since the last call if :meth:`submit_evolve` reported nothing new for
+        it. ``self.evolve_chunk`` Web Workers can therefore genuinely run at once instead of the
+        one this used to dispatch regardless of how many were available.
 
         Each task is already wire-safe as a plain tuple: :func:`~autocircuit.core.discover.
         evolve_plan` builds it from JSON scalars, a ``dict[str, float] | None`` and nothing
@@ -580,9 +599,15 @@ class DiscoveryJob:
         self._evolve_issued = len(batch.tasks)
         return list(batch.tasks)
 
-    def submit_evolve(self, outcomes: list[EvolveOutcome]) -> None:
-        """Hand back one ``(polish, search)`` wire-form outcome per task in the batch just
-        issued."""
+    def submit_evolve(self, outcomes: list[EvolveOutcome | None]) -> None:
+        """Hand back this window's outcomes, one slot per task :meth:`next_evolve` issued.
+
+        A slot is ``None`` if it had no task to begin with (nothing to report) -- there is no
+        "still pending" case here, since the browser dispatches and awaits every non-empty slot
+        of a window together before calling this (``docs/EVOLVE_COMPUTE_SKIP_PLAN.md`` section
+        3.1's own scope decision: functional correctness and full worker-pool use, not the
+        CLI driver's finer-grained per-completion resubmission).
+        """
         if len(outcomes) != self._evolve_issued:
             raise ValueError(f"{len(outcomes)} outcomes for {self._evolve_issued} evolve tasks")
         self._evolve_outcomes = list(outcomes)
@@ -684,10 +709,11 @@ class DiscoveryJob:
             seeds=[c.circuit.to_string() for c in candidates[:5]],
             warm_accept=self.warm_accept,
             criterion=self.criterion,
-            # One offspring per round trip: the browser fans a generation across its own
-            # worker pool exactly as it fans a screen, rather than this generator batching
-            # several into one round trip the way a `multiprocessing.Pool` dispatch would.
-            item_chunk=1,
+            # `evolve_chunk` offspring genuinely in flight at once, refilled as each completes
+            # -- the same sliding-window protocol `_evolve`'s own parallel driver uses
+            # (`docs/EVOLVE_COMPUTE_SKIP_PLAN.md` section 3.1), sized to this job's worker pool
+            # rather than to one at a time regardless of how many workers the browser has.
+            item_chunk=self.evolve_chunk,
         )
         try:
             self._evolve_batch = next(self._evolve)
@@ -1155,6 +1181,7 @@ def plan_summary(job: DiscoveryJob) -> dict[str, Any]:
         "mode": "auto",
         "screen_chunk": job.screen_chunk,
         "refit_chunk": job.refit_chunk,
+        "evolve_chunk": job.evolve_chunk,
     }
 
 
