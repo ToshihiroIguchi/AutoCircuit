@@ -433,6 +433,35 @@ informative at all, per this section's own note above) — because H1's own answ
 resolved at a confidence level worth building H2 on top of. Not run this session:
 `core/fit.py`'s production `_global_stage`/`screen()`/`fit()` are unchanged.
 
+**[measured, 480 seeds, 2026-09-12] H1 is rejected.** `idea_thinning.py` was rebuilt into a
+resumable, argparse-driven benchmark using `benchmarks/speedup/harness.py`'s `wilson`/
+`mcnemar_exact` (the pilot had computed neither), keeping `local=SCREEN_LOCAL` on the one fit
+call site. The first full-scale run (concurrent with other experiments in the same session) found
+hit rate unchanged (McNemar `p=0.4769` at 2x, `p=0.6445` at 4x — confirming the pilot's own
+"no hint of a hit-rate cost" at real statistical power) but wall-clock **flat across all three
+conditions** (0.735 s / 0.724 s / 0.734 s mean per fit) — nothing like the pilot's 25-52%
+reduction. Re-run alone, with no concurrent load, to rule out resource contention as the cause:
+mean time roughly halved for every condition (0.366 s / 0.370 s / 0.377 s, confirming the first
+run *was* contention-affected on its absolute numbers), but the **relative pattern held exactly
+— no speedup, and if anything the thinned conditions are marginally slower.** Hit counts were
+bit-identical between the contended and clean runs (371/381/378 of 480, as they must be —
+`fit()` is deterministic given a seed, so hit rate cannot depend on machine load). **This clears
+neither clause of section 3.5's own pass bar**: clause 1 needed a real, non-contention-artifact
+wall-clock win at preserved hit rate, and none exists. The most likely mechanism, consistent with
+`docs/SEARCH_SPEEDUP_PLAN.md` ideas C/D's own finding for this document: at
+`SCREEN_POPSIZE=8, SCREEN_MAXITER=40`, per-iteration Python/scipy dispatch overhead inside
+`differential_evolution` and `least_squares` dominates the wall-clock at this problem size, so
+shrinking the array `cost_vectorized`/`residuals` operate over (81 → 21 points) does not move the
+total meaningfully — the same "joint combinatorics, not any one input's cost" shape those ideas
+already found for a different lever. **H2 was not evaluated on its own merits**: it is
+conditioned on H1 shipping (a candidate to compare against uniform decimation, which this
+section rejects), so the id15/id34 results the H2 harness produced (`adaptive_2x` beating
+`uniform_2x` significantly, `p=0.0005`, on the one informative real dataset; `loguniform_2x`
+losing to it significantly, `p<0.0001`; `id34` saturated at 0/480 hits under every condition, an
+uninformative arena for a shape-comparison question) are recorded as raw numbers only, not as an
+H2 verdict — there is no baseline left to be a fancier alternative *to*. `core/fit.py`'s
+production `_global_stage`/`screen()`/`fit()` remain unchanged; nothing from this section ships.
+
 ## 4. Levers on F3 and on the fallback's throughput
 
 ### 4.1 The second screening seed: run the experiment that was deferred [measured, 2026-09-03]

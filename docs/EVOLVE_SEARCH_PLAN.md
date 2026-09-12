@@ -977,6 +977,28 @@ its own honesty obligations (the sentence has to say what was measured, not what
 it is deferred until one of the three mechanisms above has actually shipped and has something
 true to report.
 
+**[measured, live, 2026-09-12] The pilot's own deferred item — real `discover(mode="evolve")`
+runs rather than the frozen-table proxy — was run, via a new `benchmarks/six_plus/
+stopping_live.py`, which drives the real `evolve_plan` generator through the same dispatch loop
+`_evolve` uses (not a reimplementation) and reuses `recovery.py`'s `Referee` for `hit_at`.** Only
+(a), archive-diversity collapse, was re-tested live — plateau detection stays rejected on the
+pilot's own decisive 54-74% false-stop measurement and was not re-run. All nine `six_plus` truths
+at `SEEDS = (1, 2, 3)` (27 runs, `population=40`, `max_elements=7`, `workers=8`), scored against
+the same grid the pilot swept (`window in {2, 3, 5}`, `threshold in {0.50, 0.65, 0.80, 0.90}`).
+**The live result reproduces the pilot's own reading exactly**: zero false stops at every
+threshold that ever fired (2/27 at window=2/threshold=0.50, 1/27 at window=3/threshold=0.50,
+0/27 everywhere else in the grid, including every threshold at or above 0.65) — safe wherever it
+speaks, but too conservative to be a useful mechanism as specified, confirmed now on real search
+trajectories rather than a proxy. **Nothing ships**; `evolve_plan`'s stopping logic remains
+unchanged, and this closes the live-validation half of step 7 the pilot could not afford. One
+data-quality caveat, unrelated to the stopping-rule verdict: `ser6` (seeds 2, 3) and `ser7` (all
+three seeds) terminated at 3-8 generations instead of the 60-generation cap, hitting the run's
+600 s per-run safety limit early — likely a mix of concurrent load from other experiments running
+in the same session and the series shape's own higher per-generation cost at production
+settings. Their `hit_at`/recovery numbers should not be read as a measurement of `ser6`/`ser7`'s
+true live recoverability under this configuration; the stopping-rule conclusion above is
+unaffected, since the rule fired on none of these five truncated runs either.
+
 ### 3.7 Step 8 — the hyperparameters still unmeasured, and a plan for the two worth sweeping first
 
 **Originally written entirely `[not yet measured]`, at the same implementation-grade detail

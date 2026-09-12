@@ -366,7 +366,14 @@ static-site Web UI running the same core via WASM (Pyodide).
    false-stop rate on the harder arena at every `K` tried — a plateau of several generations is
    normal in a run that later succeeds, exactly as §1.1's own table already warned), and
    archive-diversity-collapse detection is safe (0% false stop) but too conservative to be useful
-   as tested (fired on 11/480 and 0/480 runs). Nothing ships. Step 8: `random_topology`'s
+   as tested (fired on 11/480 and 0/480 runs). Nothing ships. **[measured, live, 2026-09-12]**
+   the diversity-collapse rule was re-tested on real `discover(mode="evolve")` runs rather than
+   the frozen-table proxy (`benchmarks/six_plus/stopping_live.py`, new; drives the real
+   `evolve_plan` through `_evolve`'s own dispatch loop): all nine `six_plus` truths × 3 seeds,
+   same grid. **The live result matches the pilot exactly** — zero false stops wherever the rule
+   ever fired (2/27 and 1/27 at the two loosest settings, 0/27 everywhere else in the grid) —
+   confirming "safe but too conservative to be useful" on real search trajectories, not only a
+   simulation. Nothing ships. Step 8: `random_topology`'s
    series/parallel seeding bias showed the exact `mut_series_hi`/`mut_par_hi` signature §3.5.2
    already established for the mutation operator — measured on 480 seeds across three arenas
    (adding a cap-7 series arena to separate the effect from a cap confound, per §3.5.3's own
@@ -597,8 +604,9 @@ static-site Web UI running the same core via WASM (Pyodide).
    it. **§3.1 implemented and shipped, §3.2 measured and its fix rejected, §4.2 measured and
    its flag rejected, §4.1 measured and its own decision rule keeps it a lever rather than a
    default, §4.3 implemented and shipped, §3.3 implemented and shipped in half (the CPE kernel
-   substitution ships, the buffer-reuse half measured inside the noise floor and does not), the
-   rest is still plan only.** It is deliberately *not* about the 13x F2
+   substitution ships, the buffer-reuse half measured inside the noise floor and does not), §3.5
+   measured at full scale and rejected, the rest is still plan only.** It is deliberately *not*
+   about the 13x F2
    gap `SEARCH_ALGORITHM_SCREENING.md`
    measured: it collects the F1 and F3 levers the earlier rounds set aside — the per-topology
    setup that is 23–33% of a screen and mostly per-*dataset* work recomputed 2,976 times, a
@@ -709,12 +717,25 @@ static-site Web UI running the same core via WASM (Pyodide).
    phenomenon and not the section's own example: an over-parameterised superset topology whose
    extra element gets fitted to irrelevance lands on exactly its subset's cost, which the
    same-size breakdown shows is not the whole story — genuine same-size duplication is large on
-   its own. All seven steps of section 7's order of work are done. **§3.5, added 2026-09-12, is a
-   plan-only addition (not run)** proposing to thin the frequency points fed to the DE global
-   stage during screening, with the correctness constraint that `w_re`/`w_im` must be sliced with
-   the same index set as `omega`/`z`, and a pre-registered bar that a fancier thinning method must
-   beat plain uniform decimation, not merely beat no thinning at all, before it can ship over the
-   simpler mechanism.
+   its own. All seven steps of section 7's order of work are done. **§3.5 proposed thinning the
+   frequency points fed to the DE global stage during screening** (correctness constraint:
+   `w_re`/`w_im` sliced with the same index set as `omega`/`z`; pre-registered bar: a fancier
+   thinning method must beat plain uniform decimation, not merely beat no thinning). **[measured,
+   480 seeds, 2026-09-12] Rejected.** A 60-seed pilot had found hit rate unaffected and 25-52%
+   wall-clock reduction, but wide enough Wilson CIs that the section's own rule withheld a verdict
+   pending the full run. The full 480-seed run confirms hit rate really is unaffected (McNemar
+   `p=0.48`/`p=0.64`) but finds **no wall-clock reduction at all once machine contention from
+   concurrent work is removed** — a first run (concurrent with other experiments) reproduced a
+   large-looking gap that halved uniformly across all three conditions on a clean, isolated
+   re-run, leaving the *relative* pattern flat (if anything marginally worse for the thinned
+   conditions). The likely mechanism, matching `docs/SEARCH_SPEEDUP_PLAN.md` ideas C/D's own
+   finding elsewhere in this document: at `SCREEN_POPSIZE=8, SCREEN_MAXITER=40`, per-iteration
+   dispatch overhead dominates the wall-clock at this problem size, so shrinking the array these
+   calls operate over does not move the total. H2 (method comparison) was never evaluated on its
+   own terms, since it is conditioned on H1 shipping a baseline to compare against; the harness
+   built for it still measured a real, informative result on one dataset (`adaptive` thinning beat
+   `uniform` significantly, `p=0.0005`, on `zenodo-21700-id15`'s genuinely irregular frequency
+   axis) which is recorded as a number only, not a verdict. `core/fit.py` is unchanged.
 
 18. `docs/DISCOVER_UX_PLAN.md` — usability fixes on the Discover path, from two rounds of user
    review of the CLI and web front ends. **Implemented, items A-G; verified by `npm run check`,
@@ -1008,20 +1029,32 @@ static-site Web UI running the same core via WASM (Pyodide).
 23. `docs/EVOLVE_COMPUTE_SKIP_PLAN.md` — what the genetic fallback already skips (a persistent
     best-wins canonical-form cache, propose-until-unique breeding dedup, two-tier screening, and
     warm-start inheritance with a "close enough" skip — but no early-abandon in tier 1, unlike the
-    exhaustive path), and four proposed additions. **Written 2026-09-12; one cheap proxy count run
-    the same day, the other three (idea 2c integration, the early-abandon extension, the
-    dispatch-order proxy) explicitly not attempted — each needs a real change to `_evolve`'s
-    dispatch/population model or fit-level correctness verification that does not fit a shared,
-    time-boxed session.** Idea 2c is the strongest, cheapest candidate once attempted: it already
-    measured a 33.6% dispatch-mechanism speedup from replacing a generation's synchronous
-    `executor.map` barrier with continuous dispatch, in isolation
-    (`docs/SEARCH_SPEEDUP_PLAN.md`), but never inside `_evolve`'s real population/selection loop.
-    **The cheap count that did run** (a different, cheaper proxy than the section's own precisely
-    specified warm-start-tolerance instrumentation) found that of 21 archived candidates from one
-    `discover(mode="evolve")` run on a 10-element truth, 12 numeric equivalence classes formed, 7
-    of them multi-member, covering 76% of the archive — extending `SEARCH_TIME_PLAN.md` §3.4's
-    already-known frozen-table multiplicity finding to a live evolve archive, on one run, without
-    changing that finding's own disposition (still a count, not a decision to build).
+    exhaustive path), and four proposed additions. **Written 2026-09-12; the early-abandon
+    extension (§3.2) was built, measured, and reverted the same week; the cheap proxy count (§3.4)
+    ran 2026-09-12; idea 2c integration (§3.1) and the dispatch-order proxy (§3.3, which depends on
+    §3.1) are still plan-only** — §3.1 needs a genuine architecture change to `_evolve`'s
+    dispatch/population model (parent selection moved from a generation boundary to proposal time)
+    that was deliberately scoped out of the same session as the other three items rather than
+    attempted under time pressure. Idea 2c's underlying mechanism is nonetheless the strongest,
+    cheapest candidate once attempted: it already measured a 33.6% dispatch-mechanism speedup from
+    replacing a generation's synchronous `executor.map` barrier with continuous dispatch, in
+    isolation (`docs/SEARCH_SPEEDUP_PLAN.md`), but never inside `_evolve`'s real population/
+    selection loop. **§3.2 [measured, 2026-09-12]**: `fit()` gained an `abandon_above` parameter
+    mirroring `screen()`'s own (an abandoned candidate keeps a real, finite-AICc `FitResult`, its
+    Jacobian from a cheap finite difference, rather than a degenerate one), wired into
+    `_evolve_one`'s search-stage call at `ABANDON_FACTOR * reference`. Correctness held at reduced
+    scale (3 seeds, `workers=1`: `recommended` and the full Pareto front byte-identical with the
+    check on or forced off) — but the speed clause failed: 99 real search-stage calls from a live
+    evolve run, replayed with and without the check, showed 26% triggering the abandon path for
+    only a **3.5% wall-clock reduction**, the same "the shortened stage isn't the dominant cost"
+    shape `docs/SEARCH_TIME_PLAN.md` §3.5 found for spectrum thinning that same week. **Reverted**
+    (`fit.py` and `discover.py` both, via `git checkout`) rather than left shipped-but-useless;
+    `tests/test_fit.py`'s 46 tests re-run clean after the revert. **The cheap count (§3.4)** found
+    that of 21 archived candidates from one `discover(mode="evolve")` run on a 10-element truth, 12
+    numeric equivalence classes formed, 7 of them multi-member, covering 76% of the archive —
+    extending `SEARCH_TIME_PLAN.md` §3.4's already-known frozen-table multiplicity finding to a
+    live evolve archive, on one run, without changing that finding's own disposition (still a
+    count, not a decision to build).
 
 24. `docs/ALGEBRAIC_EQUIVALENCE_PLAN.md` — preliminary experiments (not a build plan) for
     detecting equivalent-circuit degeneracy algebraically or via a precomputed table, the two

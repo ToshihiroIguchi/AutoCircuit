@@ -1,10 +1,15 @@
 # Computation-skipping in the genetic fallback
 
-Status: **plan, with one cheap proxy count run (2026-09-12; see section 3.4).** Sections 3.1-3.3
-(idea 2c integration, the early-abandon extension, the dispatch-order proxy) are unimplemented,
-unmeasured, and were explicitly not attempted in the follow-up session that ran 3.4's count — both
-need real changes to `_evolve`'s dispatch/population model or fit-level correctness verification
-that do not fit a shared, time-boxed session alongside four other experiments. Section 1 is a
+Status: **section 3.2 built, measured, and rejected (2026-09-12); section 3.4's cheap proxy count
+also ran (2026-09-12); sections 3.1 and 3.3 remain plan-only.** Section 3.2 (early-abandon
+extension) was implemented, verified correct at reduced scale (3-seed A/B, byte-identical
+`recommended`/Pareto front), measured for speed on a real 99-call batch (3.5% wall-clock
+reduction, far short of a meaningful win), and **reverted** rather than shipped unused, per its
+own pre-registered rule — see section 3.2 below for the numbers. Section 3.1 (idea 2c
+integration) is the one item of the original four still needing a genuine architecture change to
+`_evolve`'s dispatch/population model, deferred as its own, larger-scoped piece of work rather
+than attempted alongside the other three in the same session; section 3.3 (the dispatch-order
+proxy) depends on 3.1 per its own text and was not attempted either. Section 1 is a
 survey of what already ships, verified against `src/autocircuit/core/discover.py` and
 `src/autocircuit/core/fit.py` as they stand today (line numbers may drift further; re-locate by
 symbol name if they no longer match). Section 2 restates, without re-measuring, what
@@ -352,6 +357,37 @@ to trigger the abandon check in evolve's actual population (the same "no cell mo
 `docs/SEARCH_TIME_PLAN.md` §4.1/T6 recorded for the second-screening-seed lever, where a
 plausible mechanism turned out to have nothing to repair on the truths tested) — this stays
 unshipped and the negative result is recorded exactly that way, not reworded.
+
+**[measured, 2026-09-12] Built, verified correct, and rejected on the speed clause.** `fit()`
+gained an `abandon_above: float = math.inf` parameter mirroring `screen()`'s own (the abandon
+check sits right after `problem.canonicalize(x_start)`, before `least_squares`; an abandoned
+candidate still returns a real `FitResult` with a finite AICc rather than a degenerate one, its
+Jacobian filled by a cheap forward finite difference — `n_params + 1` residual evaluations,
+verified negligible next to `PUBLISH_LOCAL`'s `max_nfev=20000` — so `_evolve_one`'s existing
+`math.isfinite(statistics.aicc)` gate does not silently blackhole an abandoned topology).
+`abandon_above=math.inf` reproduces the unmodified `fit()` byte-for-byte (checked directly:
+identical `values`, `residuals`, `statistics.aicc`), and the exhaustive path never passes it, so
+that half of the change was inert by construction. Wired into `_evolve_one`'s search-stage call
+as `ABANDON_FACTOR * reference` when a reference cost is known, mirroring `screen()`'s own
+threshold exactly. **Correctness (clause i, reduced scale)**: 3 seeds, `workers=1` (deterministic,
+single-process — the only way to A/B via a module-level toggle without a multiprocessing pool
+each rebuilding its own copy), comparing `discover(mode="evolve", ...)` with the check active
+against `ABANDON_FACTOR` forced to `math.inf` — **`recommended` and the full Pareto front were
+byte-identical on all 3 seeds**. This is a much smaller sample than section 3.1's 480-seed
+McNemar bar and is reported as exactly that scale, not stretched to stand in for it. **Speed
+(clause ii) fails outright**: 99 real search-stage tasks captured from one live `discover
+(mode="evolve")` run's own proposal stream (of a 200-task target; the run itself did not produce
+more before finishing) and replayed with and without the check, same spectrum, same context —
+26/99 (26%) triggered the abandon path, and total wall-clock moved by **3.5%** (10.92 s → 10.54
+s). This is the same shape of result section 3.1's sibling document
+(`docs/SEARCH_TIME_PLAN.md` §3.5) found for spectrum thinning on the same kind of workload: a
+mechanism that measurably fires does not translate into a meaningful wall-clock win, because the
+stage it shortens (here, the local trust-region polish) is not the dominant cost at this
+problem's `PUBLISH_LOCAL`/DE-budget scale — the global search itself is. **Nothing ships**: both
+the `fit()` parameter and its `_evolve_one` wiring were reverted (`git checkout`) rather than
+left in the tree unused, per this project's own precedent (`docs/PARAM_OPTIMIZER_PLAN.md`'s
+`core/lshade.py` removal) for a change whose own pre-registered bar it did not clear; the full
+`tests/test_fit.py` suite (46 tests) was re-run clean after the revert to confirm no residue.
 
 ### 3.3 A narrower dispatch-order proxy — explicitly not idea 2b restated
 
