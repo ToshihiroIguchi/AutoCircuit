@@ -9,13 +9,18 @@ description = "Equivalent circuit analysis of passive-component frequency charac
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
+# numpy and scipy are the only RUNTIME dependencies (CLAUDE.md) -- required so the same wheel
+# runs under Pyodide in the browser. Never add a package here without updating that rule.
 dependencies = ["numpy>=1.24", "scipy>=1.10"]
 
 [project.scripts]
 autocircuit = "autocircuit.cli.main:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "ruff>=0.4", "mypy>=1.8", "scipy-stubs>=1.15"]
+# sympy is dev-only, for benchmarks/speedup/idea_sympy_equivalence.py's symbolic-equivalence
+# spike (docs/ALGEBRAIC_EQUIVALENCE_PLAN.md section 3) -- never imported by autocircuit.core or
+# anything shipped in the wheel.
+dev = ["pytest>=7", "ruff>=0.4", "mypy>=1.8", "scipy-stubs>=1.15", "sympy>=1.12"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

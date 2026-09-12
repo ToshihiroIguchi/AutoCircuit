@@ -8,8 +8,13 @@ ship either (gate T6 run, changed nothing on the nine truths); §4.3 implemented
 CPE kernel substitution, measured and not shipped for the buffer-reuse half); §3.4's class
 multiplicity is measured (4.4-5.9x, past the bound the section hoped would close it) but ships
 nothing, for reasons unaffected by the number. All seven steps of section 7's order of work are
-done.** Written 2026-09-02. Every number outside §3.1/§3.2/§4.1/§4.2/§4.3/§3.3/§3.4 and §6's
-T1/T2/T3/T6/T4/T5 entries is quoted from a document that measured it before this plan existed.
+done. §3.5 (spectrum thinning for the DE global stage) was added 2026-09-12 and its H1 question
+(does thinning help at all) is now measured at pilot scale (60 seeds): no hit-rate cost detected,
+25-52% wall-clock reduction, but Wilson CIs overlap too much at this sample size to license a
+ship decision -- the pilot's own recommendation is a full 480-seed follow-up, not yet run.**
+Written 2026-09-02. Every number outside §3.1/§3.2/§4.1/§4.2/§4.3/§3.3/§3.4 and §6's
+T1/T2/T3/T6/T4/T5 entries is quoted from a document that measured it before this plan existed,
+except §3.5, whose pilot-scale H1 result is new and whose H2 is still unmeasured.
 
 ## 0. What this plan is and is not
 
@@ -311,6 +316,122 @@ holds a reference past its own use silently reads a later population's values.
   before screening), and the report still needs every member of a reported equivalence class
   refitted at tier 2 regardless, so this is recorded as a larger-than-hoped, still-unbuilt
   opportunity rather than a lever this plan ships.
+
+### 3.5 Spectrum thinning for the DE global stage -- H1 measured at pilot scale, H2 not run
+
+Not attempted in this document before now. Registered here as a hypothesis and a decision rule
+before any number existed to answer it, per this repository's own rule — H1 is now measured at
+pilot scale (below); H2 is not run. Nothing in `core/fit.py` changes here.
+
+**Where thinning would apply, and where it cannot.** `_global_stage` (`fit.py:796-840`) calls
+`scipy.optimize.differential_evolution(problem.cost_vectorized, ...)`; `cost_vectorized`
+(`fit.py:554-569`) is `O(N)` in frequency points on every one of the roughly `maxiter + 1 = 41`
+iterations a screen runs, each over `popsize` candidates at once. The local polish that follows
+(`scipy.optimize.least_squares(problem.residuals, ...)`, `fit.py:664-673`) already runs on the
+full spectrum, and this section proposes no change there -- thinning the DE stage does not thin
+what the reported chi2/statistics are computed from, only what the *global search* sees while
+finding a basin to polish from.
+
+**Correctness constraint, stated before any harness is built.** `w_re`/`w_im`
+(`weighting.py`'s `weight_vectors`) are per-frequency arrays multiplied elementwise against real
+and imaginary deviations in both `residuals` and `cost_vectorized`; any thinned index set must
+slice `omega`, `z`, `w_re` and `w_im` together. `FitContext` (`fit.py:415-445`) does not itself
+carry `omega`/`z` -- only `w_re`, `w_im` and a `BoundsContext` -- so a thinned global stage needs
+either a thinned `Spectrum` with its own `FitContext` built from it, or explicit index-consistent
+slicing threaded through `_Problem` at construction. Either design must guarantee the *same*
+indices are used for `omega`, `z`, `w_re` and `w_im` inside one DE call; a mismatch here would
+silently score candidates against the wrong weight for each residual, which no downstream gate in
+this document would catch, since it is a correctness bug internal to one function rather than a
+change in the search's outcome shape.
+
+**The failure mode to test for, not assume away.** `docs/SEARCH_SPEEDUP_PLAN.md` ideas C and D
+already measured that *shrinking one dimension's search box* -- a CPE `Q -> Z0` reparameterisation,
+a decorrelated `(tau, R)` block reparameterisation -- does not move hit rate on 10-12-element
+topologies, because the bottleneck at that scale is the *joint* combinatorics of getting every
+free dimension into its own narrow basin at once inside a fixed small DE budget, not any one
+input's cost. Thinning attacks a different quantity (wall-clock per evaluation, not the number of
+dimensions or their box widths), so it is not automatically subject to the same failure -- but the
+hypothesis below must be tested directly rather than assumed to transfer, precisely because C and
+D looked like they should help for an analogous "shrink one cost" reason and did not.
+
+**H1 -- does thinning help at all.** Uniform index-decimation of the frequency array by a factor
+of 2-4x should cut `cost_vectorized`'s per-call cost roughly linearly (it is a vectorised
+elementwise operation over `N` points). Measure, on a frozen-landscape arena at an unsaturated
+budget (`SEARCH_TIME_PLAN.md` section 0's rule: "a saturated arena ranks nothing" -- reuse
+`benchmarks/screening_round/land_rcl6.json`/`land_series_rcl6.json` and the same 480-seed exact
+McNemar convention `docs/EVOLVE_SEARCH_PLAN.md` section 3.5.2 and this document's section 4.3 (T4)
+already use), whether hit rate against the untouched screen survives thinning at each factor.
+
+**H2 -- does the thinning *method* matter, the question the user actually asked.** Compare three
+methods: (a) uniform index-decimation; (b) log-frequency-uniform resampling (resample onto a new
+grid evenly spaced in `log10(f)`, then nearest-index snap back to real data points); (c)
+adaptive/importance-based thinning, keeping a higher density of points where `|dZ/df|` is largest
+(resonances, relaxations) and thinning more aggressively across flat stretches. **A confound to
+flag before running anything**: every synthetic reference in this repository is generated by
+`log_frequencies` (`simulate.py:14-20`, `np.logspace` over the sweep), so on synthetic data
+*uniform index-decimation is already log-frequency-uniform* -- methods (a) and (b) collapse to the
+same condition there. The method comparison is only informative on a spectrum with an irregular,
+non-log-uniform frequency axis, so H2 must run on a real dataset from
+`benchmarks/measured/datasets.py`'s `DATASETS` list (an instrument export, not a `log_frequencies`
+sweep) alongside the synthetic arenas used for H1.
+
+**Pre-registered pass bar, before any run.** Ships only if:
+
+1. Wall-clock or DE-fit-count falls by a real margin (recommend the same >=15% bar
+   section 3.1 originally set for itself) at preserved hit rate (no significant McNemar drop) on
+   an unsaturated frozen-landscape arena -- both halves of the claim, not the speed half alone,
+   per this document's own rule that "a stage winning and the total losing is the normal case."
+2. If a method more complex than plain uniform decimation (log-uniform resampling, adaptive
+   importance-weighting) is proposed for shipping, it must clear its own significance bar *against
+   uniform decimation*, not merely against no thinning at all -- mirroring
+   `docs/EVOLVE_SEARCH_PLAN.md` section 3.5.2's finding that `mut_uniform` tied the shipped,
+   more complex mutation-weight tuple on two of three arenas: this project ships the simplest
+   mechanism that clears its own bar, not the most sophisticated one that merely beats doing
+   nothing.
+
+**Scope for this pass.** Build a standalone benchmark script under `benchmarks/` if the harness is
+cheap to assemble (reusing `benchmarks/speedup/harness.py`'s Wilson-CI/McNemar instrumentation);
+do not touch `core/fit.py`'s production `_global_stage`, `screen()`, or `fit()` in this pass.
+
+**[measured, pilot scale, 2026-09-12] H1 was run; H2 (method comparison) was not.**
+`benchmarks/speedup/idea_thinning.py` (new) fits a 10-element, 5-block Maxwell-Wagner-style
+topology (`p(R1,C1)-p(R2,C2)-p(R3,C3)-p(R4,C4)-p(R5,C5)`, the same "10-12 free parameters"
+regime `docs/SEARCH_SPEEDUP_PLAN.md` ideas C/D used) at the production tier-1 screen budget —
+`SCREEN_POPSIZE=8, SCREEN_MAXITER=40, SCREEN_RESTARTS=1`, and, caught only after an initial run
+ran far slower than the per-screen cost this document's own §1 quotes, `local=SCREEN_LOCAL`
+explicitly, since `fit()`'s own default local-polish budget is `PUBLISH_LOCAL`
+(`max_nfev=20000`), not the cheap tier-1 one, regardless of the DE popsize/maxiter passed — using
+`fit()` rather than `screen()` (which returns only a cost, no parameter vector) so the fitted
+parameters can be re-evaluated against the *full*, untouched spectrum via `relative_error`
+(weighting-independent), making costs computed on different-sized data comparable on one scale.
+60 seeds (a stated, explicit reduction from the 480-seed convention used elsewhere in this
+document — a pilot, not a final rigor level) at three conditions: full spectrum, uniform 2x
+decimation, uniform 4x decimation.
+
+| condition | median relative error | mean wall-clock per fit | hits (error < 5%) |
+|---|---:|---:|---:|
+| full (1x, 81 points) | 1.320% | 1.029 s | 41/60 |
+| half (2x, 41 points) | 1.357% | 0.771 s (-25%) | 46/60 |
+| quarter (4x, 21 points) | 1.403% | 0.494 s (-52%) | 44/60 |
+
+Wilson 95% CIs on hit rate overlap heavily and are wide at this sample size (full 0.56-0.79, half
+0.65-0.86, quarter 0.61-0.83) — **per this pilot's own pre-registered reading, this is not
+evidence that thinning helps or hurts hit rate**, only that a real difference, if one exists, is
+not visible at 60 seeds. What is visible, and repeatable in direction across both thinning
+factors, is the wall-clock reduction (25% at 2x, 52% at 4x) with **no hint of a hit-rate cost** —
+neither thinned condition trended worse than the full-spectrum control, which is the direction
+`docs/SEARCH_SPEEDUP_PLAN.md` ideas C/D's own "joint combinatorics bottleneck, not any one
+input's cost" finding would have predicted thinning *could* fail in (a cheaper-but-less-informative
+per-evaluation cost could, in principle, cost more basin-finding attempts than it saves — that
+failure mode is not what this pilot saw, but 60 seeds cannot rule it out either).
+
+**Per this document's own pre-registered rule, this pilot does not license a ship/reject verdict
+— it licenses a specific recommendation: run the full 480-seed version of H1 next**, on this same
+harness, before touching H2 (the uniform-vs-log-uniform-vs-adaptive method comparison, which still
+needs a real, non-`log_frequencies`-generated dataset from `benchmarks/measured/` to be
+informative at all, per this section's own note above) — because H1's own answer is not yet
+resolved at a confidence level worth building H2 on top of. Not run this session:
+`core/fit.py`'s production `_global_stage`/`screen()`/`fit()` are unchanged.
 
 ## 4. Levers on F3 and on the fallback's throughput
 

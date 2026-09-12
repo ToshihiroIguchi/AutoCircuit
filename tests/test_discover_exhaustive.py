@@ -237,6 +237,74 @@ def test_evolve_mode_never_claims_completeness() -> None:
     assert result.mode == "evolve"
     assert result.complete_up_to is None
     assert "sampled, not exhaustive" in result.completeness()
+    # An explicit ``mode="evolve"`` request is the caller's own choice, not an escalation the
+    # search made on its own -- the auto-fallback sentence is scoped to `mode == "auto"` and
+    # must not fire here even though `generations` is nonzero.
+    assert "fell back to a randomized genetic search" not in result.completeness()
+
+
+def _diffusion() -> np.ndarray:
+    """A finite-length diffusion spectrum: a transmission line no R/C/L/CPE tree reproduces.
+
+    The same scenario `tests/test_web_job.py`'s own `_diffusion` uses to prove the genetic
+    fallback opens at all under `pool=["R", "C"]` -- duplicated locally rather than imported
+    across test modules, matching this repository's existing convention of small per-file
+    fixture helpers (`_semicircle` above).
+    """
+    from autocircuit.core.simulate import simulate as _simulate
+
+    return _simulate(
+        "R1-Ws1",
+        log_frequencies(1e-2, 1e3, 6),
+        {"R1.R": 10.0, "Ws1.R": 100.0, "Ws1.tau": 1.0},
+        noise=0.01,
+        seed=0,
+    )
+
+
+def test_the_auto_escalation_names_itself_in_the_persisted_report() -> None:
+    """The genetic fallback used to be invisible in `completeness()`/`summary()`.
+
+    `_with_growth_note` and `_with_pool_note` already explain what those two escalations mean
+    for absence-as-evidence; the fallback itself had no equivalent sentence, so a reader of the
+    persisted report (not the live `--progress`/web progress banner, which already narrated the
+    escalation as it happened) saw only "over N generations" -- neutral-looking metadata, not a
+    statement that a heuristic search ran because the exhaustive stage's best fit still looked
+    non-random. This is the gap `DiscoveryResult._with_evolve_note` closes.
+    """
+    result = discover(
+        _diffusion(),
+        pool=("R", "C"),
+        mode="auto",
+        exhaustive_limit=3,
+        seed=0,
+        generations=3,
+        population=6,
+    )
+    # Not a vacuous pass: this scenario has to actually trigger the fallback.
+    assert result.mode == "auto"
+    assert result.generations > 0
+
+    coverage = result.completeness()
+    assert "fell back to a randomized genetic search" in coverage
+    assert "no completeness guarantee at all" in coverage
+    assert str(result.generations) in coverage
+    assert "docs/EVOLVE_SEARCH_PLAN.md" in coverage
+    assert coverage in result.summary()
+
+
+def test_the_auto_escalation_note_is_silent_when_the_fallback_never_ran() -> None:
+    """An ordinary exhaustive run that never needed the fallback must not print its sentence."""
+    result = discover(
+        _semicircle(),
+        pool=("R", "C"),
+        mode="auto",
+        exhaustive_limit=3,
+        seed=0,
+    )
+    assert result.mode == "auto"
+    assert result.generations == 0
+    assert "fell back to a randomized genetic search" not in result.completeness()
 
 
 def test_unknown_mode_is_rejected() -> None:

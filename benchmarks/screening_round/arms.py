@@ -178,6 +178,64 @@ def arm_current(table: Table, rng: np.random.Generator, pool: tuple[str, ...],
     return Trace(table.hit_at, table.fits, table.best, pressure, table.sizes)
 
 
+def _random_topology_biased(
+    rng: np.random.Generator, pool: Sequence[str], n_elements: int, bias: float
+) -> Node:
+    """`discover.random_topology` with its series/parallel coin (`discover.py:1390`) parameterised.
+
+    Same body, `bias` in place of the shipped `0.55` -- for docs/EVOLVE_SEARCH_PLAN.md section
+    3.7 Step 8's sweep of whether that seeding asymmetry is the same illegitimate shape-bet
+    section 3.5.2 already found and forbade for the mutation operator's insert-series/
+    insert-parallel weights.
+    """
+    nodes: list[Node] = [ElementNode(str(rng.choice(pool))) for _ in range(n_elements)]
+    while len(nodes) > 1:
+        i = int(rng.integers(len(nodes)))
+        first = nodes.pop(i)
+        j = int(rng.integers(len(nodes)))
+        second = nodes.pop(j)
+        combined = series(first, second) if rng.random() < bias else parallel(first, second)
+        nodes.append(combined)
+    return nodes[0]
+
+
+def arm_current_bias(table: Table, rng: np.random.Generator, pool: tuple[str, ...],
+                     max_elements: int, population: int, *, bias: float = 0.55) -> Trace:
+    """`arm_current`, with the initial population's series/parallel bias swept instead of fixed.
+
+    Identical to `arm_current` in every other respect -- same `_next_generation`, `_tournament`,
+    `_unique_best`, same mutation/crossover -- so the only difference between this arm and
+    `current` at `bias=0.55` is which random-number draws the *seeding* coin consumes.
+    """
+    trees: list[tuple[Node, Ind | None]] = [
+        (_random_topology_biased(rng, pool, int(rng.integers(2, max_elements + 1)), bias), None)
+        for _ in range(population)
+    ]
+    scored: list[Ind] = []
+    pressure: list[float] = []
+    generation = 0
+    while not table.exhausted:
+        for tree, _parent in trees:
+            ind = table.evaluate(tree, generation)
+            if ind is not None:
+                scored.append(ind)
+            if table.exhausted:
+                break
+        alive = _unique_best(scored, CRITERION)
+        if not alive:
+            trees = [
+                (_random_topology_biased(
+                    rng, pool, int(rng.integers(2, max_elements + 1)), bias
+                ), None)
+                for _ in range(population)
+            ]
+            continue
+        pressure.append(1.0 - (1.0 - 1.0 / len(alive)) ** 3)
+        trees = _next_generation(alive, rng, pool, max_elements, population, CRITERION)
+        generation += 1
+    return Trace(table.hit_at, table.fits, table.best, pressure, table.sizes)
+
+
 def arm_ga_bounded(table: Table, rng: np.random.Generator, pool: tuple[str, ...],
                    max_elements: int, population: int, *, pool_bound: int | None = None,
                    parsimony: float = 0.0,
@@ -686,6 +744,13 @@ def arm_beam_full(table: Table, rng: np.random.Generator, pool: tuple[str, ...],
 ARMS: dict[str, Callable[..., Trace]] = {
     "random": arm_random,
     "current": arm_current,
+    # docs/EVOLVE_SEARCH_PLAN.md section 3.7 Step 8's bias sweep: `bias055` reproduces `current`
+    # exactly (same code path, same constant) and stands in as the paired control.
+    "bias035": lambda *a, **k: arm_current_bias(*a, bias=0.35, **k),
+    "bias045": lambda *a, **k: arm_current_bias(*a, bias=0.45, **k),
+    "bias050": lambda *a, **k: arm_current_bias(*a, bias=0.5, **k),
+    "bias055": lambda *a, **k: arm_current_bias(*a, bias=0.55, **k),
+    "bias065": lambda *a, **k: arm_current_bias(*a, bias=0.65, **k),
     "ga_bounded": arm_ga_bounded,
     "islands2": lambda *a, **k: arm_islands(*a, islands=2, **k),
     "islands4": lambda *a, **k: arm_islands(*a, islands=4, **k),

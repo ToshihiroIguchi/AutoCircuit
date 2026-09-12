@@ -989,6 +989,41 @@ class DiscoveryResult:
             "evaluated."
         )
 
+    def _with_evolve_note(self, coverage: str) -> str:
+        """The coverage sentence, plus what it means that the genetic fallback ran.
+
+        ``_with_recommendation_note`` already knows the fallback's candidates are "not bounded
+        by :attr:`complete_up_to` at all" -- a stronger disclaimer than growth's, which still
+        earns its own sentence from :meth:`_with_growth_note`. Without an equivalent sentence
+        here, :meth:`summary`'s only trace of the fallback is "over N generations" in the
+        opening line -- neutral-looking progress metadata, not a statement that a heuristic
+        search ran because the exhaustive stage's own best fit still looked non-random. That is
+        this project's characteristic failure (docs/HANDOFF.md section 3) sitting in the one
+        artefact a reader actually keeps: the live ``--progress``/web progress banner already
+        narrates the escalation as it happens (``cli/main.py``'s ``on_stage``,
+        ``web/src/components/SearchProgress.tsx``), but neither front end's *persisted* report
+        said anything before this method existed.
+
+        Scoped to ``mode == "auto"``: a caller who asked for ``mode="evolve"`` directly chose a
+        sampled, non-exhaustive search on purpose, and that case already gets its own "sampled,
+        not exhaustive" sentence a few lines up in :meth:`completeness` -- this note is about the
+        *automatic* escalation, which is what earlier review found nothing said out loud.
+        """
+        if self.mode != "auto" or not self.generations:
+            return coverage
+        limit = self.grown_to if self.grown_to is not None else self.complete_up_to
+        beyond = f"Beyond {limit} element(s) the" if limit is not None else "The"
+        return (
+            f"{coverage} {beyond} search stopped enumerating: the best fit up to that point "
+            f"still showed a systematic residual (structured, not random, by a runs-test "
+            f"check), so it fell back to a randomized genetic search for {self.generations} "
+            "generations. That fallback carries no completeness guarantee at all -- not even "
+            "the weaker one the growth stage above earns -- so a topology's absence from this "
+            "report above that point is never evidence against it. See "
+            "docs/EVOLVE_SEARCH_PLAN.md for what is and is not yet measured about how often it "
+            "succeeds."
+        )
+
     def _with_refit_note(self, coverage: str) -> str:
         """The coverage sentence, plus what a half-finished second tier does to it.
 
@@ -998,6 +1033,7 @@ class DiscoveryResult:
         change. Saying so on the same line is the same rule a skeleton follows -- a reader who
         skims past the qualification has been misled by a true sentence.
         """
+        coverage = self._with_evolve_note(coverage)
         coverage = self._with_pool_note(coverage)
         if self.refit_progress is None:
             return coverage
@@ -1344,14 +1380,30 @@ def _delete(node: Node, path: Sequence[int]) -> Node | None:
 
 
 def random_topology(rng: np.random.Generator, pool: Sequence[str], n_elements: int) -> Node:
-    """Build a random topology by repeatedly combining nodes in series or in parallel."""
+    """Build a random topology by repeatedly combining nodes in series or in parallel.
+
+    The series/parallel coin is exactly even. [measured, docs/EVOLVE_SEARCH_PLAN.md section 3.7
+    Step 8] It shipped at 0.55 -- favouring series -- with no measurement behind the value,
+    unlike `MUTATION_WEIGHTS`' insert-series/insert-parallel entries, which section 3.5.2 already
+    proved must be held equal because any asymmetry there is a bet on the shape of the answer
+    ("the same thing as asking the user what kind of part this is, reached from inside the
+    search instead of from the CLI"). A 480-seed sweep of this seeding bias, on the same
+    opposite-shape arenas that measurement used plus a third (cap 7) to rule out a cap
+    confound, found the identical signature: bias 0.35 loses catastrophically on series-shaped
+    truths (p<0.0001, both caps) while winning significantly on a parallel-shaped one
+    (p=0.0022); bias 0.65 is the mirror image. The candidate replacement, 0.5, beat the shipped
+    0.55 significantly on the parallel arena (p=0.0133) and on the series arena at cap 7
+    (p=0.0042), with the same sign just short of conventional significance at cap 6 alone
+    (p=0.0594) -- the same "third arena settles it" pattern section 3.5.3 already used. Shipped
+    at 0.5 on that evidence.
+    """
     nodes: list[Node] = [ElementNode(str(rng.choice(pool))) for _ in range(n_elements)]
     while len(nodes) > 1:
         i = int(rng.integers(len(nodes)))
         first = nodes.pop(i)
         j = int(rng.integers(len(nodes)))
         second = nodes.pop(j)
-        combined = series(first, second) if rng.random() < 0.55 else parallel(first, second)
+        combined = series(first, second) if rng.random() < 0.5 else parallel(first, second)
         nodes.append(combined)
     return nodes[0]
 

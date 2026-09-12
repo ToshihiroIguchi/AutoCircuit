@@ -1151,6 +1151,10 @@ def test_the_genetic_fallback_in_the_browser_matches_discover_mode_auto() -> Non
     # exercising the thing it exists to check.
     assert reference.generations > 0
     assert report["mode"] == "auto"
+    # The persisted report -- not just the live progress panel -- says the fallback ran and
+    # what that means for absence-as-evidence (`DiscoveryResult._with_evolve_note`); this is
+    # the sentence the Report screen's `report.completeness` renders verbatim.
+    assert "fell back to a randomized genetic search" in report["completeness"]
 
     # `discover_refit` names what it is escalating past the moment the fallback opens
     # (bridge v15), so the progress panel can explain why rather than just naming the new

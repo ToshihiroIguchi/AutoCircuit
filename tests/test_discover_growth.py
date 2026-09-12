@@ -445,3 +445,41 @@ def test_growth_reaches_a_bounded_distance_past_the_complete_level() -> None:
     )
     assert result.complete_up_to == 3
     assert result.grown_to == 3 + GROWTH_REACH
+
+
+def test_growth_and_the_genetic_fallback_can_both_earn_their_own_note() -> None:
+    """Growth and the evolve fallback are independent escalations and can both fire on one run.
+
+    Growth lives inside `_exhaustive`; the fallback is `discover()`'s own separate step after
+    it, gated on `complete_up_to` (not `grown_to`), so a spectrum no R/C tree can reproduce
+    triggers both -- and the report must carry both notes, in the order growth-then-evolve, one
+    reading naturally into the other rather than either one being silently dropped.
+    """
+    diffusion = simulate(
+        "R1-Ws1",
+        log_frequencies(1e-2, 1e3, 6),
+        {"R1.R": 10.0, "Ws1.R": 100.0, "Ws1.tau": 1.0},
+        noise=0.01,
+        seed=0,
+    )
+    result = discover(
+        diffusion,
+        pool=("R", "C"),
+        mode="auto",
+        exhaustive_limit=3,
+        growth_width=1,
+        max_elements=6,
+        seed=0,
+        generations=3,
+        population=6,
+    )
+    assert result.grown_to is not None and result.grown_to > result.complete_up_to
+    assert result.generations > 0
+    coverage = result.completeness()
+    assert "grew rather than enumerated" in coverage
+    assert "fell back to a randomized genetic search" in coverage
+    # Growth's own note is the weaker, narrower claim and reads first; the fallback note, about
+    # what happened past even growth's reach, follows it rather than the other way around.
+    assert coverage.index("grew rather than enumerated") < coverage.index(
+        "fell back to a randomized genetic search"
+    )

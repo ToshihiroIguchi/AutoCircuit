@@ -358,7 +358,21 @@ static-site Web UI running the same core via WASM (Pyodide).
    against `discover(mode="auto")` on a spectrum engineered to make the fallback fire for a real
    reason — passed on every compared field, JSON export included, with a byte-identical
    fingerprint (`benchmarks/ev5_fingerprint.py --mode evolve`) proving both of the fallback's own
-   tiers refactor-safe first.
+   tiers refactor-safe first. **§3.6 Step 7 and §3.7 Step 8, added 2026-09-12, are now measured
+   at pilot scale.** Step 7: the loop's only stopping conditions are a generation cap, `time_limit`
+   checked at generation boundaries, and a tier-2 refit deadline — no plateau/stagnation/diversity
+   check at all. Two candidate fixes were measured against a false-stop-rate bar on a frozen-table
+   simulation (480 seeds, two arenas): plateau-based stopping is **rejected outright** (54-74%
+   false-stop rate on the harder arena at every `K` tried — a plateau of several generations is
+   normal in a run that later succeeds, exactly as §1.1's own table already warned), and
+   archive-diversity-collapse detection is safe (0% false stop) but too conservative to be useful
+   as tested (fired on 11/480 and 0/480 runs). Nothing ships. Step 8: `random_topology`'s
+   series/parallel seeding bias showed the exact `mut_series_hi`/`mut_par_hi` signature §3.5.2
+   already established for the mutation operator — measured on 480 seeds across three arenas
+   (adding a cap-7 series arena to separate the effect from a cap confound, per §3.5.3's own
+   precedent) — and was **shipped**, `0.55` → `0.5`, with the measurement in the function's own
+   docstring. The tournament/elite-width sweep and the two lower-priority items were not
+   attempted.
 
 11. `docs/KK_RESONANCE_PLAN.md` — the Lin-KK test and the resonance its basis cannot express.
    **Implemented; gates K1–K4 measured.** Its §2 is the one to read, and it is the whole point
@@ -695,7 +709,12 @@ static-site Web UI running the same core via WASM (Pyodide).
    phenomenon and not the section's own example: an over-parameterised superset topology whose
    extra element gets fitted to irrelevance lands on exactly its subset's cost, which the
    same-size breakdown shows is not the whole story — genuine same-size duplication is large on
-   its own. All seven steps of section 7's order of work are done.
+   its own. All seven steps of section 7's order of work are done. **§3.5, added 2026-09-12, is a
+   plan-only addition (not run)** proposing to thin the frequency points fed to the DE global
+   stage during screening, with the correctness constraint that `w_re`/`w_im` must be sliced with
+   the same index set as `omega`/`z`, and a pre-registered bar that a fancier thinning method must
+   beat plain uniform decimation, not merely beat no thinning at all, before it can ship over the
+   simpler mechanism.
 
 18. `docs/DISCOVER_UX_PLAN.md` — usability fixes on the Discover path, from two rounds of user
    review of the CLI and web front ends. **Implemented, items A-G; verified by `npm run check`,
@@ -736,7 +755,23 @@ static-site Web UI running the same core via WASM (Pyodide).
    startup library-loading concern is two already-closed questions —
    `STARTUP_AND_EDITING_PLAN.md` §3's staging and `METRICS_AND_UX_PLAN.md` §1.5's rejected
    prefetch — plus a scipy replacement, which is a different scale of project than anything else
-   in this document and was not attempted without being asked for specifically.
+   in this document and was not attempted without being asked for specifically. **A fourth review
+   round, 2026-09-12, found and fixed the one remaining gap**: both front ends already narrated
+   the escalation live (`cli/main.py`'s `on_stage`, `web/src/components/SearchProgress.tsx`'s
+   `"evolving"` banner, confirmed still correct by actually driving both), but the *persisted*
+   report — what `summary()` prints and what `report.completeness` renders on the Report screen —
+   said nothing beyond "over N generations" once the fallback ran, because
+   `DiscoveryResult.completeness()` had a sentence for pool-widening and one for growth but none
+   for the fallback itself. Fixed with `_with_evolve_note` (`discover.py`, wired through
+   `_with_refit_note`, the common wrapper every `completeness()` path already passes through, so
+   both front ends' persisted reports picked it up with zero React changes — confirmed with
+   Playwright against a live `npm run dev` session, not merely read from the component source).
+   Scoped to `mode == "auto"`, since an explicit `mode="evolve"` request is the caller's own
+   choice and already gets its own "sampled, not exhaustive" sentence. No wire-schema field was
+   added (`generations > 0` is already public); verified with new tests
+   (`tests/test_discover_exhaustive.py`, `tests/test_discover_growth.py`, an extra assertion on
+   gate W-EV1 in `tests/test_web_job.py`), `mypy --strict`, `ruff check`, the full relevant
+   `pytest` suite, `npm run check`, and `npm run smoke`.
 
 19. `docs/CRITERION_SELECTION_PLAN.md` — whether `DEFAULT_CRITERION` (`stats.py:39`) was the
    right default against BIC, CAIC, HQC or AICc, which no document had measured before this.
@@ -969,6 +1004,53 @@ static-site Web UI running the same core via WASM (Pyodide).
     front's *membership* shifts on two of three references in the direction the mechanism
     predicts (a surcharged element's complexity falling to match a plain R/C/L candidate's changes
     which one dominates) — explicable, not a regression, and `recommended` never moved.
+
+23. `docs/EVOLVE_COMPUTE_SKIP_PLAN.md` — what the genetic fallback already skips (a persistent
+    best-wins canonical-form cache, propose-until-unique breeding dedup, two-tier screening, and
+    warm-start inheritance with a "close enough" skip — but no early-abandon in tier 1, unlike the
+    exhaustive path), and four proposed additions. **Written 2026-09-12; one cheap proxy count run
+    the same day, the other three (idea 2c integration, the early-abandon extension, the
+    dispatch-order proxy) explicitly not attempted — each needs a real change to `_evolve`'s
+    dispatch/population model or fit-level correctness verification that does not fit a shared,
+    time-boxed session.** Idea 2c is the strongest, cheapest candidate once attempted: it already
+    measured a 33.6% dispatch-mechanism speedup from replacing a generation's synchronous
+    `executor.map` barrier with continuous dispatch, in isolation
+    (`docs/SEARCH_SPEEDUP_PLAN.md`), but never inside `_evolve`'s real population/selection loop.
+    **The cheap count that did run** (a different, cheaper proxy than the section's own precisely
+    specified warm-start-tolerance instrumentation) found that of 21 archived candidates from one
+    `discover(mode="evolve")` run on a 10-element truth, 12 numeric equivalence classes formed, 7
+    of them multi-member, covering 76% of the archive — extending `SEARCH_TIME_PLAN.md` §3.4's
+    already-known frozen-table multiplicity finding to a live evolve archive, on one run, without
+    changing that finding's own disposition (still a count, not a decision to build).
+
+24. `docs/ALGEBRAIC_EQUIVALENCE_PLAN.md` — preliminary experiments (not a build plan) for
+    detecting equivalent-circuit degeneracy algebraically or via a precomputed table, the two
+    heavier approaches beyond the numeric post-hoc clustering `SEARCH_TIME_PLAN.md` §3.4 already
+    measured. **Both spikes run 2026-09-12, the second with the user's explicit authorization to
+    install SymPy as a dev-only dependency; a full production build of either approach is not
+    attempted, and remains its own, separate decision.** The precomputed-
+    table spike found the opposite of what it expected: **size is not the binding constraint** —
+    the full `n<=8` default-pool table (1,205,566 topologies, measured by
+    `count_topologies`/`enumerate_topologies`, not projected) is ~43 MB raw JSON / ~5.7 MB
+    gzip-compressed, comfortably inside the 17–41 MB cold-start budget
+    `STARTUP_AND_EDITING_PLAN.md` §3 already fights to hold. **Build time is**: the only
+    dataset-independent way to populate such a table without a symbolic engine is to screen every
+    topology once and cluster by cost, and this project's own already-measured per-screen costs
+    put that at roughly 42–54 hours of continuous 8-worker compute for one pass — about two orders
+    of magnitude past this document's own "a few hours" bar, and a cost that recurs on every
+    canonicalization or pool change. This inverts the plan's original framing: a cheap dictionary
+    is not a free-standing alternative to the symbolic-engine spike, it is *downstream* of it (or
+    of an equally cheap algebraic shortcut), because only an algebraic method makes populating the
+    table's class assignments cheap in the first place. **The SymPy spike then ran and passed all
+    three of its own pre-registered clauses** (`benchmarks/speedup/idea_sympy_equivalence.py`):
+    zero false positives on 18 negative-control comparisons, both known equivalent-pair cases
+    (idea A's closed form, idea A2's order-2 Foster/Cauer pair) recognised — one to exact symbolic
+    zero, one to a 3.4e-20 relative residual, comfortably inside a 1e-6 tolerance the spike found
+    it genuinely needs (float-derived closed-form parameters essentially never cancel to a literal
+    `0`, a real correction to the plan's first-draft design, not a loosened bar) — and per-pair
+    timing (worst 0.11 s) well inside the "~1 s" ceiling. Confirmed at the scale tested (R/C/L
+    only, hand-supplied equivalent pairs); no general-purpose detector or production table was
+    built, and both remain the user's own decision to authorize.
 
 Update these when decisions change.
 
