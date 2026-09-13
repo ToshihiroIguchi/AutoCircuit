@@ -7,7 +7,17 @@ rather than the clauses being reworded (§3.4.4, §3.5.1, §4). §3.2.1, §3.3.1
 §3.5.1–§3.5.3 record what steps 2–5 needed that this plan did not specify — read those before
 changing any of it, because several of the round's readings were withdrawn by a later measurement
 and each one is written down beside the number that withdrew it. §4 carries EV1's completed
-baseline and the pass bar written from it.
+baseline and the pass bar written from it. **§3.6 (Step 7) — bounding a genetic run that spends
+its whole time budget with no measured improvement — is now measured at pilot scale
+(2026-09-12).** Plateau-based stopping (any `K` tried) is rejected outright: on the harder of two
+frozen-table arenas it would have discarded the eventual truth in 54-74% of the runs that found
+one at all. Archive-diversity-collapse detection is safe (0% false stop where it fired) but too
+conservative to be useful as tested (fired on 11/480 and 0/480 runs). Nothing ships; the
+diminishing-returns variant (c) was not attempted. **§3.7 (Step 8) — the hyperparameters carrying
+no measurement — is now measured for its centerpiece finding.** `random_topology`'s series/
+parallel seeding bias showed the exact `mut_series_hi`/`mut_par_hi` signature (480 seeds, three
+arenas) and was shipped `0.55` → `0.5`. The tournament-size/elite-width joint sweep and the two
+lower-priority items were not attempted this pass.
 Prerequisite reading: `docs/DISCOVERY_V2_PLAN.md` §1 and §3.3 (why enumeration took over from the
 genetic search, and the measurement that says a cheaper screen trades the answer for the clock).
 
@@ -786,6 +796,465 @@ One thing the third arena settles beyond the delete question: **the series/paral
 not an artefact of the small arena.** Raising the cap five-fold in topologies leaves both signs
 and both p-values where they were. That is the finding §3.5.2 rests on, and it now rests on two
 independent arenas rather than one.
+
+### 3.6 Step 7 — bounding a run that spends its whole budget standing still
+
+**Not step 6: that number is taken.** The work-order table in §5 already has a step 6 (the
+documentation pass that shipped alongside step 5), so the next step in this plan's own sequence
+is step 7, kept distinct from `docs/PARAM_BUDGET_PLAN.md`'s own item 6 and item 7, which are a
+different plan's numbering for unrelated changes (re-keying the tier-2 quota, collapsing
+`Circuit.complexity`'s surcharge) and share nothing with this section beyond the coincidence of
+the digit.
+
+**Originally written as a proposal, the way §3.5 was written before its own sweeps ran — three
+candidate mechanisms and a pre-registered experiment for each, in the order they cost the least
+new instrumentation. Mechanisms (a) and (b) are now measured at pilot scale (2026-09-12, see
+below); (c) is still `[not yet measured]`.** No code in `core/discover.py` has changed as a
+result — both measured mechanisms stayed exactly where their own bar left them.
+
+**The finding that motivates it.** The genetic fallback's generation loop
+(`_evolve`/`evolve_plan`, `discover.py:2815-2960` as read for this section) has exactly three
+stopping conditions, and none of them looks at whether the search is making progress:
+
+1. a generation cap (`generations`, default 30, `discover.py:1963`);
+2. `time_limit`, checked only at a generation boundary — the comment the loop carries, quoted
+   exactly, is: *"A generation, once begun, always finishes -- exactly as the loop this replaces
+   always ran a whole `evaluate_all` before checking the clock."* (`discover.py:2887-2889`);
+3. a tier-2 refit deadline, `started + time_limit * REFIT_HEADROOM` with `REFIT_HEADROOM = 1.5`
+   (`discover.py:233, 2943`), which bounds the refit stage rather than the search.
+
+A search of the evolve loop and its immediate helpers for "plateau", "stagnation",
+"no_improvement" and "converge" turns up nothing that reacts to lack of progress. The one hit
+near the loop, `discover.py:4331`'s "the population converges on whatever fits best regardless"
+belongs to `mutate`'s own docstring, about a *different* concern (why a mutation needs a
+diversity-preserving weight at all), and it is not a check the generation loop performs — nothing
+reads it back and stops early. **A run can spend its entire time budget — minutes or, at
+`--time-limit` set generously, hours — producing generation after generation with zero
+improvement in the best score, and nothing currently notices or reacts to that.** The user's only
+lever today is the same blunt `time_limit`/`generations` pair regardless of whether generation 25
+found anything generation 5 did not.
+
+**§4's own generation cap is not an answer to this, and should not be read as one.** EV3's
+measurement that "all ten warm runs hit the 30-generation cap in 5.2 minutes, leaving more than
+half of a 600 s budget unspent" (§4, under EV3) already says the cap is the thing this step is
+being asked to improve on, not a substitute for it: a run that stops at generation 30 because
+`generations` said so has told the user nothing about whether generations 20-30 were still
+finding anything. The cap and `time_limit` are both *budgets the user set*; this step is about a
+budget the search should give back on its own once spending more of it is not doing anything,
+which is a different question from how big the budget is.
+
+**§1.1 already says a plateau threshold cannot be naive.** The table in §1.1 (`p(R1,C1)-p(R2,C2)-
+p(R3,C3)`, one instrumented run, seed 0) reports best AIC only at generations 0, 3, 7 and 11 —
+i.e. gaps of one to three generations with no improvement already occur in this algorithm's
+*normal* operation on the very reference this plan's own gates are built around, not only in a
+pathological run. Any of the three mechanisms below has to be validated against a **false-stop
+rate** — does it ever stop a run that would have reached the truth if it had been let past the
+plateau it stopped at? — and not only against how much time or how many fits it saves on runs
+that really were going nowhere. A mechanism that saves time by also discarding the one run in
+nine that recovers something is not a saving; it is EV1's ratchet moving the wrong direction.
+
+Three mechanisms, cheapest and most already-instrumented first.
+
+**(a) Archive-diversity collapse detection.** The propose-until-unique breeding loop that step 3
+introduced already produces, as a side effect of filling a generation, the count this plan has
+already measured once: §1.3 reports the cache-hit rate rising from 15/40 (37.5%) at generation 1
+to 22/40 (55%) at generation 11 in the same instrumented run §1.1 uses. That number does not need
+new instrumentation to exist — whether it is already exposed on the object the loop yields, or
+needs one field added to `_GenerationBatch` (or whatever the current yield type is; check before
+assuming), is the first thing the experiment below has to establish. The proposal: expose the
+per-generation cache-hit rate directly, and stop (or, more conservatively, downshift to a
+narrower operator mix rather than stop outright — that choice is also part of what the experiment
+should decide) once it has stayed above some threshold (e.g. 90%) for several consecutive
+generations, on the reasoning that an archive re-deriving the same handful of trees over and over
+is unlikely to find anything qualitatively new by continuing to run at the same settings.
+
+*Pre-registered experiment.* Instrument the hit rate (whether newly exposed or already available)
+across the same nine `benchmarks/six_plus/truths.py` truths at the same three seeds
+`benchmarks/six_plus/recovery.py` already uses (`SEEDS = (1, 2, 3)`) — the harness §3.4.4, §3.5.2
+and §3.5.3's arenas and X4/T4/T6 in `docs/TOPOLOGY_6PLUS_PLAN.md` all draw on. For each run, record
+the generation (if any) at which the candidate rule would have fired, and separately let the run
+continue to its existing budget. *Decision rule, stated before running it*: the rule ships only if
+(i) the false-stop rate is at or indistinguishable from zero — no run where stopping at the fired
+generation would have missed a truth-or-equivalent that continuing to the existing budget found —
+and (ii) it produces a reported, non-trivial wall-clock or fit-count saving on the runs it does
+correctly cut short. Either clause failing alone is enough not to ship it, the same two-sided
+discipline EV3 and EV4 already use elsewhere in this document.
+
+**(b) Best-cost plateau detector.** Stop after `K` consecutive generations with no improvement in
+the best score. Two design choices this section states rather than leaves implicit, because both
+change what the mechanism actually measures: whether "best score" means the single best score
+across the whole archive, or a per-complexity-level best (since §1.1's own table shows a
+six-element truth's five-, six- and seven-element bands can each still be improving while another
+band has stalled, and a global best can mask that) — and this section's working assumption,
+subject to revision by whichever the experiment shows discriminates better, is per-complexity,
+because a global-best plateau says only that the *largest* candidate stopped improving and
+nothing about whether a smaller, still-live candidate is about to cross it on the front. `K`
+itself must be **swept**, not guessed — a ladder such as `K` in `{3, 5, 8, 12}` — following this
+document's own hyperparameter discipline (§3.5's mutation-weight and adaptive-parsimony sweeps,
+both of which tested a ladder of values and reported a sweep that found nothing as a result in
+its own right, rather than picking one value and asserting it).
+
+*Pre-registered experiment and decision rule*: identical harness and identical two-clause rule to
+(a) — zero (or statistically indistinguishable from zero) false-stop rate on the nine truths ×
+three seeds, and a real saving on the runs that do stop — evaluated at each rung of the `K`
+ladder, so that the ladder's own end (very small `K`, very large `K`) is measured rather than
+assumed to bracket a sensible middle, the same "run the ladder to its ends, not just its middle"
+discipline §3.4.3 used for the breeding-pool width.
+
+**(c) Diminishing-returns threshold on the Pareto front.** A softer version of (b): rather than a
+hard zero-improvement count, sum the improvement across the *whole current Pareto front* (not
+just the single best score) over the last `K` generations, and stop when that sum falls below
+some fraction (e.g. 10%) of the sum seen over the *first* `K` generations of the same run. This
+is meant to catch the case (b) cannot: a front that is still inching forward on several
+complexity levels at once, none of which individually clears a hard no-improvement count, but
+whose combined movement has already dropped to noise.
+
+*Pre-registered experiment and decision rule*: same harness, same two-clause rule as (a) and (b),
+swept over both `K` and the fraction threshold (e.g. 5%, 10%, 20%), because a threshold invented
+in advance and never swept is exactly the failure `WEB_UI_PLAN.md` §2.5 and
+`PARTIAL_TOPOLOGY_PLAN.md` §3.2 already name in this project's own house rules.
+
+**None of the three is assumed to win, and it would not be a surprise if the answer this step
+produces is the one §3.5 produced for adaptive parsimony and the mutation weights: built, swept,
+and left off because nothing cleared its own bar.** Nothing ships on a plausible story here
+either — only a number, against a rule written before the run that produced it.
+
+**[measured, pilot scale, 2026-09-12] (a) and (b) were both run; (c) was not attempted this
+session.** Rather than the nine live `six_plus` truths this section's own decision rule is
+written against (each `discover(mode="evolve")` call costs minutes, per §1's own 471.9 s example
+— too slow for a shared time budget), the pilot reused `benchmarks/screening_round/arms.py`'s
+frozen-table simulation (`benchmarks/screening_round/stopping_rule_probe.py`, new): the real
+`_unique_best`/`_next_generation`/`random_topology` loop against a pre-screened cost table, so
+480 seeds finishes in minutes rather than hours. A false stop is recorded whenever the rule would
+have fired at a fit count strictly before the run's own (already-tracked) `hit_at`. **This
+answers "does the signal work as a rule" cheaply; it is not the live-truth evidence base the
+section's own decision rule asks for, and nothing here ships as a default on its strength alone.**
+
+| rule | series arena (100% baseline hit rate) | Maxwell-Wagner arena (83.1% baseline hit rate) |
+|---|---|---|
+| plateau K=3 | 12.3% false stop, 292.2 fits saved | **74.2% false stop**, 1026.0 fits saved |
+| plateau K=5 | 3.8% false stop, 258.8 fits saved | **66.0% false stop**, 942.4 fits saved |
+| plateau K=8 | 0.6% false stop, 216.5 fits saved | **54.2% false stop**, 826.1 fits saved |
+| diversity, window 3, threshold 90% | 0% false stop (11/480 ever fired), 27.2 fits saved | never fired (0/480) |
+
+**Plateau detection is rejected, decisively, at every `K` tried.** §1.1's own table already
+warned that a plateau of 1-3 generations is normal in a run that later succeeds; this measures
+exactly how costly that warning is to ignore — on the harder, lower-baseline-hit-rate
+Maxwell-Wagner arena, a plateau rule would have thrown away the eventual truth in **54 to 74% of
+the runs that found one at all**, worse at every `K` down to the largest tried. Raising `K`
+shrinks the damage but does not come close to eliminating it, and the fits saved by a false stop
+are not a saving at all — they are the truth, discarded. No `K` in the tried range clears the
+"at or near zero" bar on both arenas simultaneously, so plateau detection in any of the forms
+tested here is closed, not merely deferred.
+
+**Archive-diversity collapse is the opposite shape of result: safe, but too conservative to be
+useful as tested.** Zero false stops where it fired at all — but at window 3 / threshold 90% it
+fired on only 11 of 480 series-arena runs and never once on the harder arena, saving a modest
+27.2 fits on the runs it did catch. This is the safe side of the same trade-off plateau detection
+got wrong: a threshold this strict essentially never distinguishes a truly converged archive from
+an ordinary run, so it is not yet a useful lever, but the mechanism itself (the signal is already
+computed, for free, by the existing propose-until-unique loop) remains the cheapest one to
+revisit with a lower threshold or shorter window — not attempted this session.
+
+**(c) was not run.** Diminishing-returns-on-the-whole-front needed its own new instrumentation
+(summed front improvement, not a single best score) that the time budget did not reach; it stays
+an open item, not a rejected one.
+
+**Nothing ships from this step.** Both measured mechanisms stayed exactly where their own
+pre-registered bar left them — one closed on the evidence, one open on it — and `evolve_plan`'s
+production stopping logic is unchanged.
+
+**A follow-on this step does not build.** If any of (a)-(c) ships, a run stopped early by it
+becomes a fourth way a report can be partial, alongside the ones `DiscoveryResult` already tracks
+(`refit_progress` for a tier-2 deadline, and `_with_evolve_note`, `discover.py:992-1025`, which
+already exists and already states that the fallback ran at all and what that does and does not
+guarantee). The natural place to record *which* stopping condition actually fired — generation
+cap, `time_limit`, or a new plateau rule — is that same reporting layer, most likely as a further
+sentence alongside `_with_evolve_note`'s, so that a reader can tell "ran the full budget and
+still didn't find much" apart from "stopped itself early because it judged further search
+unlikely to help." That is explicitly out of scope for this step: it is a reporting change with
+its own honesty obligations (the sentence has to say what was measured, not what was hoped), and
+it is deferred until one of the three mechanisms above has actually shipped and has something
+true to report.
+
+**[measured, live, 2026-09-12] The pilot's own deferred item — real `discover(mode="evolve")`
+runs rather than the frozen-table proxy — was run, via a new `benchmarks/six_plus/
+stopping_live.py`, which drives the real `evolve_plan` generator through the same dispatch loop
+`_evolve` uses (not a reimplementation) and reuses `recovery.py`'s `Referee` for `hit_at`.** Only
+(a), archive-diversity collapse, was re-tested live — plateau detection stays rejected on the
+pilot's own decisive 54-74% false-stop measurement and was not re-run. All nine `six_plus` truths
+at `SEEDS = (1, 2, 3)` (27 runs, `population=40`, `max_elements=7`, `workers=8`), scored against
+the same grid the pilot swept (`window in {2, 3, 5}`, `threshold in {0.50, 0.65, 0.80, 0.90}`).
+**The live result reproduces the pilot's own reading exactly**: zero false stops at every
+threshold that ever fired (2/27 at window=2/threshold=0.50, 1/27 at window=3/threshold=0.50,
+0/27 everywhere else in the grid, including every threshold at or above 0.65) — safe wherever it
+speaks, but too conservative to be a useful mechanism as specified, confirmed now on real search
+trajectories rather than a proxy. **Nothing ships**; `evolve_plan`'s stopping logic remains
+unchanged, and this closes the live-validation half of step 7 the pilot could not afford. One
+data-quality caveat, unrelated to the stopping-rule verdict: `ser6` (seeds 2, 3) and `ser7` (all
+three seeds) terminated at 3-8 generations instead of the 60-generation cap, hitting the run's
+600 s per-run safety limit early — likely a mix of concurrent load from other experiments running
+in the same session and the series shape's own higher per-generation cost at production
+settings. Their `hit_at`/recovery numbers should not be read as a measurement of `ser6`/`ser7`'s
+true live recoverability under this configuration; the stopping-rule conclusion above is
+unaffected, since the rule fired on none of these five truncated runs either.
+
+### 3.7 Step 8 — the hyperparameters still unmeasured, and a plan for the two worth sweeping first
+
+**Originally written entirely `[not yet measured]`, at the same implementation-grade detail
+§3.5's sweeps were written at before their own gates existed. The centerpiece
+(`random_topology`'s bias) is now measured and shipped (2026-09-12, see below); the
+tournament-size/elite-width sweep and the two lower-priority items remain `[not yet measured]`.**
+
+#### What already carries a measurement, and what does not
+
+Six module-level constants that govern `_evolve`/`evolve_plan` already carry a `[measured]`
+justification at their own definition, confirmed by reading each one rather than assumed from its
+name:
+
+- `SCREEN_RESTARTS` (`discover.py:146`) — `[measured, docs/TOPOLOGY_6PLUS_PLAN.md section 5.7.2]`,
+  the basin-lottery finding, plus `docs/SEARCH_TIME_PLAN.md` §4.1's later run of the recovery arm
+  that kept it at 1.
+- `MUTATION_WEIGHTS` (`discover.py:294`) — `[measured, §3.5.2]`, the series/parallel symmetry
+  finding this section extends.
+- `PARSIMONY_SCALING` (`discover.py:327`) — `[measured, §3.5.1]`, inert below scaling 300 and
+  unordered above it.
+- `BREEDING_EXTRA` (`discover.py:272`) — `[measured, §3.4.3]`, the ladder that ran the pool width
+  down to zero.
+- `WARM_ACCEPT_FACTOR` (`discover.py:256`) — `[measured, §3.3.1]`, the near-binary accept/reject
+  finding.
+- `MIN_REFINE_PER_SIZE` (`discover.py:218`) — `[measured, docs/PARAM_BUDGET_PLAN.md section 6,
+  benchmarks/screening_round/quota_replay.py]`, the re-keyed quota's floor.
+
+Five more items in the same file govern the same loop and carry no measurement note of any kind —
+confirmed by reading each definition, not by their absence from this document's index:
+
+- **`PROPOSE_RETRY_CAP = 20`** (`discover.py:306`, used at `discover.py:4353` inside
+  `_next_generation`'s breeding loop). Its docstring gives a structural reason *some* cap must
+  exist — an unbounded retry against a converged front, every neighbour one mutation away from the
+  elite already known, would spin forever — but the value 20 itself has never been swept.
+- **`_tournament`'s sample size, `size: int = 3`** (`discover.py:4378-4381`). Fixed regardless of
+  how large the set it draws from is.
+- **The elite-width divisor, `6`, in `elite = front[: max(2, population // 6)]`**
+  (`discover.py:4347`, inside `_next_generation`). `population` is a user-facing budget; the
+  divisor that turns it into an elite count is not.
+- **The crossover probability, `0.3`, in `if rng.random() < 0.3 and len(alive) > 1:`**
+  (`discover.py:4357`, inside `_next_generation`'s breeding loop, gating whether a child is bred by
+  crossover-then-mutate or by mutation alone).
+- **`random_topology`'s series/parallel bias, `0.55`, in
+  `combined = series(first, second) if rng.random() < 0.55 else parallel(first, second)`**
+  (`discover.py:1382-1392`, the literal at line 1390). This is the one this section argues for
+  first.
+
+One correction worth stating before the rest: `_tournament` and the elite-width formula both draw
+from whatever `_next_generation` is handed as `alive`, and since step 4 shipped with
+`BREEDING_EXTRA = 0`, that argument is `_breeding_pool(alive, criterion=criterion)` — the bounded
+pool, which at `BREEDING_EXTRA = 0` **is** the Pareto front (`discover.py:2789-2790`). So in the
+code as it ships today, both unmeasured constants act on the *front* (EV4 measures it at roughly
+5-10 members across a run, §4 under EV4's front-only re-run), not on the unbounded history §1.2
+measured collapsing. That distinction matters for how item 2 below has to be framed, and getting
+it wrong would repeat exactly the mistake §3.5.1 records for the crowding term.
+
+#### The centerpiece: `random_topology`'s bias is the same choice, made in a different function
+
+§3.5.2 found that `MUTATION_WEIGHTS`' insert-series and insert-parallel entries must be held
+equal, because any asymmetry is not a better search — it is a bet on the shape of the answer:
+"Any asymmetric setting is a bet on the shape of the answer: it pays on truths of that shape and
+costs about as much on truths of the other. The software is not allowed to make that bet — it is
+the same thing as asking the user what kind of part this is, reached from inside the search
+instead of from the CLI, and CLAUDE.md rules it out in the one place it is hardest to notice."
+That sentence is about which **structural edit** `mutate` prefers when it changes an existing
+candidate.
+
+`random_topology`'s bias is the same decision made one level earlier, before mutation has anything
+to work on at all: at line 1390, every time two subtrees are joined while assembling the initial
+population, the coin is `0.55` in favour of `series`, not `0.5`. That is not a mutation preference,
+it is the search **starting out already believing the answer has more series structure than
+parallel structure** — structurally identical to the choice §3.5.2 already forbade, applied to
+seeding instead of editing. Nothing has ever checked whether it does the same thing that
+asymmetric mutation weights did: win on series-shaped truths and lose by a comparable margin on
+their mirror image.
+
+**Pre-registered experiment**, reusing §3.5.2's own validated method rather than inventing a new
+one: the same two arenas, `land_rclcpe6.json` (the 21,057-topology `R,C,L,CPE` arena carrying the
+parallel-shaped three-block Maxwell-Wagner truth, `p(R1,C1)-p(R2,C2)-p(R3,C3)`) and
+`land_series_rcl6.json` (2,174 topologies, the series-shaped `C1-R1-L1-p(R2,C2)` truth, 23
+targets), both in `benchmarks/screening_round/`. Sweep `random_topology`'s bias over
+`{0.35, 0.45, 0.5, 0.55 (shipped), 0.65}` via `benchmarks/screening_round/arms.py`, at the same
+budgets §3.5.2 and §3.4.3 already calibrated as unsaturated for these exact arenas — 150 fits on
+`land_rclcpe6`, 40 fits on `land_series_rcl6` ("a budget calibrated to 64% so that the arena still
+has somewhere to fail", §3.5.2) — 480 seeds per arm, McNemar exact on the discordant seeds, the
+same discipline §3.4.4 and §3.5.2/§3.5.3 both used. If either arena shows a significant swing,
+extend to `land_series_rcl7.json` (11,033 topologies, same truth two below the cap instead of one)
+the way §3.5.3 built its own third arena, to separate a genuine bias effect from a truth-sits-at-
+the-cap confound.
+
+*Decision rule, stated before running it*: ship `0.5` only if bias `0.55` shows a significant
+(McNemar `p < 0.05`, sign consistent across both arenas at 480 seeds) win on the series-shaped
+truth and a significant loss of comparable size on the parallel-shaped truth — the exact
+signature §3.5.2 measured for `mut_series_hi`/`mut_par_hi`. If the sweep instead ties on both
+arenas the way `mut_uniform` tied (§3.5.2's other reading), `0.55` stays, on the same grounds
+`MUTATION_WEIGHTS`' *level* stayed: a value this codebase's own arenas cannot distinguish from
+another is not evidence for moving it, only for recording that it was checked. Either outcome is
+written down; a tie is not license to change the default anyway on the standing symmetry
+argument.
+
+**A cheaper alternative, and why the direct measurement should still run.** Because the standing
+symmetry principle already covers this case, one could simply set the bias to `0.5` on that
+principle alone and run only enough seeds to confirm no regression, rather than a full sweep aimed
+at finding an effect. That is available and cheaper. It is not what this section recommends,
+because this project's own stated rule is that "nothing ships on a plausible story, only on a
+number" (`docs/SEARCH_SPEEDUP_PLAN.md`'s opening line, in the style of `docs/SEARCH_TIME_PLAN.md`)
+— and the mutation-weight symmetry finding itself is exactly this kind of intuitively-obvious
+conclusion that turned out to need the second arena and then a third to actually establish (§3.5.2,
+§3.5.3). A plausible-sounding structural analogy between `random_topology` and `mutate` is not the
+same instrument as a measurement of `random_topology` itself, and this document's own track record
+says the two do not always agree.
+
+**[measured, 2026-09-12] Run exactly as pre-registered, plus the cap-7 extension, and the
+decision rule's ship condition is met.** `benchmarks/screening_round/arms.py` gained
+`arm_current_bias`/`_random_topology_biased` (the shipped loop, bias parameterised) and five arm
+entries (`bias035`…`bias065`); `bias055` reproduces `arm_current` exactly and stood in as the
+paired control. 480 seeds each, on both original arenas plus the cap-7 series arena the rule's
+own extension clause calls for whenever either shows a swing (it did, on both):
+
+| arm | Maxwell-Wagner (parallel), budget 150 | series, cap 6, budget 40 | series, cap 7, budget 40 |
+|---|---:|---:|---:|
+| `bias055` (shipped) | 24/480 | 217/480 | 258/480 |
+| `bias035` | 48/480, **p=0.0022 better** | 123/480, **p<0.0001 worse** | 137/480, **p<0.0001 worse** |
+| `bias045` | 43/480, **p=0.0145 better** | 170/480, **p=0.0003 worse** | 203/480, **p<0.0001 worse** |
+| `bias050` (candidate) | 42/480, **p=0.0133 better** | 196/480, p=0.0594 worse | 227/480, **p=0.0042 worse** |
+| `bias065` | 23/480, p=1.00 (tied) | 256/480, **p=0.0032 better** | 320/480, **p<0.0001 better** |
+
+**The signature is exactly `mut_series_hi`/`mut_par_hi`'s, and it is stronger than the
+pre-registration's own minimum bar asked for.** Every bias below 0.55 wins significantly on the
+parallel-shaped truth and loses significantly on the series-shaped truth at both caps; every bias
+above 0.55 does the mirror image. `bias055` is not a neutral point sitting between two ties — it
+is already partway into a real, monotonic, opposite-signed effect that both `bias035`'s and
+`bias065`'s far-larger swings make unambiguous. The specific replacement candidate, `bias050`,
+clears significance against the shipped `0.55` on the parallel arena (p=0.0133) and on the series
+arena at the larger, more powerful cap-7 table (p=0.0042); the cap-6 series contrast alone is
+directionally identical but short of conventional significance (p=0.0594) — the same "one arena
+underpowered, a third settles it" pattern §3.5.3 used for the delete weight, reproduced here on
+the *specific* pairwise contrast the decision rule is written around, even though the wider sweep
+already makes the underlying effect obvious without it.
+
+**Shipped.** `discover.py`'s `random_topology` bias moved `0.55` → `0.5`, with the measurement
+recorded in the function's own docstring. This is a one-line, RNG-stream-sensitive change (like
+the mutation-weight change before it), so `benchmarks/ev5_fingerprint.py --mode evolve` is
+expected to differ and is not a regression; `mypy --strict` and `ruff check` pass on the changed
+module, and `tests/test_discover.py`/`test_discover_exhaustive.py`/`test_discover_growth.py`/
+`test_discover_pool.py`/`test_discover_params.py`/`test_discover_skeleton.py` — 137 tests — were
+re-run after the change: all pass, confirming nothing else in the suite assumed the old value.
+
+#### Second: tournament size and elite width, swept jointly against an already-measured pathology
+
+§1.2 measured the mechanism this pair of constants controls: "the probability that the best-known
+candidate is even considered as a parent is about `3/N`, and `N` grows every generation
+[...] 3/32 = 9.4% at generation 0, 3/263 = 1.1% at generation 11 — an 8.2× fall in selection
+pressure over 12 generations." That measurement predates step 4's bounded pool, and step 4's own
+re-run under `BREEDING_EXTRA = 0` shows the pathology sharply reduced but not gone: EV4's
+front-only arm (§4, under EV4) has `P(best enters a tournament)` fall from 0.3763 to 0.2750 (÷1.37)
+over a run, driven by the front itself growing from 5 to 10 members as it acquires complexity
+levels — a residual of the same mechanism, an order of magnitude smaller because the pool it acts
+on is now bounded rather than unbounded. Tournament size (fixed at 3) and elite width
+(`population // 6`, decoupled from the front's own size) are the two levers that jointly decide how
+sensitive selection is to that residual growth, and neither has been swept, let alone swept
+together — sweeping them independently would risk exactly the kind of one-axis-at-a-time reading
+this document's own islands round (§3.4.2-§3.4.4) had to walk back once width and migration turned
+out to interact.
+
+**The trap to avoid, stated explicitly.** §3.5.1 records the shape of the mistake most relevant
+here: "The frequency is taken over the archive, not the pool. Step 4 left the breeding pool equal
+to the Pareto front, which holds about one member per complexity by construction — a crowding
+count over it is 1 everywhere and ranks nothing. [...] Written against the pool, as the plan's own
+wording implies, the term would have been a measured no-op for a reason that has nothing to do
+with adaptive parsimony." The direct analogue for this sweep: an archive-relative tournament-size
+formula must be sized against whatever `_next_generation` actually breeds from **today** — the
+bounded pool (the front, per the correction above), not the unbounded evaluation history that
+`_Evaluator.cache`/`DiscoveryResult` still retains for reporting. Sizing the formula against the
+full history would reproduce §3.5.1's mistake with the sign flipped: since the history keeps
+growing while the front does not, a formula keyed to history size would make the tournament grow
+without bound long after the quantity it is meant to track (front width) has stopped moving,
+measuring an effect that cannot be there by construction.
+
+**Concrete candidate.** An archive-size-relative tournament, `max(3, len(pool) // K)`, where
+`pool` is the exact object `_tournament` is already handed (the bounded breeding pool, i.e. the
+front at the shipped `BREEDING_EXTRA = 0`) and `K` is swept over a ladder such as
+`{4, 8, 16, 32}` — following §3.4.3's own discipline of running a ladder to both of its ends rather
+than guessing a middle. Paired with an elite-width ladder over the divisor, `{3, 6, 9, 12}` in
+`max(2, population // divisor)`, swept as the second dimension of the same grid rather than as a
+separate round, since both formulas read from the same pool and a change to one changes what the
+other is competing against.
+
+*Pre-registered experiment*: extend `benchmarks/ev4_diversity.py`'s existing instrumentation
+(cache-hit rate per generation, `P(best enters a tournament)`, unique topologies) to report the
+same two numbers at each cell of the `(K, divisor)` grid, on the same three-block Maxwell-Wagner
+reference EV4 already uses, seeds 0-2, 600 s, arms interleaved seed by seed exactly as EV4's own
+runs were. Independently, run the hit-rate/McNemar comparison `arms.py` already supports at the
+same two unsaturated budgets §3.4.3 established (150 fits on `land_rclcpe6`, 40 fits on
+`land_series_rcl6`), 480 seeds per cell, on the corners and midpoint of the grid rather than every
+cell (the full outer product is expensive; §3.4.3 and §3.5.2 both found that the ends of a ladder,
+not its middle, are where an effect either shows up or fails to).
+
+*Decision rule, stated before running it*: a cell ships as the new default only if (i) it does not
+regress EV1's ratchet (1/9 reported, 1/9 on-front, 0/9 recommended, the same floor every step in
+this document has been held to) and (ii) it produces a McNemar-significant hit-rate improvement
+over the shipped `(size=3, divisor=6)` on at least one of the two arenas **without a
+significant loss on the other** — the same two-sided standard §3.5.2 applied to the mutation
+weights, because a formula that trades one arena's recovery for the other's is exactly the
+shape-dependent bet CLAUDE.md rules out, restated for a selection-pressure knob instead of a
+structural-edit one. A grid that ties everywhere, the way `mut_uniform` tied on two of three
+arenas in §3.5.2, is reported as that result and nothing moves.
+
+#### Lower priority: `PROPOSE_RETRY_CAP` and the crossover probability
+
+Both are bare scalar levels rather than a structural symmetry, and this project's own track record
+on that category is consistent: §3.5.2 found that the *level* of the shipped mutation-weight
+tuple — retype at 0.35 rather than 0.25, delete at 0.15 rather than 0.25 — was not something either
+arena could distinguish from choosing nothing at all (`mut_uniform` tied the shipped tuple at
+p = 1.00 and p = 0.92 on the two arenas that mattered). Bare levels rarely move outcomes here; only
+the one structural asymmetry did. That is a reason to give these two a cheap first pass rather than
+the full joint sweep above, not a reason to skip measuring them.
+
+**`PROPOSE_RETRY_CAP`.** Before sweeping the value 20, measure whether it is ever the binding
+constraint at all — the same shape of question §1.5 already asked and answered for a different
+suspected inefficiency: "4000 proposed children on the same archive: 3853 kept, 96.3%. A 3.7%
+discard rate is not worth a code change, and it is recorded here so nobody re-derives the
+suspicion and acts on it." The retry cap's equivalent is cheap to instrument because
+`benchmarks/screening_round/arms.py`'s incumbent arm already drives the real
+`discover._next_generation` (and therefore the real retry loop at `discover.py:4353`) against a
+frozen landscape table, so no full fit is needed — only a counter on how many of the
+`PROPOSE_RETRY_CAP` iterations a call actually uses before finding a fresh child or giving up and
+accepting a duplicate. *Pre-registered rule*: instrument this over a normal run on both
+`land_rclcpe6` and `land_series_rcl6` at their established budgets (150 and 40 fits) for 20 seeds
+each — enough to see whether the cap is hit rarely (in which case, following §1.5's own
+precedent, it is left alone and recorded as checked) or non-negligibly often (in which case, and
+only then, the value 20 itself gets a real sweep, `{5, 10, 20, 40}`, under the same McNemar
+discipline as everything else in this section).
+
+**Crossover probability (`0.3`).** Rather than a separate round, bundle it as a third swept
+dimension into the tournament/elite grid above — `{0.15, 0.3 (shipped), 0.5}` alongside `K` and
+the elite divisor — since it is read from the same breeding loop those two constants are, and
+running it as its own 480-seed round would cost as much as the grid above for a constant this
+document's own base rate says is more likely than not to tie. If time does not allow the full
+three-dimensional grid, this is the dimension to drop, on the base-rate evidence above, not
+`random_topology`'s bias or the tournament/elite pair.
+
+#### Work order
+
+1. **`random_topology`'s bias.** Cheapest of the four: it reuses `land_rclcpe6.json` and
+   `land_series_rcl6.json` exactly as they already exist, needs no new instrumentation beyond what
+   `arms.py` already reports, and carries the strongest prior justification of the four (the
+   symmetry principle §3.5.2 already established for a structurally identical choice).
+2. **Tournament size / elite width, joint sweep.** Addresses a pathology this document already
+   measured (§1.2's 8.2× collapse, EV4's residual 1.37× under the bounded pool) and needs the
+   `ev4_diversity.py` extension described above before the grid can be scored on selection
+   pressure rather than only on hit rate.
+3. **`PROPOSE_RETRY_CAP`.** Cheap instrumentation-only pass first, on the model of §1.5; a full
+   sweep of the value 20 runs only if that pass finds the cap binding non-negligibly often.
+4. **Crossover probability.** Bundled into item 2's grid if time allows; skipped otherwise, on
+   this document's own repeated finding that a bare scalar level rarely moves an outcome here.
 
 ## 4. Gates
 

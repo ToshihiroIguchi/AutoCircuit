@@ -72,6 +72,11 @@ class Arm:
     name: str
     growth_width: int
     screen_restarts: int
+    #: docs/PARAM_BUDGET_PLAN.md item 5 (X4 at P=7): on an R,C,L-only pool every element costs
+    #: one parameter, so ``max_params=7`` enumerates exhaustively to exactly seven elements --
+    #: the same reach ``grow`` gets from growth, through the parameter-axis code path instead.
+    #: Mutually exclusive with ``growth_width>0`` (``discover()`` refuses the combination).
+    max_params: int | None = None
 
 
 ARMS: tuple[Arm, ...] = (
@@ -79,6 +84,7 @@ ARMS: tuple[Arm, ...] = (
     Arm("grow", growth_width=4, screen_restarts=1),
     Arm("seeds2", growth_width=0, screen_restarts=2),
     Arm("grow+seeds2", growth_width=4, screen_restarts=2),
+    Arm("params7", growth_width=0, screen_restarts=1, max_params=7),
 )
 
 #: Noise realisations. Fixed here rather than passed, so that a run cannot be extended until it
@@ -152,6 +158,7 @@ def run_one(truth: Truth, arm: Arm, seed: int, workers: int) -> dict[str, Any]:
         growth_width=arm.growth_width,
         screen_restarts=arm.screen_restarts,
         max_elements=7,
+        max_params=arm.max_params,
         seed=0,
     )
     elapsed = time.perf_counter() - started
@@ -171,6 +178,7 @@ def run_one(truth: Truth, arm: Arm, seed: int, workers: int) -> dict[str, Any]:
         "arm": arm.name,
         "growth_width": arm.growth_width,
         "screen_restarts": arm.screen_restarts,
+        "max_params": arm.max_params,
         "seed": seed,
         "seconds": round(elapsed, 1),
         "n_evaluated": result.n_evaluated,

@@ -20,6 +20,10 @@ from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
+
+# docs/DE_KERNEL_PLAN.md Step 4: run this file with the repo root on PYTHONPATH alongside
+# `src` (see that plan's own usage block) so this import resolves.
+from benchmarks.speedup.de_kernel import de_best1bin_relaxed
 from landscape import reference_spectrum
 from scipy.optimize import (
     basinhopping,
@@ -87,6 +91,20 @@ def de(popsize: int, maxiter: int) -> Callable[[Counted, int], Float]:
             updating="deferred",
         )
         return np.asarray(result.x, dtype=np.float64)
+
+    return run
+
+
+def de_relaxed_best1bin() -> Callable[[Counted, int], Float]:
+    """docs/DE_KERNEL_PLAN.md's purpose-written vectorized DE (relaxed variant: batched
+    sample-index draws, not bit-exact against scipy's RNG stream), at the same 8x40 budget as
+    the incumbent arm."""
+
+    def run(c: Counted, seed: int) -> Float:
+        bounds = list(zip(c.p.lower_x, c.p.upper_x, strict=True))
+        return de_best1bin_relaxed(
+            c.batch, bounds, seed=seed, popsize=8, maxiter=40, tol=1e-4,
+        )
 
     return run
 
@@ -278,7 +296,9 @@ def lshade(
     return run
 
 
-def jade(np_mult: float = 18.0, p_min_frac: float = 0.05, c: float = 0.1) -> Callable[[Counted, int], Float]:
+def jade(
+    np_mult: float = 18.0, p_min_frac: float = 0.05, c: float = 0.1
+) -> Callable[[Counted, int], Float]:
     """JADE (Zhang & Sanderson, 2009): SHADE's ancestor.
 
     Same `current-to-pbest/1` mutation and archive as `lshade()`, but adaptation is a single
@@ -426,9 +446,11 @@ def ga_sbx(
         best_x, best_f = pop[:, best_i].copy(), float(fitness[best_i])
 
         while c.n < cap:
-            i1, i2 = rng.integers(0, pop_size, size=pop_size), rng.integers(0, pop_size, size=pop_size)
+            i1 = rng.integers(0, pop_size, size=pop_size)
+            i2 = rng.integers(0, pop_size, size=pop_size)
             sel1 = np.where(fitness[i1] < fitness[i2], i1, i2)
-            i3, i4 = rng.integers(0, pop_size, size=pop_size), rng.integers(0, pop_size, size=pop_size)
+            i3 = rng.integers(0, pop_size, size=pop_size)
+            i4 = rng.integers(0, pop_size, size=pop_size)
             sel2 = np.where(fitness[i3] < fitness[i4], i3, i4)
             p1, p2 = pop[:, sel1], pop[:, sel2]
 
@@ -615,6 +637,7 @@ def sobol_lm(n_starts: int = 12) -> Callable[[Counted, int], Float]:
 
 ARMS: dict[str, Callable[[Counted, int], Float]] = {
     "de_8x40 (current)": de(8, 40),
+    "de_relaxed_vectorized": de_relaxed_best1bin(),
     "de_8x20": de(8, 20),
     "de_4x40": de(4, 40),
     "de_rand1bin": de_strategy("rand1bin"),

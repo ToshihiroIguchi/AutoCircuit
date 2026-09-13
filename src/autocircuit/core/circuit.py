@@ -151,7 +151,16 @@ class Circuit:
 
     @property
     def complexity(self) -> float:
-        """Structural cost used to rank candidates in the topology search."""
+        """Structural cost used to rank candidates in the topology search.
+
+        [measured, docs/PARAM_BUDGET_PLAN.md section 7, 2026-09-12] Identically :attr:`n_params`
+        under today's element weights: every :class:`~autocircuit.core.elements.Element` charges
+        its own parameter count and nothing more, after a per-element surcharge on four elements
+        (W, CPE, SKINF, SKINW) was measured and found to earn nothing it was tested against. Kept
+        as its own named property rather than folded into `n_params` everywhere it is used, so a
+        future weighting has one place to be reintroduced if a measurement ever justifies one --
+        see :attr:`~autocircuit.core.elements.Element.complexity` for the measurement.
+        """
         return float(sum(el.complexity for _, el in self._specs))
 
     def param_specs(self) -> list[elements.ParamSpec]:
@@ -317,6 +326,17 @@ def simplify(node: Node) -> Node:
 def count_elements(node: Node) -> int:
     """Number of element leaves in a topology."""
     return len(_walk(node))
+
+
+def count_params(node: Node) -> int:
+    """Total free parameters in a topology, summed over its element leaves.
+
+    A bare recursion rather than ``len(Circuit(node).param_names)``: the parameter-budgeted
+    enumerator in :mod:`autocircuit.core.enumerate` calls this once per candidate tree while
+    composing it, and ``Circuit.__init__`` relabels and validates every leaf on construction --
+    work this call sits squarely upstream of and must not pay for.
+    """
+    return sum(elements.get(leaf.code).n_params for leaf in _walk(node))
 
 
 # -- Tree addressing -----------------------------------------------------------------------

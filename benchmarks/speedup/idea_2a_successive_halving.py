@@ -36,8 +36,8 @@ sys.path.insert(0, str(_SPEEDUP_DIR))
 
 from truths import MW5, spectrum_for  # noqa: E402
 
-from autocircuit.core.enumerate import enumerate_topologies  # noqa: E402
 from autocircuit.core.circuit import Circuit  # noqa: E402
+from autocircuit.core.enumerate import enumerate_topologies  # noqa: E402
 from autocircuit.core.fit import screen  # noqa: E402
 
 N_ELEMENTS = 5
@@ -56,7 +56,9 @@ def main() -> None:
     full_costs = []
     quarter_costs = []
     for text in texts:
-        full_costs.append(screen(text, spectrum, seed=0, popsize=FULL_POPSIZE, maxiter=FULL_MAXITER))
+        full_costs.append(
+            screen(text, spectrum, seed=0, popsize=FULL_POPSIZE, maxiter=FULL_MAXITER)
+        )
         quarter_costs.append(
             screen(text, spectrum, seed=0, popsize=QUARTER_POPSIZE, maxiter=QUARTER_MAXITER)
         )

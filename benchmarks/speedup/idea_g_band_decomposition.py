@@ -12,10 +12,10 @@ that guess -- no `differential_evolution` at all. Compare its final cost against
 pipeline's full global-DE-plus-polish, at the same total budget class (one local polish vs one
 full screen).
 
-Decision rule, fixed before running: worth prototyping into `discover.py` only if the band-warm-start
-route reaches within the same basin (`cost <= best_known * 1.1`) at least as often as the
-production screen, since its whole appeal is replacing an expensive global search with N cheap
-local ones.
+Decision rule, fixed before running: worth prototyping into `discover.py` only if the
+band-warm-start route reaches within the same basin (`cost <= best_known * 1.1`) at least as
+often as the production screen, since its whole appeal is replacing an expensive global search
+with N cheap local ones.
 """
 
 from __future__ import annotations
@@ -31,21 +31,22 @@ _BENCH_DIR = _SPEEDUP_DIR.parent
 sys.path.insert(0, str(_SPEEDUP_DIR))
 sys.path.insert(0, str(_BENCH_DIR / "screening_round"))
 
+import harness  # noqa: E402
+from param_opt import _polish  # noqa: E402
 from truths import MW5, MW6, spectrum_for  # noqa: E402
 
 from autocircuit.core.circuit import Circuit  # noqa: E402
-from autocircuit.core.fit import SCREEN_LOCAL, _Problem, screen  # noqa: E402
-
-from param_opt import _polish  # noqa: E402
-
-import harness  # noqa: E402
+from autocircuit.core.fit import _Problem, screen  # noqa: E402
 
 SEEDS = range(120)
 SCREEN_POPSIZE, SCREEN_MAXITER = 8, 40  # matches discover.py's tier-1 budget
 
 
 def band_warm_start(omega: np.ndarray, z: np.ndarray, n_blocks: int) -> list[tuple[float, float]]:
-    """Fit a lone R||C block to each of n_blocks equal log-decade sub-bands. Returns [(R,C), ...]."""
+    """Fit a lone R||C block to each of n_blocks equal log-decade sub-bands.
+
+    Returns [(R,C), ...].
+    """
     log_omega = np.log10(omega)
     edges = np.linspace(log_omega.min(), log_omega.max(), n_blocks + 1)
     out: list[tuple[float, float]] = []
@@ -95,7 +96,13 @@ def run_one(truth) -> None:
         band_costs.append(band_cost)
 
         screen_costs.append(
-            screen(truth.circuit, spectrum, seed=seed, popsize=SCREEN_POPSIZE, maxiter=SCREEN_MAXITER)
+            screen(
+                truth.circuit,
+                spectrum,
+                seed=seed,
+                popsize=SCREEN_POPSIZE,
+                maxiter=SCREEN_MAXITER,
+            )
         )
 
     best_known = min(band_costs + screen_costs)
@@ -105,8 +112,14 @@ def run_one(truth) -> None:
     print(f"\n{truth.id}, {len(SEEDS)} seeds, best known cost = {best_known:.6g}")
     lo_b, hi_b = harness.wilson(band_hits, len(SEEDS))
     lo_s, hi_s = harness.wilson(screen_hits, len(SEEDS))
-    print(f"  band warm-start + local polish only: {band_hits}/{len(SEEDS)} in basin [{lo_b:.3f},{hi_b:.3f}]")
-    print(f"  production tier-1 screen (global DE): {screen_hits}/{len(SEEDS)} in basin [{lo_s:.3f},{hi_s:.3f}]")
+    print(
+        f"  band warm-start + local polish only: {band_hits}/{len(SEEDS)} "
+        f"in basin [{lo_b:.3f},{hi_b:.3f}]"
+    )
+    print(
+        f"  production tier-1 screen (global DE): {screen_hits}/{len(SEEDS)} "
+        f"in basin [{lo_s:.3f},{hi_s:.3f}]"
+    )
     print(f"  CIs overlap: {harness.wilson_overlap((lo_b, hi_b), (lo_s, hi_s))}")
 
 

@@ -30,12 +30,11 @@ from pathlib import Path
 _SPEEDUP_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_SPEEDUP_DIR))
 
+import harness  # noqa: E402
 from truths import MW6, SRF3, spectrum_for  # noqa: E402
 
 from autocircuit.core import discover as discover_mod  # noqa: E402
 from autocircuit.core.discover import discover  # noqa: E402
-
-import harness  # noqa: E402
 
 GENERATIONS = 10
 POPULATION = 15
@@ -84,8 +83,11 @@ def run_one(truth, pool) -> None:
         w_cost = wide.best.score() if wide.best else float("inf")
         baseline_costs.append(b_cost)
         wide_costs.append(w_cost)
-        print(f"  seed {seed}: baseline(extra=0)={b_cost:.6g}  wide(extra={POPULATION // 2})={w_cost:.6g}",
-              flush=True)
+        print(
+            f"  seed {seed}: baseline(extra=0)={b_cost:.6g}  "
+            f"wide(extra={POPULATION // 2})={w_cost:.6g}",
+            flush=True,
+        )
 
     best_known = min(baseline_costs + wide_costs)
     baseline_hits = sum(1 for c in baseline_costs if c <= best_known * 1.1)

@@ -812,13 +812,24 @@ def test_the_search_breeds_from_a_bounded_pool_however_long_it_runs(
     )
     population = 16
     offered: list[tuple[int, int]] = []
-    original = discover_module._next_generation
+    original = discover_module._breeding_pool
 
-    def spy(alive, rng, pool, max_elements, pop, criterion=discover_module.DEFAULT_CRITERION, **kw):  # type: ignore[no-untyped-def]
-        offered.append((len(alive), len(pareto_front(alive, criterion))))
-        return original(alive, rng, pool, max_elements, pop, criterion, **kw)
+    # Spies on `_breeding_pool` itself rather than `_next_generation`: the steady-state search
+    # (docs/EVOLVE_COMPUTE_SKIP_PLAN.md section 3.1) proposes one individual at a time via
+    # `_SteadyState`, which calls `_breeding_pool` directly at each virtual generation boundary
+    # rather than going through `_next_generation` at all -- `_next_generation` is still real,
+    # shipped code (`arms.py`'s benchmark arms and the non-steady-state callers use it
+    # unchanged), just no longer the one thing every offer to breed from passes through.
+    def spy(  # type: ignore[no-untyped-def]
+        alive,
+        extra=discover_module.BREEDING_EXTRA,
+        criterion=discover_module.DEFAULT_CRITERION,
+    ):
+        front = original(alive, extra, criterion)
+        offered.append((len(alive), len(front)))
+        return front
 
-    monkeypatch.setattr(discover_module, "_next_generation", spy)  # type: ignore[attr-defined]
+    monkeypatch.setattr(discover_module, "_breeding_pool", spy)  # type: ignore[attr-defined]
     result = discover(
         data,
         pool=("R", "C", "L"),
@@ -833,12 +844,16 @@ def test_the_search_breeds_from_a_bounded_pool_however_long_it_runs(
     )
 
     assert offered, "the genetic search never bred"
+    assert len(offered) > 1, (
+        "the bound was only ever applied once, so a growing archive never re-exercised it"
+    )
     for n_alive, n_front in offered:
-        # The shipped rule is the front itself (`BREEDING_EXTRA`), so this is an equality
-        # rather than a bound. An inequality would pass just as well with the front-plus-forty
-        # rule the ladder of section 3.4.3 measured as 9x worse.
-        assert n_alive == n_front, (
-            f"bred from {n_alive} candidates against a front of {n_front}"
+        # `n_alive` is the *raw* archive at that virtual generation boundary (`_SteadyState`
+        # passes it in unfiltered, unlike the old per-generation caller which had already
+        # reduced it), so the bound is now an inequality rather than the old equality -- but it
+        # is still `_breeding_pool`'s own front, called for real, on every generation.
+        assert n_front <= n_alive, (
+            f"front of {n_front} exceeds the {n_alive} candidates it was drawn from"
         )
     assert result.n_evaluated > max(n for n, _f in offered), (
         "the archive never outgrew the pool, so the bound was never tested"

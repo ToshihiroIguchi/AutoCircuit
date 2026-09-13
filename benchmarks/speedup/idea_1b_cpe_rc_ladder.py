@@ -31,7 +31,6 @@ from scipy.optimize import differential_evolution, least_squares
 _SPEEDUP_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_SPEEDUP_DIR))
 
-from truths import MW4CPE, spectrum_for  # noqa: E402
 
 from autocircuit.core.elements import BoundsContext  # noqa: E402
 from autocircuit.core.simulate import log_frequencies, simulate  # noqa: E402

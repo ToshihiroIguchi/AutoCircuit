@@ -112,9 +112,16 @@ _MAG_SET = {_canon(a) for a in _MAG_ALIASES}
 _PHASE_SET = {_canon(a) for a in _PHASE_ALIASES}
 
 
-def _classify_header(raw: str) -> tuple[str, bool] | None:
-    """Map a header token to (field, negate_imag), or None if unrecognized."""
-    c = _canon(raw)
+# Unit suffixes stripped only as a fallback, never folded into `_canon` itself: doing it
+# unconditionally there would rewrite "re_z_ohm" -> "rez", which is not in `_REAL_SET` ("zre"
+# is), silently breaking an alias that matches today. Longest first, so "kohm" is tried before
+# a bare "ohm" would otherwise strip only part of it.
+_UNIT_SUFFIXES = tuple(
+    sorted(["mohm", "kohm", "ohms", "ohm", "ghz", "khz", "mhz", "hz", "deg", "rad"], key=len)[::-1]
+)
+
+
+def _classify_canon(c: str) -> tuple[str, bool] | None:
     if c in _FREQ_SET:
         return ("f", False)
     if c in _OMEGA_SET:
@@ -127,6 +134,27 @@ def _classify_header(raw: str) -> tuple[str, bool] | None:
         return ("mag", False)
     if c in _PHASE_SET:
         return ("phase", False)
+    return None
+
+
+def _classify_header(raw: str) -> tuple[str, bool] | None:
+    """Map a header token to (field, negate_imag), or None if unrecognized.
+
+    Tries an exact alias match first; only when that fails does it retry once with a
+    trailing unit token (``Ohm``, ``kHz``, ``deg``, ...) stripped, so a header like
+    ``Real_Ohm`` or ``Frequency_kHz`` is recognized without adding every unit-bearing spelling
+    to the alias tables by hand. Purely additive: a header that already matches keeps matching
+    exactly as it does today, since the fallback only runs when the first pass returns None.
+    """
+    c = _canon(raw)
+    role = _classify_canon(c)
+    if role is not None:
+        return role
+    for suffix in _UNIT_SUFFIXES:
+        if len(c) > len(suffix) and c.endswith(suffix):
+            role = _classify_canon(c[: -len(suffix)])
+            if role is not None:
+                return role
     return None
 
 

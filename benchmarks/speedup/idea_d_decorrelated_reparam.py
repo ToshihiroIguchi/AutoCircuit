@@ -37,15 +37,13 @@ _BENCH_DIR = _SPEEDUP_DIR.parent
 sys.path.insert(0, str(_SPEEDUP_DIR))
 sys.path.insert(0, str(_BENCH_DIR / "screening_round"))
 
+import harness  # noqa: E402
+from param_opt import Counted, _polish  # noqa: E402
 from truths import MW5, MW6, spectrum_for  # noqa: E402
 
 from autocircuit.core.circuit import Circuit  # noqa: E402
 from autocircuit.core.elements import BoundsContext  # noqa: E402
 from autocircuit.core.fit import _Problem  # noqa: E402
-
-from param_opt import Counted, _polish  # noqa: E402
-
-import harness  # noqa: E402
 
 SCREEN_POPSIZE = 8
 SCREEN_MAXITER = 40
@@ -83,7 +81,9 @@ def run_baseline(problem: _Problem, seed: int) -> tuple[float, int]:
     return final_cost, counted.n
 
 
-def run_reparam(problem: _Problem, ctx: BoundsContext, blocks: list[tuple[str, str]], seed: int) -> tuple[float, int]:
+def run_reparam(
+    problem: _Problem, ctx: BoundsContext, blocks: list[tuple[str, str]], seed: int
+) -> tuple[float, int]:
     names = list(problem.circuit.param_names)
     r_idx = [names.index(f"R{r}.R") for r, _c in blocks]
     c_idx = [names.index(f"C{c}.C") for _r, c in blocks]
@@ -145,15 +145,17 @@ def run_one(truth) -> None:
     print(f"hit-rate Wilson CIs: baseline [{lo_b:.3f},{hi_b:.3f}]  reparam [{lo_r:.3f},{hi_r:.3f}]")
     print(f"hit-rate CIs overlap: {harness.wilson_overlap((lo_b, hi_b), (lo_r, hi_r))}")
 
-    r_idx0 = list(circuit.param_names).index(f"R{blocks[0][0]}.R")
     c_idx0 = list(circuit.param_names).index(f"C{blocks[0][1]}.C")
-    ctx0 = BoundsContext.from_data(spectrum_for(truth, seed=0).omega, spectrum_for(truth, seed=0).z, 3.0)
+    ctx0 = BoundsContext.from_data(
+        spectrum_for(truth, seed=0).omega, spectrum_for(truth, seed=0).z, 3.0
+    )
     lower_all, upper_all = circuit.bounds(ctx0)
     c_lo, c_hi = lower_all[c_idx0], upper_all[c_idx0]
     tau_lo, tau_hi = ctx0.tau()
     print(
         f"per-block box width (decades), one representative block: "
-        f"C (as shipped) = {np.log10(c_hi / c_lo):.2f}, tau (reparam) = {np.log10(tau_hi / tau_lo):.2f}"
+        f"C (as shipped) = {np.log10(c_hi / c_lo):.2f}, "
+        f"tau (reparam) = {np.log10(tau_hi / tau_lo):.2f}"
     )
 
 

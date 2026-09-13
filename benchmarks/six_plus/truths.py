@@ -86,6 +86,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
@@ -195,6 +196,12 @@ class Truth:
         Keyed on the *label* (``R1``) rather than the element code (``R``), because a parameter
         name is ``label.field``: keying on the code produced ``R.R`` and a ``KeyError`` the
         first time this ran on a truth whose blocks were not the first two elements.
+
+        Matched by a code-then-digits regex rather than ``str.startswith``: a plain prefix check
+        matches ``"CPE1"`` and ``"CC1"`` as capacitors too (both start with ``"C"``), which stayed
+        invisible as long as every truth in this module was R/C/L only and surfaced as a
+        ``KeyError`` (``"CPE1.C"`` has no such field) the first time a parameter-dense,
+        CPE-bearing truth was added (``docs/PARAM_BUDGET_PLAN.md`` section 8, item E.1).
         """
         out: dict[str, float] = {}
         root = Circuit.parse(self.circuit).root
@@ -204,8 +211,8 @@ class Truth:
             labels = [
                 child.label for child in node.children if isinstance(child, ElementNode)
             ]
-            resistors = [name for name in labels if name.startswith("R")]
-            capacitors = [name for name in labels if name.startswith("C")]
+            resistors = [name for name in labels if re.fullmatch(r"R\d+", name)]
+            capacitors = [name for name in labels if re.fullmatch(r"C\d+", name)]
             if resistors and capacitors:
                 r, c = resistors[0], capacitors[0]
                 out[f"{r}*{c}"] = self.params[f"{r}.R"] * self.params[f"{c}.C"]
@@ -581,7 +588,13 @@ def _min_leverage(circuit: str, frequencies: np.ndarray, values: dict[str, float
     return worst
 
 
-def tune(truth: Truth, *, seed: int = 0, maxiter: int = 300) -> tuple[dict[str, float], float]:
+def tune(
+    truth: Truth,
+    *,
+    seed: int = 0,
+    maxiter: int = 300,
+    ranges: dict[str, tuple[float, float]] | None = None,
+) -> tuple[dict[str, float], float]:
     """Pick parameter values that maximise the truth's *weakest* leverage.
 
     Hand-picking values does not scale past a couple of circuits and it picked badly here: the
@@ -592,19 +605,26 @@ def tune(truth: Truth, *, seed: int = 0, maxiter: int = 300) -> tuple[dict[str, 
     on it.**
 
     This deliberately picks the *most identifiable* member of each topology's parameter family.
-    That is the right control rather than a flattering one -- a search that fails on the most
+    That is the right control rather than a flattening one -- a search that fails on the most
     identifiable instance of a topology is failing at finding the topology, which is what these
     experiments are about, and ``docs/TOPOLOGY_6PLUS_PLAN.md`` section 5.3 is what happens when
     nobody checks.
+
+    ``ranges`` defaults to :data:`TUNE_RANGES` (``R``/``C``/``L``, this module's own truths); a
+    caller building truths over a different vocabulary -- e.g. ``docs/PARAM_BUDGET_PLAN.md``
+    section E.1's CPE/SKINF-bearing negative controls in ``param_dense_truths.py`` -- passes its
+    own dict rather than this module silently falling back to the ``(1e-3, 1e3)`` default range,
+    which is the wrong order of magnitude for a CPE's ``Q`` or an ``n`` exponent.
     """
     parsed = Circuit.parse(truth.circuit)
     names = list(parsed.param_names)
     frequencies = truth.frequencies
+    ranges = TUNE_RANGES if ranges is None else ranges
 
     bounds: list[tuple[float, float]] = []
     for name in names:
         field = name.split(".")[-1]
-        low, high = TUNE_RANGES.get(field, (1e-3, 1e3))
+        low, high = ranges.get(field, (1e-3, 1e3))
         bounds.append((math.log10(low), math.log10(high)))
 
     def objective(x: np.ndarray) -> float:
@@ -619,7 +639,11 @@ def tune(truth: Truth, *, seed: int = 0, maxiter: int = 300) -> tuple[dict[str, 
 
 
 def tune_until_screened(
-    truth: Truth, *, seeds: Sequence[int] = (0, 1, 2, 3, 4), noise: float = NOISE
+    truth: Truth,
+    *,
+    seeds: Sequence[int] = (0, 1, 2, 3, 4),
+    noise: float = NOISE,
+    ranges: dict[str, tuple[float, float]] | None = None,
 ) -> tuple[dict[str, float], float, int]:
     """Tune, then *check*, and keep tuning until a candidate passes all three parts.
 
@@ -644,7 +668,7 @@ def tune_until_screened(
     """
     attempts: list[tuple[dict[str, float], float, int]] = []
     for seed in seeds:
-        values, worst = tune(truth, seed=seed)
+        values, worst = tune(truth, seed=seed, ranges=ranges)
         candidate = replace(truth, params=values)
         verdict = screen(candidate, noise=noise)
         attempts.append((values, worst, seed))

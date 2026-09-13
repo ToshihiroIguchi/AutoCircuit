@@ -29,6 +29,7 @@ import { defaultPoolSize } from "../worker/pool";
 import { CircuitPreview } from "../components/CircuitPreview";
 import { ParetoTable } from "../components/ParetoTable";
 import { PlotsPanel, type ModelOverlay } from "../components/PlotsPanel";
+import { PoolNote } from "../components/PoolNote";
 import { GROWTH_REACH, SearchPanel } from "../components/SearchPanel";
 import { SearchProgressPanel } from "../components/SearchProgress";
 import { RuntimeNotice } from "../components/RuntimeNotice";
@@ -304,6 +305,7 @@ export function DiscoverScreen({
           {/* The CLI's own sentence, verbatim: what a constrained or partial search may claim
               is exactly the part a paraphrase would get subtly wrong. */}
           <p className="discover-report__completeness">{report.completeness}</p>
+          <PoolNote pool={report.pool} poolChoice={report.pool_choice} />
 
           {report.refit_progress !== null && (
             <p className="discover-report__warning" role="alert">

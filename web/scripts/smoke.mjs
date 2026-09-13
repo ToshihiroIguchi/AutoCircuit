@@ -556,7 +556,10 @@ function driveWithEvolve(job) {
         const step = ask({ op: "discover_evolve", job, outcomes });
         if (step.ok !== true) throw new Error(JSON.stringify(step.error));
         if (step.result.tasks === null) break;
+        // A `null` slot -- evolve_plan's sliding-window protocol, see its docstring -- has
+        // nothing to dispatch and is reported back unchanged.
         outcomes = step.result.tasks.map((task) => {
+          if (task === null) return null;
           const result = ask({ op: "evolve_task", spectrum: diffusion, task }).result;
           return [result.polish, result.search];
         });

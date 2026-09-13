@@ -20,6 +20,7 @@ import pytest
 from autocircuit.core.circuit import Circuit
 from autocircuit.core.discover import (
     ABANDON_FACTOR,
+    CRITERIA,
     MIN_REFINE_PER_SIZE,
     REFINE_CEILING_FACTOR,
     SCREEN_BUDGET,
@@ -236,6 +237,74 @@ def test_evolve_mode_never_claims_completeness() -> None:
     assert result.mode == "evolve"
     assert result.complete_up_to is None
     assert "sampled, not exhaustive" in result.completeness()
+    # An explicit ``mode="evolve"`` request is the caller's own choice, not an escalation the
+    # search made on its own -- the auto-fallback sentence is scoped to `mode == "auto"` and
+    # must not fire here even though `generations` is nonzero.
+    assert "fell back to a randomized genetic search" not in result.completeness()
+
+
+def _diffusion() -> np.ndarray:
+    """A finite-length diffusion spectrum: a transmission line no R/C/L/CPE tree reproduces.
+
+    The same scenario `tests/test_web_job.py`'s own `_diffusion` uses to prove the genetic
+    fallback opens at all under `pool=["R", "C"]` -- duplicated locally rather than imported
+    across test modules, matching this repository's existing convention of small per-file
+    fixture helpers (`_semicircle` above).
+    """
+    from autocircuit.core.simulate import simulate as _simulate
+
+    return _simulate(
+        "R1-Ws1",
+        log_frequencies(1e-2, 1e3, 6),
+        {"R1.R": 10.0, "Ws1.R": 100.0, "Ws1.tau": 1.0},
+        noise=0.01,
+        seed=0,
+    )
+
+
+def test_the_auto_escalation_names_itself_in_the_persisted_report() -> None:
+    """The genetic fallback used to be invisible in `completeness()`/`summary()`.
+
+    `_with_growth_note` and `_with_pool_note` already explain what those two escalations mean
+    for absence-as-evidence; the fallback itself had no equivalent sentence, so a reader of the
+    persisted report (not the live `--progress`/web progress banner, which already narrated the
+    escalation as it happened) saw only "over N generations" -- neutral-looking metadata, not a
+    statement that a heuristic search ran because the exhaustive stage's best fit still looked
+    non-random. This is the gap `DiscoveryResult._with_evolve_note` closes.
+    """
+    result = discover(
+        _diffusion(),
+        pool=("R", "C"),
+        mode="auto",
+        exhaustive_limit=3,
+        seed=0,
+        generations=3,
+        population=6,
+    )
+    # Not a vacuous pass: this scenario has to actually trigger the fallback.
+    assert result.mode == "auto"
+    assert result.generations > 0
+
+    coverage = result.completeness()
+    assert "fell back to a randomized genetic search" in coverage
+    assert "no completeness guarantee at all" in coverage
+    assert str(result.generations) in coverage
+    assert "docs/EVOLVE_SEARCH_PLAN.md" in coverage
+    assert coverage in result.summary()
+
+
+def test_the_auto_escalation_note_is_silent_when_the_fallback_never_ran() -> None:
+    """An ordinary exhaustive run that never needed the fallback must not print its sentence."""
+    result = discover(
+        _semicircle(),
+        pool=("R", "C"),
+        mode="auto",
+        exhaustive_limit=3,
+        seed=0,
+    )
+    assert result.mode == "auto"
+    assert result.generations == 0
+    assert "fell back to a randomized genetic search" not in result.completeness()
 
 
 def test_unknown_mode_is_rejected() -> None:
@@ -304,7 +373,7 @@ def _forms(pool: tuple[str, ...], n: int) -> list[str]:
     return [Circuit(node).to_string() for node in enumerate_topologies(pool, n)]
 
 
-def test_shortlist_gives_every_element_count_its_own_quota() -> None:
+def test_shortlist_gives_every_parameter_count_its_own_quota() -> None:
     """The bug this locks down cost gate G1 an entire benchmark run.
 
     Raw residual cost always improves with parameters, so ranking the whole screen by it hands
@@ -312,6 +381,12 @@ def test_shortlist_gives_every_element_count_its_own_quota() -> None:
     candidates had five elements and the four-element circuit that generated the data was
     never refitted at all. Small test spaces hide this completely, because there the shortlist
     covers every size anyway -- hence this deliberately lopsided synthetic screen.
+
+    ``R,C`` is a unit-parameter-cost pool (every element is one parameter), so this fixture does
+    not distinguish the parameter-count key from the retired element-count one -- see
+    :func:`test_shortlist_is_criterion_invariant_under_the_parameter_key` and
+    :func:`test_the_retired_element_count_key_was_criterion_sensitive` for a CPE-bearing fixture
+    where the two axes actually diverge.
     """
     small = _forms(("R", "C"), 2)
     large = _forms(("R", "C"), 5)
@@ -321,6 +396,68 @@ def test_shortlist_gives_every_element_count_its_own_quota() -> None:
     keep = set(_shortlist(scored, n_refine=10, n_data=140))
     assert keep & set(small), "every two-element candidate was crowded out by the big circuits"
     assert keep & set(large)
+
+
+def test_shortlist_is_criterion_invariant_under_the_parameter_key() -> None:
+    """docs/PARAM_BUDGET_PLAN.md section 5's provable corollary, exercised through production
+    code: inside a fixed-parameter-count bucket every scored criterion is ``deviance(cost)`` plus
+    a constant that does not depend on cost, so re-keying the quota on ``n_params`` makes tier
+    1's shortlist -- which candidates are worth a full-budget refit -- the same set whichever
+    criterion ranks it. ``docs/CRITERION_SELECTION_PLAN.md`` section 1's scoping premise (that
+    the criterion used to rank tier-1 promotion could change which topologies survive) no longer
+    holds under this key; see that document's own updated section 2(a).
+
+    The fixture must contain CPE, not just R/C/L: on a unit-parameter-cost pool every element
+    count is also a parameter count, and the claim would be untestable.
+    """
+    pool = ("R", "CPE")
+    texts = _forms(pool, 2) + _forms(pool, 3)
+    param_counts = {Circuit.parse(t).n_params for t in texts}
+    assert len(param_counts) > 1, "fixture must actually span more than one parameter bucket"
+    # Costs deliberately vary within every parameter-count bucket, so a flat cost-only sort
+    # would not already make the sets trivially identical for a trivial reason.
+    scored = [(1e-3 * (1 + 0.37 * (i % 5)), text) for i, text in enumerate(texts)]
+    n_data = 60
+
+    reference = set(_shortlist(scored, n_refine=6, n_data=n_data, criterion="aic"))
+    assert reference, "fixture must actually produce a non-empty shortlist"
+    for criterion in CRITERIA:
+        assert set(_shortlist(scored, n_refine=6, n_data=n_data, criterion=criterion)) == reference
+
+
+def test_the_retired_element_count_key_was_criterion_sensitive() -> None:
+    """The negative half of the corollary above: bucketing on element count did *not* have this
+    property, because two circuits with the same element count do not have to agree on which one
+    an information criterion prefers once they carry a different number of parameters -- CPE
+    costs two, R costs one. This is the mechanism ``docs/PARAM_BUDGET_PLAN.md`` section 6 (F2)
+    measured and the reason the quota bucket changed; it is not merely a hypothetical.
+
+    Both circuits below have three elements (the old bucket key would have put them in one
+    group) and different parameter counts (four against six), and are within
+    :data:`REFINE_COST_FACTOR` of each other's cost (so the near-tie rule alone would not settle
+    which one a small quota keeps) -- close enough that the criterion's own penalty term is what
+    decides which one an information criterion ranks first, and AIC's `2k` and BIC's `k*log(n)`
+    do not have to agree.
+    """
+    cheaper_fewer_params = "p(R1-CPE1,R2)"
+    pricier_more_params = "CPE1-CPE2-CPE3"
+    assert Circuit.parse(cheaper_fewer_params).n_params == 4
+    assert Circuit.parse(pricier_more_params).n_params == 6
+    cost_low_k, cost_high_k = 0.011, 0.0092
+    n_data = 40
+
+    aic_prefers_more_params = _screening_score(cost_high_k, 6, n_data, "aic") < _screening_score(
+        cost_low_k, 4, n_data, "aic"
+    )
+    bic_prefers_more_params = _screening_score(cost_high_k, 6, n_data, "bic") < _screening_score(
+        cost_low_k, 4, n_data, "bic"
+    )
+    assert aic_prefers_more_params and not bic_prefers_more_params, (
+        "fixture must actually flip which circuit ranks first between aic and bic -- "
+        "that flip, inside a single element-count-3 bucket, is exactly what the old key "
+        "exposed to a criterion choice and the new key (separate n_params=4 and n_params=6 "
+        "buckets, never compared against each other) does not"
+    )
 
 
 def test_shortlist_stays_bounded_when_everything_is_a_near_tie() -> None:

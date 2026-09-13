@@ -77,7 +77,14 @@ async function stampOf(pyodidePkg, sourceArchive) {
  * is somewhere else entirely: this step's input and its output would otherwise be one path,
  * whose content decides whether the step is skipped.
  */
-export async function precompile(publicDir, pyodidePkg, sourceArchive) {
+export async function precompile(publicDir, pyodidePkg, sourceArchive, options = {}) {
+  // `skipStdlibBytecode` exists only for docs/SEARCH_TIME_PLAN.md / STARTUP_AND_EDITING_PLAN.md
+  // §3's own measurement of whether the stdlib bytecode (2.5 MB -> 7.1 MB, this file's header)
+  // is worth its transfer cost over a real link, not for anything the shipped site ever sets: it
+  // ships `python_stdlib.zip` pristine (source-only, as `node_modules/pyodide` provides it)
+  // instead of with bytecode folded in. The numpy/scipy overlays and the package archive are
+  // untouched either way -- only the stdlib half of this step is under test.
+  const { skipStdlibBytecode = false } = options;
   const pyodideOut = join(publicDir, "pyodide");
   const stdlibOut = join(pyodideOut, "python_stdlib.zip");
   const numpyOut = join(publicDir, "pyodide-bytecode-numpy.zip");
@@ -90,7 +97,8 @@ export async function precompile(publicDir, pyodidePkg, sourceArchive) {
   // single overlay that nothing fetches any more.
   await rm(join(publicDir, "pyodide-bytecode.zip"), { force: true });
 
-  const stamp = await stampOf(pyodidePkg, sourceArchive);
+  const stamp =
+    (await stampOf(pyodidePkg, sourceArchive)) + (skipStdlibBytecode ? " nostdlib" : "");
   const built =
     (await exists(stdlibOut)) &&
     (await exists(numpyOut)) &&
@@ -234,15 +242,20 @@ package = zip_bytes(
 
   const [stdlib, numpyOverlay, scipyOverlay, packageZip, numpyCount, scipyCount] = compile.toJs();
   compile.destroy();
-  await writeFile(stdlibOut, Buffer.from(stdlib));
+  // The compiled `stdlib` bytes are computed either way (the compile step above is one Python
+  // call producing all four outputs together) -- only which bytes get written to disk depends
+  // on the flag, so a skipped variant costs nothing extra at build time, only at fetch time.
+  const stdlibToShip = skipStdlibBytecode ? pristine : stdlib;
+  await writeFile(stdlibOut, Buffer.from(stdlibToShip));
   await writeFile(numpyOut, Buffer.from(numpyOverlay));
   await writeFile(scipyOut, Buffer.from(scipyOverlay));
   await writeFile(archiveOut, Buffer.from(packageZip));
   await writeFile(stampPath, stamp, "utf8");
   const mb = (bytes) => `${(bytes.length / 1e6).toFixed(1)} MB`;
   console.log(
-    `bytecode: stdlib ${mb(pristine)} -> ${mb(stdlib)}, ` +
-      `numpy overlay ${mb(numpyOverlay)} (${numpyCount} modules), ` +
+    `bytecode: stdlib ${mb(pristine)} -> ${mb(stdlibToShip)}` +
+      (skipStdlibBytecode ? " (skipped, shipping source)" : "") +
+      `, numpy overlay ${mb(numpyOverlay)} (${numpyCount} modules), ` +
       `scipy overlay ${mb(scipyOverlay)} (${scipyCount} modules), ` +
       `package ${mb(packageZip)}`,
   );

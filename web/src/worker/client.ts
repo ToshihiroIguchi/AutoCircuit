@@ -519,7 +519,7 @@ export class BridgeClient {
    */
   async discoverEvolve(
     job: string,
-    outcomes: EvolveOutcomeWire[] | null,
+    outcomes: (EvolveOutcomeWire | null)[] | null,
   ): Promise<EvolveStepWire> {
     return this.call<EvolveStepWire>({ op: "discover_evolve", job, outcomes });
   }

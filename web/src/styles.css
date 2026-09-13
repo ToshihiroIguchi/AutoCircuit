@@ -2036,6 +2036,12 @@ body {
   color: var(--text-primary);
 }
 
+.discover-report__pool {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
 .discover-report__warning {
   margin: 0;
   padding: 6px 10px;

@@ -344,6 +344,7 @@ def _op_discover_start(payload: dict[str, Any]) -> dict[str, Any]:
         growth_width=int(payload.get("growth_width", job.GROWTH_DEFAULT)),
         screen_chunk=int(payload.get("screen_chunk", job.SCREEN_CHUNK)),
         refit_chunk=int(payload.get("refit_chunk", job.REFIT_CHUNK)),
+        evolve_chunk=int(payload.get("evolve_chunk", job.REFIT_CHUNK)),
         # The genetic fallback's own knobs. Defaults match `discover()`'s own signature, since
         # an old cached bundle that never sends these keeps that same default rather than a
         # bridge-invented one.
@@ -446,7 +447,10 @@ def _op_discover_evolve(payload: dict[str, Any]) -> dict[str, Any]:
     running = job.current(str(payload["job"]))
     outcomes = payload.get("outcomes")
     if outcomes is not None:
-        running.submit_evolve([(o[0], o[1]) for o in outcomes])
+        # `None` reports an empty slot -- nothing was dispatched there, so there is nothing to
+        # merge; `evolve_plan`'s own sliding-window protocol treats that identically to "still
+        # pending" (see its docstring), so no separate case is needed on this side either.
+        running.submit_evolve([None if o is None else (o[0], o[1]) for o in outcomes])
     tasks = running.next_evolve()
     return {
         "tasks": (
@@ -454,12 +458,11 @@ def _op_discover_evolve(payload: dict[str, Any]) -> dict[str, Any]:
             else [
                 # `warm_accept` ships as `math.inf` by default (WARM_ACCEPT_FACTOR), unlike
                 # `reference`, which is a real cost or `None` and therefore already JSON-safe.
-                [text, seed, warm, reference, job.to_wire_cost(warm_accept), need_search,
-                 restarts, popsize, maxiter, tol]
-                for (
-                    text, seed, warm, reference, warm_accept, need_search,
-                    restarts, popsize, maxiter, tol,
-                ) in tasks
+                # A `None` slot (nothing left to propose there) passes straight through.
+                None if t is None else [
+                    t[0], t[1], t[2], t[3], job.to_wire_cost(t[4]), t[5], t[6], t[7], t[8], t[9],
+                ]
+                for t in tasks
             ]
         ),
         # The genetic fallback's own progress counter: a generation is the only honest

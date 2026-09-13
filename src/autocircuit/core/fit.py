@@ -30,6 +30,7 @@ from numpy.typing import NDArray
 from scipy.optimize import OptimizeResult, differential_evolution, least_squares
 
 from .circuit import Circuit
+from .de import de_best1bin
 from .elements import BoundsContext
 from .noise import resolve_weights
 from .spectrum import Spectrum
@@ -804,40 +805,55 @@ def _global_stage(
     time_limit: float | None,
     x0: Float | None,
 ) -> Float:
-    """Run differential evolution over the log-space bounds and return the best point."""
+    """Run differential evolution over the log-space bounds and return the best point.
+
+    The ``workers=1`` branch -- the only one any caller in this codebase reaches -- uses
+    :func:`de.de_best1bin` instead of ``scipy.optimize.differential_evolution``: 35-46% faster
+    per generation, measured with no quality cost across ``docs/DE_KERNEL_PLAN.md``'s full DE5
+    battery (two Wilson-CI arenas, a 120-seed reliability sweep of this project's hardest known
+    multi-modal landscape, and an end-to-end pipeline/recovery comparison). See that module's
+    docstring for why a from-scratch loop is safe to trust here and what was measured before it
+    shipped. The ``workers != 1`` branch stays on scipy: unreachable today, and kept that way
+    deliberately, since a process pool's worker processes would not inherit anything patched
+    into this module in a single process, so `de_best1bin` would silently go unused there.
+    """
     deadline = None if time_limit is None else time.perf_counter() + time_limit
 
-    def callback(xk: Float, convergence: float = 0.0) -> bool:
-        return deadline is not None and time.perf_counter() > deadline
-
-    kwargs: dict[str, Any] = {
-        "bounds": list(zip(problem.lower_x, problem.upper_x, strict=True)),
-        "seed": seed,
-        "popsize": popsize,
-        "maxiter": maxiter,
-        "tol": tol,
-        "mutation": (0.4, 1.0),
-        "recombination": 0.9,
-        "strategy": "best1bin",
-        "init": "sobol",
-        "polish": False,
-        "callback": callback,
-    }
-    if x0 is not None:
-        kwargs["x0"] = x0
     if workers and workers != 1:
-        kwargs["workers"] = workers
-        kwargs["updating"] = "deferred"
+
+        def callback(xk: Float, convergence: float = 0.0) -> bool:
+            return deadline is not None and time.perf_counter() > deadline
+
+        kwargs: dict[str, Any] = {
+            "bounds": list(zip(problem.lower_x, problem.upper_x, strict=True)),
+            "seed": seed,
+            "popsize": popsize,
+            "maxiter": maxiter,
+            "tol": tol,
+            "mutation": (0.4, 1.0),
+            "recombination": 0.9,
+            "strategy": "best1bin",
+            "init": "sobol",
+            "polish": False,
+            "callback": callback,
+            "workers": workers,
+            "updating": "deferred",
+        }
+        if x0 is not None:
+            kwargs["x0"] = x0
         result = differential_evolution(problem.cost, **kwargs)
-    else:
-        kwargs["vectorized"] = True
-        kwargs["updating"] = "deferred"
-        # scipy-stubs has a single, non-overloaded signature for differential_evolution that
-        # always types `func` as scalar-returning; it does not model the `vectorized=True`
-        # calling convention (population in, cost array out) that this code relies on, so the
-        # declared return type of cost_vectorized genuinely cannot match the stub here.
-        result = differential_evolution(problem.cost_vectorized, **kwargs)  # type: ignore[arg-type]
-    return np.asarray(result.x, dtype=np.float64)
+        return np.asarray(result.x, dtype=np.float64)
+
+    return de_best1bin(
+        problem.cost_vectorized,
+        list(zip(problem.lower_x, problem.upper_x, strict=True)),
+        seed=seed,
+        popsize=popsize,
+        maxiter=maxiter,
+        tol=tol,
+        x0=x0,
+        deadline=deadline,
+    )
 
 
 def _restart_spread(problem: _Problem, xs: list[Float], best_cost: float) -> dict[str, float]:

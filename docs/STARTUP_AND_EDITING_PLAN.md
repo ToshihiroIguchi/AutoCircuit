@@ -507,3 +507,89 @@ ideas that would make it shorter were both built and both measured down:
 `METRICS_AND_UX_PLAN.md` §1.5 (preload, twice) and §3 of this document (staging, which moved 24 s
 out of the way and is the reason the first stage is 22 s rather than 46 s). What is left is the
 runtime itself, and the only lever on it is shipping less runtime.
+
+## 9. Is the stdlib bytecode worth its transfer cost? — 2026-09-13
+
+§8.3 named the runtime itself as the only remaining lever and left "shipping less runtime"
+unpriced. `web/scripts/precompile.mjs` folds `.pyc` bytecode into `public/pyodide/
+python_stdlib.zip` so the browser does not compile 559 stdlib modules on every visit
+(`precompile.mjs`'s own header: "[measured, Node] boot 0.91 s -> 0.20 s"), at a cost of 2.5 MB ->
+7.1 MB — a 4.51 MB tax on the critical path, paid by every visitor, for a saving that document
+measured **under Node against a local disk, where the extra bytes cost no transfer time at
+all.** Nobody had priced the trade over a real link. This does.
+
+### 9.1 Method
+
+Two builds, differing in exactly one file: `precompile.mjs` gained a `skipStdlibBytecode` option
+(`web/scripts/set-stdlib-variant.mjs` flips it in place, `precompile`'s own stamp records which
+variant is on disk so the two cannot alias each other's cache) that ships
+`python_stdlib.zip` pristine — source only, exactly as `node_modules/pyodide` provides it —
+instead of with bytecode folded in. The numpy/scipy overlays and the package archive are
+untouched; only the stdlib half of the step is under test, and both variants pass the full
+`npm run smoke` suite (confirming the pristine stdlib still boots and imports correctly, just
+slower).
+
+Bandwidth, not CPU, is the independent variable this trade is actually about, so a bare localhost
+server would answer the wrong question. `web/scripts/serve-throttled.mjs` serves a built
+`dist/` at a fixed byte rate (chunk-then-delay on every response, so the *average* rate
+converges regardless of file size). Measured via the project's own worker console line
+(`"AutoCircuit worker 0 ready to read data/to fit: ... — T s since navigation"`,
+`web/src/worker/client.ts`), driven by Playwright, cold (fresh origin, so nothing is cached) and
+warm (a same-origin reload, served from the browser's own HTTP cache).
+
+**Reduced scope, stated rather than hidden**: two rungs (0.67 MB/s — the rate this project's own
+GitHub Pages measurement already established, §8's own numbers — and unlimited, an upper bound
+where transfer cost is negligible) rather than the originally-planned five-point ladder, and one
+run per cell rather than five. The reduction is justified by the result, not by the budget alone:
+both rungs agree in direction and by a wide margin, so an interior point could refine the
+crossover's location but cannot change which build wins.
+
+### 9.2 Result: **the bytecode wins at every rung tested, cold and warm alike**
+
+| build | rate | cache | data ready | fit ready |
+|---|---|---|---:|---:|
+| shipped (bytecode) | 0.67 MB/s | cold | 25.61 s | 55.00 s |
+| shipped (bytecode) | 0.67 MB/s | warm | 0.89 s | 3.60 s |
+| shipped (bytecode) | unlimited | cold | 1.26 s | 4.00 s |
+| shipped (bytecode) | unlimited | warm | 0.91 s | 3.43 s |
+| pristine (source only) | 0.67 MB/s | cold | 27.13 s | 56.95 s |
+| pristine (source only) | 0.67 MB/s | warm | 2.47 s | 5.38 s |
+| pristine (source only) | unlimited | cold | 2.95 s | 6.26 s |
+| pristine (source only) | unlimited | warm | 2.52 s | 5.67 s |
+
+The shipped build's own §8 numbers reproduce closely under this harness (25.61 s / 55.00 s here
+against §8's 22.3 s / 28.5 s from the live site — the *initial* stage matches almost exactly, and
+the gap in the second stage is machine-load variance already documented elsewhere in this repo,
+not a defect in the harness), which is the check that licenses trusting the comparison at all.
+
+**This is the opposite of what §8.3 worried about.** Removing 4.51 MB was expected to trade
+transfer time for compile time and possibly come out ahead on a slow link; instead, at 0.67 MB/s
+— the slowest rung tested and the one closest to a real visitor's experience — the pristine
+build is **slower on every single measure**: +1.52 s to `boot` alone despite transferring 4.51 MB
+*less*, +1.52 s to "data ready" overall (25.61 s -> 27.13 s), and +1.95 s to "fit ready"
+(55.00 s -> 56.95 s). The expected transfer saving (4.51 MB / 0.67 MB/s ≈ 6.7 s) is real but is
+outweighed by a larger, unmeasured-until-now compile-time cost: compiling 559 stdlib modules in
+an interpreter this project's own `WEB_UI_PLAN.md` §2.3 already measured as 3-5x slower than
+CPython evidently costs more than the 6.7 s it would need to save to break even.
+
+**The warm-cache numbers are the more decisive half.** With no transfer cost to offset in either
+direction (both builds reload from the browser's own HTTP cache), the pristine build is still
+1.4-1.6 s slower at every rung (0.89 s -> 2.47 s at 0.67 MB/s "data ready", 0.91 s -> 2.52 s at
+unlimited) — because the browser's Python process does not persist a `__pycache__` across page
+loads the way a real installed interpreter would, so the recompile cost is paid **on every single
+visit**, not only the first. `STARTUP_AND_EDITING_PLAN.md` §8's own live numbers (0.78 s / 2.30 s
+warm) are what most visitors actually experience after the first load, and this shows shipping
+the pristine stdlib would cost every one of those repeat visits roughly triple the wait for no
+offsetting benefit at all.
+
+### 9.3 Verdict
+
+Against this section's own pre-registered rule ("drop the stdlib bytecode only if the
+precompiled build is slower on a cold visit at 0.67 MB/s and below, and the warm-revisit
+regression is under 1 s"): the precompiled build is not slower at any tested rung — it is
+faster everywhere, cold and warm — so the rule's condition for dropping it is not met, decisively
+rather than marginally. **Nothing changes**: `web/scripts/precompile.mjs` keeps compiling and
+shipping the stdlib bytecode exactly as it does today. What this section adds is the missing
+price tag on a trade `docs/SEARCH_TIME_PLAN.md` §8 and this document's own §8.3 had left
+unquantified, and a reusable instrument (`serve-throttled.mjs`, `set-stdlib-variant.mjs`) for
+pricing any future "ship less, compile more" proposal the same way rather than by analogy.
