@@ -50,7 +50,7 @@ from autocircuit.core import elements
 from autocircuit.core.circuit import Circuit
 from autocircuit.core.discover import SCREEN_MAXITER, SCREEN_POPSIZE, SCREEN_TOL
 from autocircuit.core.elements import Resistor
-from autocircuit.core.fit import FitContext, _global_stage, _Problem, screen
+from autocircuit.core.fit import FitContext, _Problem, screen
 from autocircuit.core.simulate import log_frequencies, simulate
 from autocircuit.core.spectrum import Spectrum
 
@@ -207,24 +207,12 @@ def run_a1(reps: int) -> None:
             real_nit = real_result.nit
             real_per_iter.append(real_elapsed / max(real_nit, 1))
 
-            # Parity check against the production function, on the first rep only: confirms
-            # this script's copied kwargs really do reproduce `_global_stage`'s own dispatch
-            # rather than a typo'd variant of it.
-            if rep == 0:
-                production_x = _global_stage(
-                    problem,
-                    seed=seed,
-                    popsize=SCREEN_POPSIZE,
-                    maxiter=SCREEN_MAXITER,
-                    tol=SCREEN_TOL,
-                    workers=1,
-                    time_limit=None,
-                    x0=None,
-                )
-                assert np.array_equal(production_x, real_result.x), (
-                    f"{topo.label}: this script's direct DE call diverged from "
-                    "_global_stage's own -- kwargs are out of sync, fix _de_kwargs"
-                )
+            # A parity assertion against `_global_stage` used to live here: production's
+            # `workers=1` branch now calls `de.de_best1bin` (see docs/DE_KERNEL_PLAN.md), not
+            # scipy, so a byte-for-byte comparison against it would no longer be meaningful --
+            # this script's own direct `differential_evolution` call above is kept as the
+            # historical scipy-only baseline instead, deliberately decoupled from whatever
+            # kernel production uses.
 
         null_med = float(np.median(null_per_iter))
         real_med = float(np.median(real_per_iter))

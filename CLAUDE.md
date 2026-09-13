@@ -775,7 +775,8 @@ static-site Web UI running the same core via WASM (Pyodide).
    headroom is SciPy's own DE bookkeeping (48-67%), not shipped or attempted this round --
    `docs/PARAM_OPTIMIZER_PLAN.md` already measured a *different* optimizer replacement (L-SHADE)
    regressing a known-hard reference before being withdrawn, so this is recorded as a priced,
-   ranked candidate for a future round, not a recommendation to act on unmeasured.
+   ranked candidate for a future round, not a recommendation to act on unmeasured. **That future
+   round ran the same day and shipped — see item 25, `docs/DE_KERNEL_PLAN.md`.**
 
 18. `docs/DISCOVER_UX_PLAN.md` — usability fixes on the Discover path, from two rounds of user
    review of the CLI and web front ends. **Implemented, items A-G; verified by `npm run check`,
@@ -1147,6 +1148,34 @@ static-site Web UI running the same core via WASM (Pyodide).
     timing (worst 0.11 s) well inside the "~1 s" ceiling. Confirmed at the scale tested (R/C/L
     only, hand-supplied equivalent pairs); no general-purpose detector or production table was
     built, and both remain the user's own decision to authorize.
+
+25. `docs/DE_KERNEL_PLAN.md` — `SEARCH_TIME_PLAN.md` §8's one unclaimed lever (SciPy's own DE
+    bookkeeping, 48–67% of the global stage), built and shipped. **Implemented and measured,
+    2026-09-13.** A bit-exact route was tried first: `core/de.py`'s prototype reproduces
+    `scipy.optimize.differential_evolution`'s own RNG stream and output exactly (72/72 bit-exact
+    cases) but was not fast enough (0.76–0.87x scipy's per-iteration time against a 0.75x bar,
+    only 1/6 topologies clearing it) — the bit-exact and the fast routes turned out not to be the
+    same thing here, and per the pre-registered stop rule this routed to a relaxed variant rather
+    than shipping. The relaxed variant (one deliberate, non-bit-exact departure — donor indices
+    for a whole DE generation drawn in one batched call instead of scipy's own per-candidate
+    sequential shuffle) measured 35–46% faster per generation and passed a four-clause quality
+    battery: two Wilson-CI frozen-landscape arenas (1125 paired samples, no significant
+    difference on either), an end-to-end `.summary()` pipeline comparison (5/6 references
+    identical or a benign already-known "which exact-equivalence-class member does a restart
+    land on" relabeling, 1/6 a single unreplicated regression), and a 27-cell recovery check
+    (cell-for-cell identical to the incumbent). **The one clause that mattered most to get right
+    is a lesson about sample size, not about the kernel**: a 12-seed reliability sweep of this
+    project's hardest known multi-modal landscape (the same one `PARAM_OPTIMIZER_PLAN.md`'s
+    L-SHADE regressed) read 5/12 vs 2/12 and looked like a decisive failure — exact McNemar on
+    that draw is p=0.25 with only 3 discordant pairs, essentially no power, and a 120-seed
+    re-run found no significant difference at all (p=0.84; baseline's *true* rate on that
+    landscape is ~13%, not the 42% twelve seeds happened to show). Shipped:
+    `core/de.py::de_best1bin` is what `fit.py:_global_stage`'s `workers=1` branch calls now;
+    `pytest` is unchanged at 1132 passed/19 skipped, `mypy --strict`/`ruff`/`npm run
+    check`/`npm run smoke` all clean. The benchmark instruments (both DE prototypes, the
+    monkeypatch harness, the pipeline/known-trap/recovery scripts, and a new arm in
+    `param_opt.py::ARMS`) stay in the tree per this project's own standing precedent for
+    measurement code, whatever the ship verdict.
 
 Update these when decisions change.
 

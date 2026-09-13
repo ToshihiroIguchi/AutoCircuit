@@ -20,6 +20,10 @@ from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
+
+# docs/DE_KERNEL_PLAN.md Step 4: run this file with the repo root on PYTHONPATH alongside
+# `src` (see that plan's own usage block) so this import resolves.
+from benchmarks.speedup.de_kernel import de_best1bin_relaxed
 from landscape import reference_spectrum
 from scipy.optimize import (
     basinhopping,
@@ -87,6 +91,20 @@ def de(popsize: int, maxiter: int) -> Callable[[Counted, int], Float]:
             updating="deferred",
         )
         return np.asarray(result.x, dtype=np.float64)
+
+    return run
+
+
+def de_relaxed_best1bin() -> Callable[[Counted, int], Float]:
+    """docs/DE_KERNEL_PLAN.md's purpose-written vectorized DE (relaxed variant: batched
+    sample-index draws, not bit-exact against scipy's RNG stream), at the same 8x40 budget as
+    the incumbent arm."""
+
+    def run(c: Counted, seed: int) -> Float:
+        bounds = list(zip(c.p.lower_x, c.p.upper_x, strict=True))
+        return de_best1bin_relaxed(
+            c.batch, bounds, seed=seed, popsize=8, maxiter=40, tol=1e-4,
+        )
 
     return run
 
@@ -619,6 +637,7 @@ def sobol_lm(n_starts: int = 12) -> Callable[[Counted, int], Float]:
 
 ARMS: dict[str, Callable[[Counted, int], Float]] = {
     "de_8x40 (current)": de(8, 40),
+    "de_relaxed_vectorized": de_relaxed_best1bin(),
     "de_8x20": de(8, 20),
     "de_4x40": de(4, 40),
     "de_rand1bin": de_strategy("rand1bin"),

@@ -977,3 +977,17 @@ replacement, L-SHADE, tying or losing on both benchmark arenas and regressing a 
 withdrawn) — but it is the only place this round found real, uncommitted headroom, and it is
 recorded here as a priced, ranked candidate for a future measured round rather than left
 unquantified the way it was before this section existed.
+
+**[measured, shipped, 2026-09-13] That future round ran** -- see `docs/DE_KERNEL_PLAN.md` for
+the full account. The headroom priced here was real, and unlike L-SHADE, a purpose-written loop
+that reproduces scipy's own algorithm (rather than a different one) shipped: `core/de.py`'s
+`de_best1bin`, now what `fit.py:_global_stage`'s `workers=1` branch calls, measured 35-46%
+faster per DE generation with no quality cost found across a four-part battery (two Wilson-CI
+arenas at 750 and 375 paired samples, a 120-seed reliability sweep of the same hard multi-modal
+landscape cited above, and an end-to-end pipeline/recovery comparison) -- once that battery's
+own n=12 pilot (mirroring `PARAM_OPTIMIZER_PLAN.md`'s L-SHADE check exactly, and initially
+reading as a 5/12-vs-2/12 failure) was re-run at n=120 and the apparent gap turned out to be
+small-sample noise (McNemar p=0.84 at scale, against p=0.25 and only 3 discordant pairs at
+n=12). A bit-exact route was tried first and rejected on its own numbers before this one shipped
+-- see the linked plan for why bit-exactness and shipping speed turned out not to be the same
+question here.
