@@ -392,7 +392,28 @@ static-site Web UI running the same core via WASM (Pyodide).
    (adding a cap-7 series arena to separate the effect from a cap confound, per §3.5.3's own
    precedent) — and was **shipped**, `0.55` → `0.5`, with the measurement in the function's own
    docstring. The tournament/elite-width sweep and the two lower-priority items were not
-   attempted.
+   attempted. **§3.8, added 2026-09-13, measured a two-element insertion step** (a web-UI review
+   question: should the search emit motifs like `p(R,C)` as a set? A hard-coded motif *library*
+   is ruled out on inspection alone as the same shape-bet §3.5.2 already rejected; the narrower,
+   testable version is `mutate` sometimes inserting `series(A,B)`/`parallel(A,B)` — an even coin,
+   both drawn from `pool` — instead of one element). **[measured, `motif_rate=0.30`, 480 seeds]
+   passes its own pre-registered symmetry rule**: wins on the one informative parallel/CPE-dense
+   arena (`land_rclcpe6`, p=0.0085) and does not lose on either series arena (p=0.125 both,
+   numerically ahead on both) — the plain R/C/L parallel arena (`land_rcl6`) saturated at 100%
+   both ways and settled nothing, the same saturated-arena trap `SEARCH_ALGORITHM_SCREENING.md`
+   §4.2 already names. `motif_rate=0.15` fails the win clause (p=0.0147, short of the 0.01 bar).
+   This is the first operator in this document to clear its own symmetry rule rather than be
+   rejected by it. Two mistakes were caught and corrected before trusting any number: a first
+   pilot at `arms.py`'s own `--budget 450` default hung for minutes, traced by profiling the
+   *unmodified* `arm_ga_bounded` to `_unique_best` recomputing `canonical_form()` over an
+   ever-growing, never-deduplicated archive every generation — a pre-existing property of the
+   shipped arm, not of the new code, fixed by giving the new benchmark's `--budget` no default
+   and pointing at this section's own established unsaturated budgets (150 / 40); and the first
+   `land_series_rcl7` sweep silently ran at `--max-elements` 6 instead of 7, caught because its
+   hit counts were suspiciously identical to the cap-6 arena's, and re-run correctly. **Nothing
+   shipped to `discover.py` this round** — scope was measurement and a verdict only; production
+   wiring still needs an EV3-style real-fit throughput/recovery gate first, per every other step
+   in this document.
 
 11. `docs/KK_RESONANCE_PLAN.md` — the Lin-KK test and the resonance its basis cannot express.
    **Implemented; gates K1–K4 measured.** Its §2 is the one to read, and it is the whole point

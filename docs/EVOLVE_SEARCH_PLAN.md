@@ -1577,6 +1577,107 @@ three-dimensional grid, this is the dimension to drop, on the base-rate evidence
 Step 2 is severable and worth landing on its own even if 3–5 are never done: it is the only step
 that fixes something wrong rather than something slow.
 
+### 3.8 A two-element insertion step, measured against section 3.5.2's own symmetry rule
+
+A web-UI review asked whether the genetic search should be able to emit common EIS "motifs"
+(`p(R,C)` and the like) as a set. A hard-coded motif *library* is ruled out on inspection alone,
+without needing a measurement: it is exactly the shape of bet section 3.5.2 already measured and
+rejected for `MUTATION_WEIGHTS` — a change that wins on parallel-shaped truths and loses on
+series-shaped ones — made worse by the motifs carrying electrochemical names that would make the
+bias read as domain knowledge the search is not supposed to have.
+
+The version that is not a shape bet, and is genuinely testable, is narrower: `mutate`'s insertion
+sometimes places **two** fresh elements instead of one — `series(A,B)` or `parallel(A,B)`, an
+exactly even coin (mirroring `random_topology`'s own 0.5, section 3.7 Step 8), `A` and `B` drawn
+from `pool` — rather than a fixed pair. This is a claim about step size (crossing the
+"worse-intermediate" valley a single-element insertion must otherwise cross over two,
+usually-worse generations), not about which shapes exist.
+
+**Method.** `benchmarks/screening_round/motif_probe.py` (new), which does not edit `discover.py`
+or `arms.py`: it monkeypatches the module-level `discover.mutate` name for the duration of one
+`Trace`, so the search loop under test is `arm_ga_bounded`'s exact, unmodified
+`_next_generation`/`_propose_child`/`_tournament`, per this file's own "a reimplementation would
+measure this file" rule. `motif_rate ∈ {0.15, 0.30}`; the operator declines the two-element
+insertion (falling back to one, as today) whenever it would exceed `max_elements`. Every result
+below is 480 seeds, exact McNemar via `arms.py`'s own `_sign_test`, paired by seed against
+`motif_rate=0.0` (identical to today's `mutate` up to one extra, always-unused RNG draw).
+
+**A budget mistake, caught and corrected before any number was trusted.** The pilot's first run
+used `--budget 450`, `arms.py`'s own CLI default — and both the new arm and, when re-checked,
+today's *unmodified, unpatched* `arm_ga_bounded` hung for minutes on a single seed. Profiling the
+unmodified library code (not this file) found why: `_unique_best` recomputes
+`circuit.canonical_form()` over the *entire*, never-deduplicated `scored` archive once per
+generation, and that archive grows every generation regardless of duplicates, so cost rises
+sharply with generation count. This is a pre-existing property of the shipped, published
+`arm_ga_bounded`, confirmed by profiling the untouched code, not a defect this file introduces —
+and it is exactly why section 3.4.3 and 3.5.2 calibrated their own "unsaturated" budgets at 150
+fits (`land_rcl6`/`land_rclcpe6`-family arenas) and 40 fits (`land_series_rcl6`/`_rcl7`) rather
+than at the CLI's 450 default. `motif_probe.py --budget` therefore has **no default** and its
+`--help` states this reasoning, so the mistake cannot be silently repeated.
+
+**A second mistake, caught after the first full sweep.** The initial `land_series_rcl7` runs
+(the cap-7 series arena) were launched without `--max-elements 7`, silently leaving the CLI's
+`--max-elements` default of 6 — capping the search exactly as tightly as the cap-6 arena and
+producing suspiciously identical hit counts to `land_series_rcl6` (258/480 at every rate on
+both). Re-run at `--max-elements 7`: the counts changed (292/480 base), confirming the first
+`ser7` numbers were void and not merely coincidental. **The corrected numbers below are the
+`--max-elements 7` re-run**, and the discarded run is not reported as a result.
+
+**Results, 480 seeds each, `mcnemar_p` from `arms.py`'s exact `_sign_test`:**
+
+| arena | shape | budget | rate | base hits | motif hits | discordant (only-base / only-motif) | p |
+|---|---|---:|---:|---:|---:|---:|---:|
+| `land_rcl6` | parallel | 150 | 0.15 | 480/480 | 480/480 | 0 / 0 | 1.0 (saturated, uninformative) |
+| `land_rcl6` | parallel | 150 | 0.30 | 480/480 | 480/480 | 0 / 0 | 1.0 (saturated, uninformative) |
+| `land_rclcpe6` | parallel, CPE-dense | 150 | 0.15 | 268/480 | 301/480 | 70 / 103 | **0.0147** |
+| `land_rclcpe6` | parallel, CPE-dense | 150 | 0.30 | 268/480 | 304/480 | 71 / 107 | **0.0085** |
+| `land_series_rcl6` | series | 40 | 0.15 | 258/480 | 262/480 | 21 / 25 | 0.659 |
+| `land_series_rcl6` | series | 40 | 0.30 | 258/480 | 272/480 | 29 / 43 | 0.125 |
+| `land_series_rcl7` | series, cap 7 | 40 | 0.15 | 292/480 | 299/480 | 20 / 27 | 0.382 |
+| `land_series_rcl7` | series, cap 7 | 40 | 0.30 | 292/480 | 306/480 | 29 / 43 | 0.125 |
+
+**`land_rcl6` saturates at 100% both ways and settles nothing** — zero discordant pairs is a
+test with no power at all, the same shape of trap section 3.4.4 and
+`docs/SEARCH_ALGORITHM_SCREENING.md` §4.2 already name for a smaller arena that cannot separate
+arms. This is exactly why `land_rclcpe6` was included in the plan alongside it rather than
+substituted in afterward: it is the parallel-shaped, CPE-dense arena that carries the actual
+signal when the plainer R/C/L one saturates.
+
+**Verdict against the pre-registered rule** ("ships only if it wins on the parallel arena and
+does not lose on either series arena; p < 0.01 for the win, p > 0.05 for no-loss," reading
+`land_rclcpe6` in the parallel arena's role since `land_rcl6` returned no information):
+
+- **`motif_rate = 0.30` passes.** Wins on `land_rclcpe6` (p = 0.0085 < 0.01) and does not lose on
+  `land_series_rcl6` (p = 0.125) or `land_series_rcl7` (p = 0.125) — on both series arenas the
+  motif arm is numerically *ahead*, not behind, so this is a clean pass on both clauses rather
+  than a near-miss on the second one.
+- **`motif_rate = 0.15` does not pass.** Its `land_rclcpe6` result (p = 0.0147) is short of the
+  0.01 bar. Failing the win clause is enough on its own; the series clauses are moot for this
+  rate.
+
+**This is the first operator this document has measured that clears its own symmetry rule going
+*in* rather than being rejected by it** — unlike the mutation-weight and seeding-bias sweeps
+(sections 3.5.2, 3.7 Step 8), which found a real asymmetry and had to hold a parameter fixed to
+avoid it, a two-element insertion at an even series/parallel coin never loses on the shapes
+tested and wins on the one informative arena that was not saturated. That is consistent with the
+step-size framing above: nothing about *which* two elements or *which* connective is chosen
+favours one shape over the other, so there is no shape bet to detect.
+
+**Scope of what this measurement licenses, and what it does not.** Per this section's own
+pre-registration, this round is measurement and a written verdict only — `discover.py` is
+unchanged and no default has moved. Wiring `motif_rate = 0.30` as a real (off-by-default, or
+on-by-default) option in `mutate` would still need the two checks every other step in this
+document has needed before shipping: an EV3-style two-sided real-fit throughput/recovery gate
+(a frozen-table win is not yet a real-search win, section 3.3's own caution), and a check that it
+does not interact badly with `PROPOSE_RETRY_CAP` or the steady-state proposer's duplicate
+handling, since a two-element move lands in already-visited territory more often than a
+one-element move. Neither was attempted this round.
+
+**Files.** `benchmarks/screening_round/motif_probe.py` (new); results under
+`benchmarks/screening_round/motif_results/`; `benchmarks/paired_stats.py` (new, `mcnemar_exact`,
+lifted out of `arms.py`'s `_sign_test` for reuse by other rounds — see
+`docs/SMALL_SAMPLE_REVIEW.md` for its first other user).
+
 ## 6. Risks
 
 - **Step 3 changes what the fitness means.** Mitigated by ordering it after step 2 and by EV3
