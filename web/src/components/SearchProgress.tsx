@@ -17,11 +17,16 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { SearchProgress, SearchStage } from "../core/search";
+import { BridgeClient } from "../worker/client";
+import { CircuitPreview } from "./CircuitPreview";
 import { ParetoTable } from "./ParetoTable";
 
 export interface SearchProgressPanelProps {
   progress: SearchProgress;
   poolSize: number;
+  /** Same bridge and readiness the rest of this screen uses, for drawing a picked live row. */
+  client: BridgeClient;
+  ready: boolean;
 }
 
 const STAGE_LABEL: Record<SearchStage, string> = {
@@ -158,8 +163,13 @@ function useLiveElapsed(progress: SearchProgress): number {
   return shown.current;
 }
 
-export function SearchProgressPanel({ progress, poolSize }: SearchProgressPanelProps) {
+export function SearchProgressPanel({ progress, poolSize, client, ready }: SearchProgressPanelProps) {
   const elapsedMs = useLiveElapsed(progress);
+  // A row of the *live* front, picked by the user and only by the user -- null until a click, so
+  // no schematic ever appears on its own. Local to this component: it is a display-only concern
+  // of the live panel, and the panel unmounts (and this resets) the moment the run stops, which
+  // is right -- the finished report's own picker (`DiscoverScreen`) starts from null too.
+  const [pickedLive, setPickedLive] = useState<string | null>(null);
   // `enumerating` and `reporting` have no counter of their own -- they are one call each -- so
   // they are named in the heading and fold into the neighbouring rows below.
   const screening = stateOf(progress.stage, "screening");
@@ -277,7 +287,22 @@ export function SearchProgressPanel({ progress, poolSize }: SearchProgressPanelP
       )}
 
       {progress.front.length > 0 && (
-        <ParetoTable title="Pareto front so far" rows={progress.front} />
+        <ParetoTable
+          title="Pareto front so far"
+          rows={progress.front}
+          selected={pickedLive}
+          onSelect={setPickedLive}
+        />
+      )}
+
+      {pickedLive !== null && (
+        <div className="search-progress__live-preview">
+          <CircuitPreview client={client} ready={ready} circuit={pickedLive} />
+          <p className="search-progress__live-caption">
+            Front so far, from a search that has not finished. Rows above this one may still
+            appear, and this is not the recommendation.
+          </p>
+        </div>
       )}
     </section>
   );

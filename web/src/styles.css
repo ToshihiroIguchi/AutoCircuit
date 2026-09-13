@@ -1983,6 +1983,18 @@ body {
   font-family: var(--font-mono);
 }
 
+.search-progress__live-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.search-progress__live-caption {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
 /* ---- discover report ---- */
 
 .discover-screen__stopped {
