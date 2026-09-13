@@ -7,14 +7,20 @@
 // The rest have no standard symbol. A survey of ZView, Gamry, EC-Lab and the EIS literature found
 // no agreed drawing for a CPE, and none for the Warburg family either: the notation everyone
 // shares is the *code* (W, Ws, Wo, G), not a shape. So this file does not invent one and present
-// it as convention. CPE gets the one departure that is widely readable -- a capacitor whose plates
-// are curved, saying "a capacitor, but distributed" -- and everything else gets a box with its
-// code in it, which is what a tool draws for an element the reader has to be told the name of.
-// An element added to the Python registry therefore appears here as a labelled box rather than as
+// it as convention. CPE used to depart from that rule with a glyph of its own -- two plates both
+// bowing outward -- and that departure collided with IEC 60617 rather than merely extending it:
+// the standard already assigns a curved plate to the polarized/electrolytic capacitor (one
+// straight plate, one curved), so the old glyph's outward-bowed right-hand plate read as that
+// symbol, mirrored -- a misreading in-domain for a tool whose users measure real electrolytic
+// capacitors. CPE is therefore drawn with `C`'s own straight-plate shape (the true and only
+// honest claim: "capacitor-like") plus its code beneath the wire, exactly the "a tool draws a
+// box with its code in it" treatment given to every other non-IEC element, just without the box.
+// Every element added to the Python registry appears here as a labelled box rather than as
 // nothing, which is the behaviour that keeps the palette's promise that the catalogue is dynamic.
 
 import type { ReactNode } from "react";
 import type { ElementPlacement } from "../core/schematic";
+import type { ElementWire } from "../core/types";
 
 /** Half the width every symbol draws inside; the cell's leads stop at these edges. */
 const HALF = 15;
@@ -61,14 +67,9 @@ function symbolPaths(code: string): ReactNode {
         </>
       );
     case "CPE":
-      return (
-        <>
-          <line x1={-HALF} y1={0} x2={-10} y2={0} />
-          <line x1={10} y1={0} x2={HALF} y2={0} />
-          <path className="cc-sym__line" d="M-4,-9 Q-10,0 -4,9" />
-          <path className="cc-sym__line" d="M4,-9 Q10,0 4,9" />
-        </>
-      );
+      // Same shape as `C`: two straight plates. See the file header for why -- CPE no longer
+      // gets a glyph of its own, only its code drawn beneath the wire (see `body`).
+      return symbolPaths("C");
     default: {
       const w = boxWidth(code);
       return (
@@ -82,15 +83,26 @@ function symbolPaths(code: string): ReactNode {
   }
 }
 
-const DRAWN = new Set(["R", "C", "L", "CPE"]);
+//: R, C and L carry no code text -- their IEC 60617 shapes are self-identifying. Everything
+//: else needs its code written somewhere: a boxed element gets it centred inside the box;
+//: CPE, drawn as a plain capacitor, gets it beneath the wire instead, at the same offset the
+//: designator label above uses in the other direction (see `ElementSymbol`'s `y={-16}`).
+const SELF_IDENTIFYING = new Set(["R", "C", "L"]);
 
-/** The symbol itself, centred on (0,0): the code goes inside the box of an element that has one. */
+/** The symbol itself, centred on (0,0): the code goes inside the box of an element that has one,
+ * or beneath the wire for a shaped-but-unlabelled element (CPE). */
 function body(code: string): ReactNode {
+  const shaped = code === "CPE";
   return (
     <>
       {symbolPaths(code)}
-      {!DRAWN.has(code) && (
-        <text className="cc-sym__code" x={0} y={0} dominantBaseline="central">
+      {!SELF_IDENTIFYING.has(code) && (
+        <text
+          className="cc-sym__code"
+          x={0}
+          y={shaped ? 16 : 0}
+          dominantBaseline={shaped ? undefined : "central"}
+        >
           {code}
         </text>
       )}
@@ -118,6 +130,11 @@ export function ElementSymbol({ placement, selected }: SymbolProps) {
  * The palette used to list codes while the canvas drew shapes, which left the reader to learn the
  * mapping from the schematic. It is one drawing routine, so the two cannot drift apart.
  */
+/** The tooltip text for an element: just its full name, same as SearchPanel's checkbox label. */
+export function elementTitle(element: ElementWire): string {
+  return element.name;
+}
+
 export function SymbolPreview({ code }: { code: string }) {
   return (
     <svg

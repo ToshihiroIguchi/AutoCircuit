@@ -20,7 +20,7 @@
   --border: rgba(11, 11, 11, 0.12);
   --series-1: #2a78d6; /* measured data */
   --series-2: #eb6834; /* Lin-KK fit overlay */
-  /* Text on a --series-1 fill: the primary buttons, and the active palette chip. */
+  /* Text on a --series-1 fill: the primary buttons, and other active-state fills. */
   --on-accent: #ffffff;
   --accent-ring: rgba(42, 120, 214, 0.25);
   --row-selected-bg: #e6f0fb;
@@ -1001,7 +1001,7 @@ body {
 
 .fit-screen__build {
   display: grid;
-  grid-template-columns: 190px 1fr;
+  grid-template-columns: 240px 1fr;
   gap: 12px;
   align-items: start;
 }
@@ -1016,37 +1016,12 @@ body {
   padding: 10px 12px;
 }
 
-.palette__pools {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px;
-  margin-bottom: 8px;
-}
-
-.palette__pool {
-  font-family: inherit;
-  font-size: 10px;
-  letter-spacing: 0.03em;
-  padding: 2px 6px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: none;
-  color: var(--text-secondary);
-  cursor: pointer;
-}
-
-.palette__pool--active {
-  background: var(--series-1);
-  border-color: var(--series-1);
-  color: var(--on-accent);
-}
-
 .palette__list {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 3px;
 }
 
@@ -1085,14 +1060,6 @@ body {
 .palette__code {
   font-family: var(--font-mono);
   font-weight: 700;
-  min-width: 36px;
-}
-
-.palette__name {
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .palette__hint {
@@ -1651,6 +1618,10 @@ body {
 
   .fit-screen__build {
     grid-template-columns: 1fr;
+  }
+
+  .palette__list {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   }
 }
 
