@@ -102,3 +102,85 @@ def test_sniff_picks_generic_csv() -> None:
     assert spec.metadata["format"] == "generic_csv"
     assert spec.metadata["source_path"] == str(DATA / "generic_re_im.csv")
     assert_allclose(spec.f, FREQS)
+
+
+# --------------------------------------------------------------------------------------
+# Unit-suffix header fallback (e.g. "Real_Ohm", "R_Ohm") -- see generic_csv._classify_header.
+# --------------------------------------------------------------------------------------
+
+
+def test_unit_suffix_headers_recognized(tmp_path: Path) -> None:
+    # The header spelling of the project's own zenodo-21700 measured datasets: no alias in
+    # _REAL_ALIASES/_IMAG_ALIASES matches "Real_Ohm"/"Imag_Ohm" verbatim, only after the
+    # trailing "Ohm" unit is stripped.
+    path = tmp_path / "unit_suffix.csv"
+    path.write_text(
+        "Frequency_Hz,Real_Ohm,Imag_Ohm\n"
+        + "\n".join(f"{f},{r},{i}" for f, r, i in zip(FREQS, RE, IM, strict=True)),
+        encoding="utf-8",
+    )
+    spec = generic_csv.read(path)
+    assert_allclose(spec.f, FREQS)
+    assert_allclose(spec.z.real, RE, rtol=1e-6)
+    assert_allclose(spec.z.imag, IM, rtol=1e-6)
+
+
+def test_unit_suffix_bare_r_and_x(tmp_path: Path) -> None:
+    # "R"/"X" are already aliases for re/im; "R_Ohm"/"X_Ohm" only match via the fallback.
+    path = tmp_path / "r_x_ohm.csv"
+    path.write_text(
+        "Frequency_Hz,R_Ohm,X_Ohm\n"
+        + "\n".join(f"{f},{r},{i}" for f, r, i in zip(FREQS, RE, IM, strict=True)),
+        encoding="utf-8",
+    )
+    spec = generic_csv.read(path)
+    assert_allclose(spec.z.real, RE, rtol=1e-6)
+    assert_allclose(spec.z.imag, IM, rtol=1e-6)
+
+
+def test_unit_suffix_zpp_convention_still_negates(tmp_path: Path) -> None:
+    # "Z''_Ohm" must still be recognized as the positive-up -Im(Z) convention and negated, the
+    # same as the bare "Z''" header already is -- the fallback strips the unit but must not
+    # disturb which canonical form ends up in _IMAG_NEGATE_SET.
+    path = tmp_path / "zpp_ohm.csv"
+    path.write_text(
+        "Frequency_Hz,Re(Z)_Ohm,Z''_Ohm\n"
+        + "\n".join(f"{f},{r},{-i}" for f, r, i in zip(FREQS, RE, IM, strict=True)),
+        encoding="utf-8",
+    )
+    spec = generic_csv.read(path)
+    assert_allclose(spec.z.imag, IM, rtol=1e-6)
+    assert "negated" in spec.metadata["imag_sign_convention"]
+
+
+def test_unit_suffix_fallback_is_purely_additive() -> None:
+    # Every header token across every existing io/ fixture must classify exactly as it did
+    # before the fallback existed -- the fallback only ever fires on a header the exact-match
+    # pass returned None for.
+    known_exact = {
+        "freq": ("f", False),
+        "frequency_hz": ("f", False),
+        "omega": ("omega", False),
+        "re(z)": ("re", False),
+        "z'": ("re", False),
+        "re_z_ohm": ("re", False),
+        "im(z)": ("im", False),
+        "z''": ("im", True),
+        "-z''": ("im", False),
+        "im_z_ohm": ("im", False),
+        "|z|": ("mag", False),
+        "z": ("mag", False),
+        "phase": ("phase", False),
+        "deg": ("phase", False),
+    }
+    for header, expected in known_exact.items():
+        assert generic_csv._classify_header(header) == expected, header
+
+
+def test_unit_suffix_unmatched_remains_unmatched() -> None:
+    # A header with a stripped unit still not matching any alias stays unclassified, and a
+    # header ending in a unit token with nothing in front of it is never stripped down to an
+    # empty string.
+    assert generic_csv._classify_header("Foo_Ohm") is None
+    assert generic_csv._classify_header("Ohm") is None
+    assert generic_csv._classify_header("Bar") is None
