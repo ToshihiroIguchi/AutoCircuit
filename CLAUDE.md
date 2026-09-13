@@ -273,7 +273,20 @@ static-site Web UI running the same core via WASM (Pyodide).
    whose only disclaimer was an eleven-point caption in the header. The load state now sits in the
    content column, the tab strip marks what is not live, and the finish is announced instead of
    merely ceasing — and there is still no progress bar, because `loadPackage` reports no bytes and
-   an animated bar would look identical to a dead worker.
+   an animated bar would look identical to a dead worker. **§9, added 2026-09-13, prices the one
+   lever §8.3 left unpriced: is the stdlib bytecode (2.5 MB -> 7.1 MB, `precompile.mjs`) worth its
+   4.51 MB over a real link, measured rather than assumed from a Node-only, no-transfer-cost
+   number.** A byte-rate-limited server (`web/scripts/serve-throttled.mjs`) and a variant build
+   that ships the stdlib pristine (`set-stdlib-variant.mjs`) found **the bytecode wins at every
+   rung tested, cold and warm** — including 0.67 MB/s, this project's own measured GitHub Pages
+   rate: the pristine build is slower to "data ready" (27.13 s vs 25.61 s) and "fit ready"
+   (56.95 s vs 55.00 s) even there, because compiling 559 stdlib modules in an interpreter
+   already measured 3-5x slower than CPython costs more than the transfer it saves. The warm-
+   cache gap is the sharper number: with no transfer cost to offset in either build, the pristine
+   stdlib still costs 1.4-1.6 s more on *every single revisit*, because the browser's Python
+   process never persists a `__pycache__` the way an installed interpreter would. Nothing ships
+   from this section — the pre-registered rule for dropping the bytecode was not met, decisively
+   rather than marginally — but the reusable instrument stays for pricing the next such proposal.
 9. `docs/SCHEMATIC_PLAN.md` — how the Fit screen draws the circuit. **Implemented; gates S1–S4
    measured.** The picture is computed rather than laid out: `web/src/core/schematic.ts` turns the
    parsed tree into coordinates, which is what makes "every wire is axis-aligned", "no wire ends
@@ -736,6 +749,33 @@ static-site Web UI running the same core via WASM (Pyodide).
    built for it still measured a real, informative result on one dataset (`adaptive` thinning beat
    `uniform` significantly, `p=0.0005`, on `zenodo-21700-id15`'s genuinely irregular frequency
    axis) which is recorded as a number only, not a verdict. `core/fit.py` is unchanged.
+   **§8, added 2026-09-13 (`benchmarks/speedup/where_time_goes.py`), is a direct decomposition
+   of one `screen()` call rather than another lever -- nothing ships from it.** §1's own
+   27.6-36.1% DE-bookkeeping share came from one `cProfile` run and had never been cross-checked
+   by an unbiased method; an unbiased null-cost/real-cost comparison (normalized per DE
+   iteration, since the null arm was measured to still converge early even with a real-valued,
+   non-constant cost -- it collapses the population's spread in exactly the coordinate the
+   convergence test watches) finds **48-67%**, confirming §1's number rather than overturning it.
+   A `cProfile` decomposition of a full `screen()` call (after fixing a found-and-corrected
+   cold-start artifact: the first topology profiled with no warm-up call read as 89% "other")
+   agrees in order of magnitude (30-39%), and separately prices the finite-difference Jacobian
+   `least_squares(method="trf")` relies on everywhere in this codebase at ~44-49% of the local-
+   polish stage's own time -- real, but that whole stage is only 2.8-4.2% of a screen because
+   `abandon_above` skips it for most candidates, so an analytic Jacobian would save at most
+   ~1.5-2% of total screen time. Four named micro-inefficiencies (a constant-impedance element's
+   redundant allocation, a per-leaf dict lookup already resolved in `Circuit._specs`, a doubly-
+   entered `np.errstate`, omega-only subexpressions recomputed on every population evaluation)
+   were priced individually and are each real in percentage terms (+28% to +99% depending on the
+   pair) but **collectively under 0.05% of one screen's total time**, arithmetically too small
+   to matter regardless of the percentages. One of these microbenchmarks was also measured to
+   *flip direction* depending on what ran earlier in the same process (+31% one way in isolation,
+   -218% the other immediately after this script's own DE-heavy stages) -- fixed by having
+   `--profile`/`--micro` skip the unrelated stage by default rather than trusting numbers taken
+   back-to-back with it. The section's own conclusion: the only lever with real, uncommitted
+   headroom is SciPy's own DE bookkeeping (48-67%), not shipped or attempted this round --
+   `docs/PARAM_OPTIMIZER_PLAN.md` already measured a *different* optimizer replacement (L-SHADE)
+   regressing a known-hard reference before being withdrawn, so this is recorded as a priced,
+   ranked candidate for a future round, not a recommendation to act on unmeasured.
 
 18. `docs/DISCOVER_UX_PLAN.md` — usability fixes on the Discover path, from two rounds of user
    review of the CLI and web front ends. **Implemented, items A-G; verified by `npm run check`,

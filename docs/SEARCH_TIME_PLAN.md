@@ -14,7 +14,14 @@ done. §3.5 (spectrum thinning for the DE global stage) was added 2026-09-12 and
 ship decision -- the pilot's own recommendation is a full 480-seed follow-up, not yet run.**
 Written 2026-09-02. Every number outside §3.1/§3.2/§4.1/§4.2/§4.3/§3.3/§3.4 and §6's
 T1/T2/T3/T6/T4/T5 entries is quoted from a document that measured it before this plan existed,
-except §3.5, whose pilot-scale H1 result is new and whose H2 is still unmeasured.
+except §3.5, whose pilot-scale H1 result is new and whose H2 is still unmeasured. **§8, added
+2026-09-13, is the direct decomposition this plan's own §1 never had** — every share in §1 came
+from one arm of an A/B (`profile_eval.py`'s `cProfile`, run once), never checked against an
+unbiased measurement of the same quantity. §8 builds that check
+(`benchmarks/speedup/where_time_goes.py`) and finds §1's own numbers hold up: SciPy's DE loop is
+~30–42% of a screen depending on topology, confirmed by both an unbiased wall-clock method and
+`cProfile`, and prices four previously-only-named micro-inefficiencies (§3.3's own kernel
+substitution already shipped; these did not) without shipping any of them.
 
 ## 0. What this plan is and is not
 
@@ -801,3 +808,172 @@ number is reported as a pair, rested and loaded, per `WEB_UI_PLAN.md`'s W3 prece
    equivalence-class member regardless) are unaffected by the count.
 
 All seven steps of this order of work are done.
+
+## 8. A direct decomposition of one `screen()` call (2026-09-13)
+
+**Nothing in this section ships.** It answers a question this plan's own §1 never actually
+asked — what a screen's time breaks down into, measured directly and cross-checked by two
+independent methods, rather than read off one arm of an A/B built for a different comparison —
+and prices four previously-unquantified micro-inefficiencies. `benchmarks/speedup/
+where_time_goes.py` is the instrument; `--all` runs everything, `--profile`/`--micro` alone
+skip the unrelated stage (see §8.4 for why that split exists).
+
+### 8.1 The unbiased number: null-cost vs real-cost, per DE iteration
+
+§1's 27.6–36.1% for `differential_evolution` bookkeeping came from one `cProfile` run, and
+`cProfile` charges per Python call — biased toward overstating exactly the Python-heavy code
+that is under suspicion. This checks it a different way: run the production DE call
+(`_global_stage`'s own kwargs, copied verbatim and parity-checked against the real function)
+twice, once with the real `cost_vectorized` and once with a cost function that does no model
+evaluation at all, and compare wall-clock time per iteration.
+
+The first design (`_null_cost` returning a constant) was rejected before it was even run:
+SciPy's convergence test is `std(energies) <= atol + tol*|mean(energies)|`, so an all-zero
+population converges at generation 1. The fix tried next — return the population's own first
+free coordinate, which has real spread — was **measured to still converge early**, because
+that coordinate *is* the quantity DE is minimizing, so DE dutifully collapses the population's
+spread in exactly the dimension the convergence test watches (nit=22 vs nit=39 on the smallest
+topology). Rather than chase a landscape that resists convergence, the comparison normalizes by
+each arm's own iteration count instead of requiring equal `nit` — DE's per-generation
+bookkeeping (population update, mutation, crossover, bound clipping) is population-shape-
+dependent but cost-function-independent, so time-per-iteration is the right unit regardless of
+how many iterations either arm ran.
+
+Six topologies, 3–6 free parameters (element count and free-parameter count deliberately
+diverge — a CPE costs one element but two parameters, `PARAM_BUDGET_PLAN.md`'s own point), half
+CPE-bearing:
+
+| topology | n_free | null/it (ms) | real/it (ms) | share |
+|---|---:|---:|---:|---:|
+| 3-element R/C | 3 | 0.210 | 0.315 | 66.8% |
+| 4-element R/C/L | 4 | 0.204 | 0.327 | 62.3% |
+| 5-element R/C | 5 | 0.339 | 0.584 | 58.1% |
+| 3-element R/CPE | 4 | 0.216 | 0.387 | 55.7% |
+| 4-element R/CPE/L | 5 | 0.416 | 0.863 | 48.2% |
+| 5-element R/C/CPE | 6 | 1.227 | 2.343 | 52.3% |
+
+**This is the number of record.** DE's own bookkeeping is 48–67% of the global stage's
+per-iteration cost — a real, large, and *already-paid* cost that has nothing to do with
+AutoCircuit's own arithmetic, confirming §1's cProfile-derived estimate rather than
+overturning it (§8.2 finds the same range by the biased method, for the same reason: the two
+agree here, so cProfile's bias is not distorting this particular number by much on these
+topologies).
+
+**A side finding, not the question asked, worth recording anyway**: both `null/it` and
+`real/it` jump sharply between the two highest-`n_free` rows (0.416 to 1.227 ms null, 0.863 to
+2.343 ms real) — far more than the population-size ratio (`popsize * n_free`, 40 to 48, a 20%
+step) predicts. Because this shows up in the *null* arm too, which never touches AutoCircuit's
+arithmetic, it is DE's own per-generation bookkeeping scaling worse than linearly with
+dimension, not a property of anything this project could fix. A future budget decision that
+scales `n_free` (a wider default pool, `max_params`) should expect superlinear DE overhead
+alongside it, not just a linear one.
+
+### 8.2 The biased decomposition: `cProfile` on a full `screen()` call
+
+Self-time (`tottime`, which does not double-count nested calls) bucketed by source file, same
+six topologies, `cProfile` over 5 full `screen()` calls per topology after one untimed warm-up
+call (§8.4 explains why the warm-up is not optional):
+
+| topology | DE bookkeeping | local polish (excl. Jacobian) | Jacobian (`_numdiff`) | impedance kernel | residual assembly | other |
+|---|---:|---:|---:|---:|---:|---:|
+| 3-element R/C | 37.8% | 1.6% | 1.4% | 16.2% | 8.3% | 34.8% |
+| 4-element R/C/L | 35.5% | 1.8% | 1.5% | 18.3% | 8.3% | 34.5% |
+| 5-element R/C | 39.3% | 1.2% | 1.0% | 25.7% | 7.1% | 25.7% |
+| 3-element R/CPE | 33.4% | 1.6% | 1.3% | 24.3% | 7.6% | 32.0% |
+| 4-element R/CPE/L | 37.1% | 1.2% | 1.1% | 29.4% | 6.9% | 24.3% |
+| 5-element R/C/CPE | 29.7% | 2.2% | 2.1% | 34.4% | 6.5% | 25.1% |
+
+DE bookkeeping (30–39%) agrees with §8.1's unbiased 48–67% share only in rough order of
+magnitude, not exactly — expected, since §8.1 measures the global stage alone and this measures
+a whole `screen()` call including local polish and setup, and `cProfile`'s per-call bias runs
+the other way here (undercounting, not overcounting, DE's C-level inner loop relative to
+Python-level bookkeeping it does still charge for). The impedance kernel's share rises with
+`n_free` and much more so with CPE (16% to 34% from smallest to largest, CPE-bearing
+topologies consistently higher at the same element count than non-CPE ones) — consistent with
+`SEARCH_ALGORITHM_SCREENING.md`'s already-measured CPE cost gap, now seen inside a single
+screen's own internal split rather than only in total wall-clock. "Other" (numpy internals,
+dispatch overhead, `_Problem` setup) is 24–35%, in the same range §1's "per-topology setup"
+bucket already reported (25.4–33.1%) — this project's own `FitContext` hoist (§3.1) already
+addresses the cross-topology-shared part of that; what remains is genuinely per-call overhead.
+
+**A methodological pitfall found and fixed before trusting this table, not a caveat added
+after**: the first topology profiled with no warm-up call read as 89% "other" and single digits
+everywhere else — a one-time cost (first-call scipy submodule imports, allocator/thread-pool
+warm-up) dominating a profile this short (5 calls). One untimed `screen()` call before
+`profiler.enable()`, per topology, removed it entirely; every row above reflects steady-state
+cost, not cold start.
+
+### 8.3 The local polish's own Jacobian share
+
+`least_squares(method="trf")` is given no analytic Jacobian anywhere in this codebase — both
+tier-1 (`SCREEN_LOCAL`) and tier-2 (`PUBLISH_LOCAL`) budgets rely on `scipy.optimize._numdiff`'s
+finite-difference approximation, costing `n_free` extra full `residuals` evaluations per
+Jacobian. Isolated from §8.2's own profile:
+
+| topology | Jacobian's share of (polish + Jacobian) |
+|---|---:|
+| 3-element R/C | 45.7% |
+| 4-element R/C/L | 44.9% |
+| 5-element R/C | 44.3% |
+| 3-element R/CPE | 44.4% |
+| 4-element R/CPE/L | 47.0% |
+| 5-element R/C/CPE | 49.3% |
+
+The Jacobian really is close to half the local-polish stage's own cost, as the "no analytic
+Jacobian" observation would predict. **It still does not matter to the whole screen**, because
+the polish stage itself is only 2.8–4.2% of `screen()`'s total self-time (polish + Jacobian
+columns of §8.2's table, summed) — `screen()`'s own `abandon_above` early-abandon skips polish
+for most candidates, and `SCREEN_LOCAL.max_nfev = 2000` caps what remains. An analytic Jacobian
+would roughly halve a 3–4% slice, i.e. save on the order of 1.5–2% of a screen's total time —
+real, but not where this round's evidence says to look.
+
+### 8.4 Four named micro-inefficiencies, priced individually — and a second pitfall
+
+Microbenchmarks only; nothing wired into `core/`. Best-of-7 mean over batched calls (a single-
+call timer was tried first and rejected: several of these are sub-microsecond, at or under
+`time.perf_counter`'s effective resolution once Python's own call overhead is subtracted, and a
+single-call read hit a `ZeroDivisionError` computing the percentage more than once):
+
+| item | current | alternative | effect |
+|---|---:|---:|---|
+| `Resistor.impedance`'s `np.ones_like` allocation | 13.9 us | `np.broadcast_to` (10.0 us) | +28.2% if switched |
+| `elements.get()` per leaf per evaluation vs a cached reference | 48 ns | 28 ns | +42.6% if switched |
+| `np.errstate` entered twice (`Circuit.impedance`, then `cost_vectorized`) vs once | 726 ns | 1532 ns (current) | +111.1% overhead from the nesting |
+| `log(1j*omega)` recomputed every evaluation vs hoisted | 9325 ns | 77 ns | +99.2% if hoisted |
+
+**A second methodological pitfall, of the same family as §8.2's cold-start one**: the smallest
+of these (the `Resistor` pair, ~10–14 us either way) was measured to *flip direction* depending
+on what ran earlier in the same process. Isolated in a fresh process, five independent runs
+agreed to within a few percent (+25% to +31%, `broadcast_to` faster). Run immediately after
+this same script's own §8.1/§8.2 workload in one `--all` invocation, the same comparison read
+anywhere from a 218% loss to a 6% win — almost certainly leftover CPU frequency scaling or
+cache state from the preceding DE-heavy work, not a property of the code being compared. The
+shipped script now skips §8.1 by default when only `--micro` is requested (rather than running
+it and discarding the result), and `--all` prints an explicit warning before this table pointing
+at a standalone `--micro` run instead of trusting numbers measured back-to-back with §8.1/§8.2.
+
+**None of these four are worth building**, and the reason is arithmetic, not the percentages
+above: every one of them fires on the order of once per leaf or once per `cost_vectorized` call
+(tens of times per screen), each saving single-digit microseconds to sub-microsecond amounts.
+Summed across a whole screen (~41 `cost_vectorized` calls, a handful of leaves each), the total
+addressable time from all four combined is on the order of hundreds of microseconds — against
+an 0.87–1.77 s screen (`SEARCH_ALGORITHM_SCREENING.md` §4.6), that is **under 0.05% of the
+total**, regardless of how large the per-call percentage looks. A large relative saving on a
+tiny absolute cost is still a tiny absolute saving; this is recorded so the four are not
+independently rediscovered and mistaken for real levers.
+
+### 8.5 What this round actually says to build, if anything
+
+**Not four small kernel tweaks (§8.4) — they are individually and collectively too small.**
+**Not an analytic Jacobian (§8.3) — real, but bounded at roughly 1.5–2% of a screen.** The one
+number this round found that is both large and real is §8.1's: SciPy's own DE bookkeeping is
+48–67% of the global stage regardless of topology or CPE content, confirmed by an unbiased
+method and roughly corroborated by `cProfile`. That is not a lever this round built or
+recommends building — replacing `scipy.optimize.differential_evolution` with a
+purpose-written vectorized DE loop is a substantial undertaking with its own correctness risk
+(this project's own `PARAM_OPTIMIZER_PLAN.md` already measured a *different* optimizer
+replacement, L-SHADE, tying or losing on both benchmark arenas and regressing a known-hard
+`LARGE_REFERENCES` entry from 5/12 seeds reaching the noise floor to 0/12 before being
+withdrawn) — but it is the only place this round found real, uncommitted headroom, and it is
+recorded here as a priced, ranked candidate for a future measured round rather than left
+unquantified the way it was before this section existed.
