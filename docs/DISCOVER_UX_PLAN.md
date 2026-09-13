@@ -1,6 +1,6 @@
 # DISCOVER_UX_PLAN.md — usability fixes on the Discover path
 
-**Status: implemented, items A-G.** Verified by `npm run check` (type-check, the schematic
+**Status: implemented, items A-G, plus a fourth review round (below).** Verified by `npm run check` (type-check, the schematic
 geometry gate, and the samples-manifest cross-check against `benchmarks/`, all passing),
 `npm run smoke` (the full Pyodide path, headless, all checks passing), `tests/test_cli.py` (24
 passed), `tests/test_discover.py` (31 passed) and the full `pytest` suite (992 passed, 19 skipped)
@@ -583,3 +583,95 @@ lowest-cost circuit found by that point. Manually exercised on the command line
 (`autocircuit discover web/public/samples/li-ion-cell.csv --growth-width 4 --progress`) through
 the screening, growth and pool-widening phases: no `N/M` line with `N > M`, and growth prints one
 self-overwriting line rather than a newline per batch.
+
+## A fourth review round: the escalation was invisible in the persisted report, not the live one
+
+A user request to "check the fallback code and Web UI behavior, and if there are problems, show
+them and take countermeasures" was investigated by actually reading the trigger code and driving
+both front ends, rather than assuming the third review round's fixes above were the whole story.
+
+**What was checked, and what turned out to already be correct.** The live-progress side of this
+was already fine on both front ends before this round started: `cli/main.py`'s `on_stage` closure
+prints a full explanatory sentence to stderr the moment either escalation fires (only under
+`--progress`), and `web/src/components/SearchProgress.tsx` already renders a pool-widening banner
+(`:187-193`) and a genetic-fallback banner (`:238-256`, the `"evolving"` stage, wired since
+`docs/EVOLVE_WEB_PLAN.md` phase 4) with a live generation counter -- confirmed by actually driving
+the Discover screen (`npm run dev`, Playwright) against a diffusion spectrum (`Randles (with
+Warburg)` example data, custom pool `R,C`, element limit 3) rather than by reading the component
+source alone: the panel showed "Falling back to a genetic search — N s elapsed" and a full
+sentence naming the exhaustive stage's own completeness and the fallback's element ceiling, live,
+before the search finished.
+
+**The actual gap was the persisted report, on both front ends, once the search finished** --
+which is the artifact a user keeps, downloads, and pastes into a ticket, unlike the progress
+banner that disappears the moment the run ends. `DiscoveryResult.completeness()`
+(`discover.py:832-904`) already had a sentence for pool-widening (`_with_pool_note`) and one for
+growth (`_with_growth_note`), each explaining what the escalation means for absence-as-evidence.
+**There was no equivalent sentence for the genetic fallback itself**, even though
+`_with_recommendation_note`'s own docstring already knew the fallback's candidates are "not
+bounded by `complete_up_to` at all" -- a stronger disclaimer than growth's, which still earned a
+full sentence. `summary()`'s only trace of a fallback run was `"... over N generations ..."` in
+its opening line: neutral-looking metadata a non-expert reads as ordinary progress, not as "this
+candidate came from an unverified heuristic search because the exhaustive stage's own best fit
+still looked non-random." Since `completeness()` backs both the CLI's `summary()` (printed
+unconditionally, not gated on `--progress`) and the web Report screen's `report.completeness`
+field (`ReportScreen.tsx:168`, sourced from `report_payload()`), the gap was identical on both
+front ends and had nothing to do with either front end's own code.
+
+**Fix.** `DiscoveryResult._with_evolve_note` (`discover.py`, new method, ~35 lines), modeled
+directly on `_with_growth_note`, wired into `_with_refit_note` (the common wrapper every
+`completeness()` return path already passes through) right before `_with_pool_note`. Scoped to
+`self.mode == "auto"` so an explicit `mode="evolve"` request -- the caller's own deliberate
+choice, which already gets its own "sampled, not exhaustive" sentence -- is left untouched. No
+new field was added to the wire schema (`generations > 0` is already public and sufficient), so
+this is a pure prose addition: `to_dict()`'s existing `"coverage"` key changes text only on runs
+where the fallback actually ran, and `ev5_fingerprint.py`'s exhaustive-only references (which
+never trigger the fallback) are unaffected.
+
+**Verified, not merely argued.** Four things were actually run, not just read:
+
+1. **The CLI, without `--progress`.** `autocircuit discover <diffusion CSV> --pool R,C --mode
+   auto --exhaustive-limit 3 --max-elements 6 --generations 3 --population 6 --seed 0` (no
+   `--progress` flag) printed, in `result.summary()`'s unconditional output:
+   > Coverage: every plausible topology with up to 3 elements from this pool was evaluated.
+   > Beyond 3 element(s) the search stopped enumerating: the best fit up to that point still
+   > showed a systematic residual (structured, not random, by a runs-test check), so it fell
+   > back to a randomized genetic search for 3 generations. That fallback carries no
+   > completeness guarantee at all -- not even the weaker one the growth stage above earns -- so
+   > a topology's absence from this report above that point is never evidence against it. See
+   > docs/EVOLVE_SEARCH_PLAN.md for what is and is not yet measured about how often it succeeds.
+
+   Confirming item 6's actual defect: the sentence above is now visible with zero flags beyond
+   the ones that control the search itself, closing exactly the gap that `--progress`'s live
+   narration never covered for a user who did not pass it.
+2. **The browser, end to end** (`npm run dev`, Playwright, headed): custom pool `R,C`, element
+   limit 3, on the `Randles (with Warburg)` example spectrum -- a Warburg element no `R,C` tree
+   reproduces, so the exhaustive stage stays underfit and the fallback opens. The live
+   `SearchProgress` banner narrated the escalation as it ran (confirming what was already
+   correct, above); once the run finished, both the Discover screen's own result view and the
+   Report screen (`report.completeness`, no React code touched) rendered the new sentence
+   verbatim -- zero front-end changes were needed, exactly as the fix's design predicted, because
+   both already render whatever `completeness()` returns.
+3. **New tests**, isolating three claims separately rather than trusting the manual runs alone:
+   `tests/test_discover_exhaustive.py::test_the_auto_escalation_names_itself_in_the_persisted_report`
+   (the sentence appears, names the generation count, and is a substring of `summary()`),
+   `test_the_auto_escalation_note_is_silent_when_the_fallback_never_ran` (an ordinary exhaustive
+   run stays silent), and the existing `test_evolve_mode_never_claims_completeness` gained one
+   more assertion that an explicit `mode="evolve"` call never gets the sentence. A fourth test,
+   `tests/test_discover_growth.py::test_growth_and_the_genetic_fallback_can_both_earn_their_own_note`,
+   confirms growth and the fallback can both fire on one run (they are independent escalations --
+   growth lives inside `_exhaustive`, the fallback is gated on `complete_up_to`, not `grown_to`)
+   and that both notes appear, growth's first. `tests/test_web_job.py`'s existing gate W-EV1
+   (`test_the_genetic_fallback_in_the_browser_matches_discover_mode_auto`) gained one assertion
+   that the sentence reaches the browser's own `report_payload()["completeness"]`.
+4. **Full verification.** `mypy --strict` and `ruff check` clean on the changed module; the
+   targeted test files plus the full relevant suite (`test_discover.py`, `test_discover_growth.py`,
+   `test_discover_pool.py`, `test_discover_exhaustive.py`, `test_discover_params.py`,
+   `test_discover_skeleton.py`, `test_cli.py`, `test_web_job.py`) pass; `npm run check` and
+   `npm run smoke` pass in `web/`.
+
+**What this round did not find a problem with, recorded so it is not re-investigated.** The
+browser's `SearchPanel.tsx` copy already states plainly that the search "may fall back to a
+slower randomized (genetic) search past this limit" and that "the progress panel names whichever
+one runs" -- this reads correctly today and needed no change. The CLI's `--progress` wording
+(`main.py:235-262`) is unchanged and was already clear about what escalated and why.

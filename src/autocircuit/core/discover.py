@@ -23,6 +23,7 @@ et al., J. Electrochem. Soc. 170, 086502, 2023).
 
 from __future__ import annotations
 
+import concurrent.futures
 import contextlib
 import csv
 import io
@@ -61,9 +62,16 @@ from .enumerate import (
     # be a second thing that can miss the subset-grouping moves -- which is exactly the hole
     # `benchmarks/screening_round/arms.py`'s own local `_grow` has.
     _insertions,
+    # Parameter-axis counterparts of `_pool_min_params`'s use inside `enumerate.py` itself;
+    # imported private the same way `_insertions` already is. See docs/PARAM_BUDGET_PLAN.md
+    # section 6 for what `_pool_max_params` (`m` in the completeness lemma) and
+    # `_pool_costliest_code` (the coverage sentence's worked example) are used for.
+    _pool_costliest_code,
+    _pool_max_params,
     contains_skeleton,
     count_skeleton_placements,
     enumerate_topologies,
+    enumerate_topologies_by_params,
     grow_up_to,
     is_feasible,
     # The structural plausibility filter now lives with the enumerator, which is what applies
@@ -93,6 +101,21 @@ from .stats import (
 from .validate import RUNS_Z_LIMIT, _runs_z
 
 Mode = Literal["auto", "exhaustive", "evolve"]
+
+#: Which currency an :class:`Enumeration`'s levels are counted in. See
+#: docs/PARAM_BUDGET_PLAN.md section 6: an element-axis enumeration completes a level of
+#: ``exhaustive_limit`` elements; a parameter-axis one completes a level of ``max_params`` free
+#: parameters, and a translation (``Enumeration.element_coverage``) is what lets both feed the
+#: same :attr:`DiscoveryResult.complete_up_to` claim.
+EnumerationAxis = Literal["elements", "params"]
+
+#: Hard ceiling on ``max_params``, mirroring ``core/enumerate.py``'s own cap on the parameter
+#: axis's memoisation: at a budget past this, a retained level for a six-code pool already
+#: passes 10**5 nodes -- the size that module's own comment names as unaffordable to hold.
+#: ``discover()`` clamps rather than raises, the same way an oversized ``exhaustive_limit``
+#: already gets clamped by ``max_candidates`` -- reported through ``complete_up_to``, never
+#: silently.
+MAX_PARAM_BUDGET = 7
 
 #: Why :attr:`DiscoveryResult.by_criterion` differs from :attr:`DiscoveryResult.recommended`,
 #: for the criteria where that comparison means anything (everything but ``ftest``; see
@@ -162,10 +185,16 @@ PERFECT_COST = 1e-9
 #: (docs/EVOLVE_SEARCH_PLAN.md section 3.2).
 #:
 #: Note what this number does *not* do. The quota is ``max(MIN_REFINE_PER_SIZE, n_refine //
-#: sizes)``, and a genetic archive spans about seven element counts, so 8, 16 and 30 all reduce
-#: to the same quota of 5: below ``MIN_REFINE_PER_SIZE * sizes`` this constant has no effect at
-#: all, and the floor is the knob. That is arithmetic rather than a measurement, and it is
-#: recorded here so nobody sweeps this value looking for a difference that cannot appear.
+#: buckets)``, where a bucket is a parameter count, not an element count
+#: (docs/PARAM_BUDGET_PLAN.md section 6 -- see :func:`_quota_by_size`'s docstring for why the
+#: axis changed). A CPE-bearing pool at the exhaustive cap spans about 10-12 parameter-count
+#: buckets rather than the 5-7 element counts the old key gave, so at :data:`MIN_REFINE_PER_SIZE`
+#: = 3 the floor binds on every such pool this project actually searches (``30 // 12 = 2 < 3``,
+#: ``30 // 10 = 3``): **this constant is inert there, on purpose, and the floor is the knob.**
+#: It stays non-inert only on pools narrow enough to have fewer than ten parameter buckets --
+#: an ``R,C,L``-only pool, where element count and parameter count coincide. That is arithmetic
+#: rather than a measurement, and it is recorded here so nobody sweeps this value looking for a
+#: difference that cannot appear on the pools it matters for.
 REFINE_DEFAULT = {"evolve": 30, "exhaustive": 30, "auto": 30}
 
 #: Every candidate within this factor of the best screening cost is refitted at full budget,
@@ -176,9 +205,18 @@ REFINE_COST_FACTOR = 10.0
 #: is unbounded, and on noisy data it selects hundreds of candidates (see `_shortlist`).
 REFINE_CEILING_FACTOR = 2
 
-#: Floor on the per-element-count refit quota, so that a size class is never represented by one
-#: or two candidates just because the run happened to span many sizes.
-MIN_REFINE_PER_SIZE = 5
+#: Floor on the per-parameter-count refit quota, so that a size class is never represented by
+#: one or two candidates just because the run happened to span many sizes.
+#:
+#: [measured, docs/PARAM_BUDGET_PLAN.md section 6, ``benchmarks/screening_round/quota_replay.py``]
+#: Re-keying the quota from element count to parameter count roughly doubles the bucket count on
+#: a CPE-bearing pool (5-7 element buckets become 10-12 parameter buckets at the exhaustive cap),
+#: so the old floor of 5 would have raised the tier-2 refit count 1.66-1.93x across the three
+#: ``REFERENCES`` pools and a 21,057-topology frozen landscape (``land_rclcpe6.json``) with no
+#: change in which topologies survive. Lowered to 3, which is the largest floor that stays within
+#: a 1.25x cost multiplier on every arena checked (1.03-1.22x measured) -- a decision rule written
+#: down before the replay was run, not fitted to it afterwards.
+MIN_REFINE_PER_SIZE = 3
 
 #: How far past ``time_limit`` the genetic search's refit may run, as a multiple of it.
 #:
@@ -560,6 +598,30 @@ class DiscoveryResult:
     collapsing the two into one would either overclaim the wide pool or throw away what the
     narrow one actually covered.
     """
+    max_params: int | None = None
+    """The parameter budget the caller asked for, or None on the (default) element axis.
+
+    Present only so :meth:`completeness` and callers downstream of it know which axis produced
+    :attr:`complete_up_to` -- the field itself never changes meaning between the two
+    (docs/PARAM_BUDGET_PLAN.md section 6). ``None`` on every run that did not pass
+    ``discover(max_params=...)``, which is every run before this field existed.
+    """
+    complete_up_to_params: int | None = None
+    """Largest free-parameter count whose topologies were *all* evaluated, or None.
+
+    Set only when :attr:`max_params` is not None -- the raw parameter-axis coverage level,
+    before it is translated into the element-axis claim :attr:`complete_up_to` always makes.
+    The two are related by the completeness lemma: with ``m`` the most expensive pool element in
+    free parameters, ``complete_up_to == complete_up_to_params // m``. Kept as a separate field
+    rather than folded into ``complete_up_to`` so a reader can see the budget actually spent
+    alongside the element-count claim it licenses.
+    """
+    base_complete_up_to_params: int | None = None
+    """:attr:`complete_up_to_params`'s counterpart to :attr:`base_complete_up_to`: the
+    parameter-axis coverage reached before the pool was widened, when :attr:`max_params` is not
+    None and a widening happened. None otherwise, for the same two reasons ``base_complete_up_to``
+    is None otherwise -- no budget, or no widening.
+    """
 
     @property
     def best(self) -> Candidate | None:
@@ -806,16 +868,74 @@ class DiscoveryResult:
             )
         if self.skeleton is not None:
             return self._with_refit_note(
-                f"Coverage: every plausible topology with up to {self.complete_up_to} "
-                f"elements that contains {self.skeleton} was evaluated, with the added "
-                "elements taken from this pool. Topologies without that skeleton were never "
-                "considered, so this report is not evidence against them."
+                self._with_recommendation_note(
+                    f"Coverage: every plausible topology with up to {self.complete_up_to} "
+                    f"elements that contains {self.skeleton} was evaluated, with the added "
+                    "elements taken from this pool. Topologies without that skeleton were never "
+                    "considered, so this report is not evidence against them."
+                )
+            )
+        if self.max_params is not None:
+            # A parameter budget earns a different sentence, not a bigger number in the same
+            # one: "every topology with up to N elements" would overclaim, since a topology
+            # built entirely from the pool's costliest code reaches the budget at a smaller
+            # element count than a topology built from its cheapest. See docs/PARAM_BUDGET_PLAN.md
+            # section 6 for the lemma this translates -- `_with_growth_note` is not applied here
+            # because growth and a parameter budget are refused together in discover().
+            worst = _pool_costliest_code(self.pool)
+            m = _pool_max_params(self.pool)
+            return self._with_refit_note(
+                self._with_recommendation_note(
+                    f"Coverage: every plausible topology with up to {self.max_params} free "
+                    "parameters from this pool was evaluated. That is a budget in parameters, "
+                    f"not elements: it covers every topology of up to {self.complete_up_to} "
+                    f"elements in full, and no more, because {worst} costs {m} parameters on "
+                    f"its own -- a {self.complete_up_to + 1}-element circuit built from it "
+                    f"carries {(self.complete_up_to + 1) * m}, past the budget, so it was never "
+                    "considered."
+                )
             )
         return self._with_refit_note(
-            self._with_growth_note(
-                f"Coverage: every plausible topology with up to {self.complete_up_to} elements "
-                f"from this pool was evaluated."
+            self._with_recommendation_note(
+                self._with_growth_note(
+                    f"Coverage: every plausible topology with up to {self.complete_up_to} "
+                    f"elements from this pool was evaluated."
+                )
             )
+        )
+
+    def _with_recommendation_note(self, coverage: str) -> str:
+        """The coverage sentence, plus a warning when the recommendation is bigger than it.
+
+        **[measured, docs/PARAM_BUDGET_PLAN.md phase 3, E.1's honesty reading] Without this the
+        report is exactly the shape this project keeps failing in.** Under a parameter budget of
+        6 on a truth costing 8, the truth is correctly not found -- and what the reader gets
+        instead is a *five*-element circuit, recommended, with every one of its parameters
+        resolved, under a coverage sentence whose only completeness claim is about three
+        elements. Every clause of that sentence is true and the report still misleads, because
+        nothing connects the size of the recommendation to the size the claim covers.
+
+        On the element axis this cannot arise from the enumeration itself -- everything
+        enumerated is inside the cap -- which is why the gap went unnoticed until an axis existed
+        that makes it routine. It can still arise there by two other routes, and this note covers
+        both: a ``seeds=`` circuit larger than the cap, and the genetic fallback under
+        ``mode="auto"``, whose candidates are not bounded by ``complete_up_to`` at all.
+
+        Growth is the one case deliberately left out: ``_with_growth_note`` has already said, in
+        more detail than this could, that above the completed level the search grew rather than
+        enumerated.
+        """
+        recommended = self.recommended
+        if recommended is None or self.complete_up_to is None or self.grown_to is not None:
+            return coverage
+        size = count_elements(recommended.circuit.root)
+        if size <= self.complete_up_to:
+            return coverage
+        return (
+            f"{coverage} Note that the recommended circuit has {size} elements, above the "
+            f"{self.complete_up_to} this run covers in full: it was evaluated, but its own size "
+            "was not searched exhaustively, so a better topology of that size may simply never "
+            "have been tried. That part of the report is a find, not a completeness claim."
         )
 
     def _with_growth_note(self, coverage: str) -> str:
@@ -870,6 +990,41 @@ class DiscoveryResult:
             "evaluated."
         )
 
+    def _with_evolve_note(self, coverage: str) -> str:
+        """The coverage sentence, plus what it means that the genetic fallback ran.
+
+        ``_with_recommendation_note`` already knows the fallback's candidates are "not bounded
+        by :attr:`complete_up_to` at all" -- a stronger disclaimer than growth's, which still
+        earns its own sentence from :meth:`_with_growth_note`. Without an equivalent sentence
+        here, :meth:`summary`'s only trace of the fallback is "over N generations" in the
+        opening line -- neutral-looking progress metadata, not a statement that a heuristic
+        search ran because the exhaustive stage's own best fit still looked non-random. That is
+        this project's characteristic failure (docs/HANDOFF.md section 3) sitting in the one
+        artefact a reader actually keeps: the live ``--progress``/web progress banner already
+        narrates the escalation as it happens (``cli/main.py``'s ``on_stage``,
+        ``web/src/components/SearchProgress.tsx``), but neither front end's *persisted* report
+        said anything before this method existed.
+
+        Scoped to ``mode == "auto"``: a caller who asked for ``mode="evolve"`` directly chose a
+        sampled, non-exhaustive search on purpose, and that case already gets its own "sampled,
+        not exhaustive" sentence a few lines up in :meth:`completeness` -- this note is about the
+        *automatic* escalation, which is what earlier review found nothing said out loud.
+        """
+        if self.mode != "auto" or not self.generations:
+            return coverage
+        limit = self.grown_to if self.grown_to is not None else self.complete_up_to
+        beyond = f"Beyond {limit} element(s) the" if limit is not None else "The"
+        return (
+            f"{coverage} {beyond} search stopped enumerating: the best fit up to that point "
+            f"still showed a systematic residual (structured, not random, by a runs-test "
+            f"check), so it fell back to a randomized genetic search for {self.generations} "
+            "generations. That fallback carries no completeness guarantee at all -- not even "
+            "the weaker one the growth stage above earns -- so a topology's absence from this "
+            "report above that point is never evidence against it. See "
+            "docs/EVOLVE_SEARCH_PLAN.md for what is and is not yet measured about how often it "
+            "succeeds."
+        )
+
     def _with_refit_note(self, coverage: str) -> str:
         """The coverage sentence, plus what a half-finished second tier does to it.
 
@@ -879,6 +1034,7 @@ class DiscoveryResult:
         change. Saying so on the same line is the same rule a skeleton follows -- a reader who
         skims past the qualification has been misled by a true sentence.
         """
+        coverage = self._with_evolve_note(coverage)
         coverage = self._with_pool_note(coverage)
         if self.refit_progress is None:
             return coverage
@@ -1061,6 +1217,13 @@ class DiscoveryResult:
             "complete_up_to": self.complete_up_to,
             "base_complete_up_to": self.base_complete_up_to,
             "grown_to": self.grown_to,
+            # max_params / complete_up_to_params / base_complete_up_to_params deliberately do
+            # NOT appear here yet: EV5's byte-identity gate fingerprints this exact dict, and
+            # even an always-null key changes the byte comparison on every existing reference
+            # (docs/PARAM_BUDGET_PLAN.md phase 3's "non-negotiable" gate, measured -- adding
+            # them unconditionally was tried and reverted). The prose in `completeness()`
+            # already carries the parameter-budget numbers for a `--json` reader in the
+            # meantime; the wire schema gets these fields in phase 9, alongside the bridge.
             "pool_choice": (None if self.pool_choice is None else self.pool_choice.to_dict()),
             "coverage": self.completeness(),
             "unresolved_everywhere": self.unresolved_everywhere,
@@ -1218,14 +1381,30 @@ def _delete(node: Node, path: Sequence[int]) -> Node | None:
 
 
 def random_topology(rng: np.random.Generator, pool: Sequence[str], n_elements: int) -> Node:
-    """Build a random topology by repeatedly combining nodes in series or in parallel."""
+    """Build a random topology by repeatedly combining nodes in series or in parallel.
+
+    The series/parallel coin is exactly even. [measured, docs/EVOLVE_SEARCH_PLAN.md section 3.7
+    Step 8] It shipped at 0.55 -- favouring series -- with no measurement behind the value,
+    unlike `MUTATION_WEIGHTS`' insert-series/insert-parallel entries, which section 3.5.2 already
+    proved must be held equal because any asymmetry there is a bet on the shape of the answer
+    ("the same thing as asking the user what kind of part this is, reached from inside the
+    search instead of from the CLI"). A 480-seed sweep of this seeding bias, on the same
+    opposite-shape arenas that measurement used plus a third (cap 7) to rule out a cap
+    confound, found the identical signature: bias 0.35 loses catastrophically on series-shaped
+    truths (p<0.0001, both caps) while winning significantly on a parallel-shaped one
+    (p=0.0022); bias 0.65 is the mirror image. The candidate replacement, 0.5, beat the shipped
+    0.55 significantly on the parallel arena (p=0.0133) and on the series arena at cap 7
+    (p=0.0042), with the same sign just short of conventional significance at cap 6 alone
+    (p=0.0594) -- the same "third arena settles it" pattern section 3.5.3 already used. Shipped
+    at 0.5 on that evidence.
+    """
     nodes: list[Node] = [ElementNode(str(rng.choice(pool))) for _ in range(n_elements)]
     while len(nodes) > 1:
         i = int(rng.integers(len(nodes)))
         first = nodes.pop(i)
         j = int(rng.integers(len(nodes)))
         second = nodes.pop(j)
-        combined = series(first, second) if rng.random() < 0.55 else parallel(first, second)
+        combined = series(first, second) if rng.random() < 0.5 else parallel(first, second)
         nodes.append(combined)
     return nodes[0]
 
@@ -1653,6 +1832,19 @@ _EvolveTask = tuple[
     str, int, "dict[str, float] | None", "float | None", float, bool, int, int, int, float
 ]
 
+#: What `_evolve_one`/`_evolve_polish_then_search_worker` return for one task: a
+#: `(polish, search)` pair of wire-form `FitResult`s, either of which may be `None`.
+type _EvolveOutcome = tuple[dict[str, Any] | None, dict[str, Any] | None]
+
+
+class _WindowSlot(NamedTuple):
+    """One slot of :func:`evolve_plan`'s sliding dispatch window: what was proposed, and the
+    task built from it. Paired so a later outcome can be merged back against the exact
+    :class:`_Prepared` it belongs to, by index, without re-deriving it."""
+
+    prepared: _Prepared
+    task: _EvolveTask
+
 
 def _evolve_one(
     task: _EvolveTask,
@@ -1791,6 +1983,7 @@ def discover(
     mode: Mode = "auto",
     exhaustive_limit: int | None = None,
     exhaustive_min: int = 1,
+    max_params: int | None = None,
     max_candidates: int = 20_000,
     feasibility_filter: bool = True,
     feasibility_budget: int = DEFAULT_DEGENERACY_BUDGET,
@@ -1864,6 +2057,19 @@ def discover(
             :data:`SKELETON_REACH` when one is given.
         exhaustive_min: Smallest element count to enumerate. Raise it only with an
             independent reason to believe the model is at least that big.
+        max_params: Budget the exhaustive enumeration by free parameters instead of raw
+            element count -- a ``C`` costs one, a ``CPE`` two, so an element cap is a different
+            amount of model freedom in every pool (docs/PARAM_BUDGET_PLAN.md). ``None`` (the
+            default) leaves the element axis, ``exhaustive_limit``, in force and every other
+            behaviour byte-identical to before this parameter existed. When given, it replaces
+            ``exhaustive_limit`` as the enumeration's own stopping rule -- :attr:`DiscoveryResult
+            .complete_up_to` still reports coverage in elements, derived from the parameter-axis
+            level actually reached (:attr:`DiscoveryResult.complete_up_to_params`) via the
+            completeness lemma in that plan's section 6. Clamped to :data:`MAX_PARAM_BUDGET`.
+            Refused (``ValueError``) together with ``skeleton`` -- ``grow_up_to`` grows by
+            elements and has no parameter-axis frontier clamp -- and together with
+            ``growth_width > 0`` -- the growth stage seeds its beam from one completed *element*
+            level, which a parameter budget does not produce.
         max_candidates: Ceiling on how many topologies the exhaustive stage may screen.
         feasibility_filter: Apply the structural endpoint-behaviour screen before fitting.
         feasibility_budget: How many elements that screen may treat as degenerate; larger is
@@ -1908,8 +2114,9 @@ def discover(
             parameter inheritance off. See :data:`WARM_ACCEPT_FACTOR`.
         final_restarts: Restart count for the final refit of the reported candidates.
         n_refine: Refit budget for the full-budget second tier. In **both** searches it is a
-            *total* that is split into a quota per element count, so that every complexity
-            reaches the Pareto front; see :func:`_quota_by_size`. :data:`REFINE_DEFAULT` holds
+            *total* that is split into a quota per parameter count, so that a wide slice of the
+            Pareto front is reached rather than a cluster at one end; see :func:`_quota_by_size`.
+            :data:`REFINE_DEFAULT` holds
             the default, and says why raising it below a threshold changes nothing.
         time_limit: Wall-clock budget in seconds; the search stops cleanly when exceeded.
         criterion: Which model-selection rule ranks the candidates, draws the Pareto front and
@@ -1961,6 +2168,22 @@ def discover(
                     f"seed circuit {text!r} does not contain the skeleton {skeleton!r}, so it "
                     "cannot be evaluated under it. Drop one of the two."
                 )
+    if max_params is not None:
+        if frame is not None:
+            raise ValueError(
+                "max_params cannot be combined with skeleton: grow_up_to grows by elements "
+                "and has no parameter-axis frontier clamp. Use exhaustive_limit under a "
+                "skeleton instead."
+            )
+        if growth_width > 0:
+            raise ValueError(
+                "max_params cannot be combined with growth_width>0: the growth stage seeds "
+                "its beam from one completed element level, which a parameter budget does "
+                "not produce. Pass growth_width=0 (the default) under a parameter budget."
+            )
+        # Clamped, not raised -- the same treatment an oversized exhaustive_limit already gets
+        # from max_candidates, reported through complete_up_to rather than refused outright.
+        max_params = min(max_params, MAX_PARAM_BUDGET)
     limit = exhaustive_limit_for(None if frame is None else len(frame.leaves), exhaustive_limit)
 
     if mode == "evolve":
@@ -1994,7 +2217,7 @@ def discover(
             evolved.pool_choice = choose_pool(spectrum, residual_runs_z=math.nan, base=codes)
         return evolved
 
-    candidates, complete_up_to, n_screened, grown_to = _exhaustive(
+    candidates, complete_up_to, n_screened, grown_to, complete_up_to_params = _exhaustive(
         spectrum,
         pool=codes,
         skeleton=None if frame is None else frame.root,
@@ -2023,10 +2246,12 @@ def discover(
         grow_to=None if frame is not None else max_elements,
         growth_width=growth_width,
         screen_restarts=screen_restarts,
+        max_params=max_params,
     )
     generations_run = 0
     pool_choice: PoolChoice | None = None
     base_complete_up_to: int | None = None
+    base_complete_up_to_params: int | None = None
 
     # Widening the pool, when either reading of the data asks for an element it lacks.
     #
@@ -2042,6 +2267,7 @@ def discover(
         remaining = None if time_limit is None else time_limit - (time.perf_counter() - started)
         if pool_choice.added and (remaining is None or remaining > 0.0):
             base_complete_up_to = complete_up_to
+            base_complete_up_to_params = complete_up_to_params
             codes = pool_choice.pool
             if on_stage is not None:
                 on_stage(
@@ -2049,7 +2275,7 @@ def discover(
                     f"The default pool's own completed fit left a systematic residual; "
                     f"widening the pool to {', '.join(codes)} and re-screening.",
                 )
-            widened, complete_up_to, n_widened, grown_to = _exhaustive(
+            widened, complete_up_to, n_widened, grown_to, complete_up_to_params = _exhaustive(
                 spectrum,
                 pool=codes,
                 skeleton=None if frame is None else frame.root,
@@ -2071,6 +2297,7 @@ def discover(
                 grow_to=max_elements,
                 growth_width=growth_width,
                 screen_restarts=screen_restarts,
+                max_params=max_params,
             )
             # The base-pool candidates are kept rather than discarded: they were fitted against
             # the same data with the same budget, and every one of them is also a member of the
@@ -2141,6 +2368,9 @@ def discover(
         pool_choice=pool_choice,
         base_complete_up_to=base_complete_up_to,
         grown_to=grown_to,
+        max_params=max_params,
+        complete_up_to_params=complete_up_to_params,
+        base_complete_up_to_params=base_complete_up_to_params,
     )
 
 
@@ -2415,28 +2645,125 @@ def _is_underfitted(candidates: Sequence[Candidate]) -> bool:
 
 
 class EvolveBatch(NamedTuple):
-    """One window of offspring to evaluate, and every candidate scored before it.
+    """The current sliding dispatch window, and every candidate scored before this yield.
 
-    Mirrors :class:`RefitBatch`'s shape and for the same reason: a caller that stops early --
-    out of time, or cancelled from a browser -- can report exactly what ``scored`` already
-    holds, without needing the generator to run to completion to learn it. A generation is never
-    reported as finished until every one of its windows has been sent back: ``generation`` only
-    changes on the first window of the next one, so a caller deciding whether to keep going can
-    do it exactly where :func:`_evolve` always has -- between generations, never inside one.
+    Unlike a discrete-generation batch, ``tasks`` is a **fixed-length window** (length
+    ``item_chunk``) that stays open across many yields: a slot holds ``None`` once there is
+    nothing left to propose for it (the search is winding down), and otherwise always holds the
+    task currently assigned to it -- unchanged across a yield if the caller has not yet reported
+    that slot's outcome, replaced with a fresh one the instant the caller does. This is what
+    lets several offspring be genuinely in flight at once without ever waiting for the slowest
+    of them before proposing the next: :func:`evolve_plan`'s docstring explains the protocol,
+    and see ``docs/EVOLVE_COMPUTE_SKIP_PLAN.md`` section 3.1 for why (idea 2c: continuous rather
+    than fixed-batch dispatch, integrated into the real search rather than measured only in
+    isolation). ``generation`` is a *virtual* generation -- population-many proposals handed
+    out, not necessarily completed -- kept under the same name because every existing reader
+    (``on_progress``, :attr:`DiscoveryResult.generations`, ``_with_evolve_note``) needs nothing
+    else to stay correct.
     """
 
-    tasks: list[_EvolveTask]
+    tasks: list[_EvolveTask | None]
     scored: list[Candidate]
     generation: int
     cache_size: int
 
 
 class EvolvePlanResult(NamedTuple):
-    """What :func:`evolve_plan` returns once its generation loop ends."""
+    """What :func:`evolve_plan` returns once its proposal budget is exhausted."""
 
     scored: list[Candidate]
     cache_size: int
     generations_run: int
+
+
+@dataclass
+class _SteadyState:
+    """Continuous proposal state for :func:`evolve_plan`'s sliding window.
+
+    Where :func:`_next_generation` proposes a whole ``population``-sized batch from a *frozen*
+    parent set, this proposes one individual at a time from whatever is in ``scored`` *right
+    now* -- parent selection at proposal time rather than at a fixed generation boundary, which
+    is the population-model change ``docs/SEARCH_SPEEDUP_PLAN.md``'s idea 2c write-up says the
+    real win requires. A **virtual generation** is exactly ``population`` proposals handed out;
+    the Pareto front used to select elites and parents is recomputed once per virtual
+    generation, from :func:`_unique_best`/:func:`_breeding_pool` over ``scored`` as it stands at
+    that moment -- which may not yet include every member of the *previous* virtual generation,
+    since dispatch never waits for stragglers. That is a real, disclosed change from
+    :func:`_next_generation`'s own semantics (there, the next generation always sees every one
+    of the last), and it is exactly what the quality gate in ``docs/EVOLVE_COMPUTE_SKIP_PLAN.md``
+    section 3.1 exists to check.
+
+    The elite quota (``max(2, population // 6)``, :func:`_next_generation`'s own fraction) is
+    spent against the *true* ``population``, never against a dispatch window's width -- sizing it
+    against ``item_chunk`` instead would silently inflate the elite fraction in a small window,
+    the pitfall this plan's own design phase already named.
+    """
+
+    rng: np.random.Generator
+    pool: tuple[str, ...]
+    max_elements: int
+    min_elements: int
+    population: int
+    criterion: Criterion
+    weights: Sequence[float]
+    #: Consumed first, in order -- the same seeded-then-random initial population
+    #: :func:`evolve_plan` has always built. Virtual generation 0 covers exactly these.
+    initial: list[_Offspring]
+    #: Virtual generations whose proposal quota has been fully handed out. Starts at 0 (the
+    #: initial population is generation 0, matching :func:`evolve_plan`'s historical numbering
+    #: exactly) and is bumped by :meth:`_start_vgen` the instant the *next* population-sized
+    #: quota is needed.
+    vgen: int = field(default=0, init=False)
+    _proposals_this_vgen: int = field(default=0, init=False)
+    _alive: list[Candidate] = field(default_factory=list, init=False)
+    _front: list[Candidate] = field(default_factory=list, init=False)
+    _elite_queue: list[Candidate] = field(default_factory=list, init=False)
+    _frequencies: dict[float, float] | None = field(default=None, init=False)
+    _seen: set[str] = field(default_factory=set, init=False)
+
+    def _start_vgen(self, cache: dict[str, Candidate | None], scored: Sequence[Candidate]) -> None:
+        self._alive = _unique_best(scored, self.criterion)
+        self._front = _breeding_pool(self._alive, criterion=self.criterion)
+        self._elite_queue = list(self._front[: max(2, self.population // 6)])
+        # Same short-circuit as `evolve_plan`'s own `if PARSIMONY_SCALING` check -- computed
+        # only when it can change something.
+        self._frequencies = _complexity_frequencies(self._alive) if PARSIMONY_SCALING else None
+        self._seen = set(cache.keys())
+        self._proposals_this_vgen = 0
+        self.vgen += 1
+
+    def propose(
+        self, cache: dict[str, Candidate | None], scored: Sequence[Candidate]
+    ) -> _Offspring:
+        """One tree to evaluate next."""
+        if self.initial:
+            self._proposals_this_vgen += 1
+            return self.initial.pop(0)
+        if self._proposals_this_vgen >= self.population:
+            self._start_vgen(cache, scored)
+        self._proposals_this_vgen += 1
+        if not self._front:
+            # Mirrors `evolve_plan`'s own historical fallback when nothing has fitted yet at
+            # all: breed from nothing, seed a fresh random individual instead.
+            n = int(self.rng.integers(self.min_elements, self.max_elements + 1))
+            return (random_topology(self.rng, self.pool, n), None)
+        if self._elite_queue:
+            candidate = self._elite_queue.pop(0)
+            return (candidate.circuit.root, candidate)
+        offspring: _Offspring | None = None
+        while offspring is None:
+            offspring = _propose_child(
+                self._front,
+                self.rng,
+                self.pool,
+                self.max_elements,
+                self.criterion,
+                frequencies=self._frequencies,
+                parsimony=PARSIMONY_SCALING,
+                weights=self.weights,
+                seen=self._seen,
+            )
+        return offspring
 
 
 def evolve_plan(
@@ -2456,35 +2783,39 @@ def evolve_plan(
     criterion: Criterion = DEFAULT_CRITERION,
     item_chunk: int = 1,
 ) -> Generator[
-    EvolveBatch, Sequence[tuple[dict[str, Any] | None, dict[str, Any] | None]], EvolvePlanResult
+    EvolveBatch,
+    Sequence[_EvolveOutcome | None],
+    EvolvePlanResult,
 ]:
     """The genetic search's tier 1, with the *running* of it left to the caller.
 
     Same inversion as :func:`screen_plan`, and no ``spectrum`` for the same reason that function
-    takes none: fitting is the caller's job, not this generator's. It yields a window of
-    offspring to evaluate and expects each one's ``(polish, search)`` wire-form outcome -- what
-    :func:`_evolve_one` returns -- back through ``send``. Every decision that has to be made
-    *between* windows lives here: whether a topology needs a fresh fit at all, what warm start to
-    offer it, and (once a generation finishes) how to breed the next one. In-process this is
-    driven by :func:`_evolve`; in a browser it is driven the same way exhaustive search already
-    is, and neither gets to hold its own opinion about any of that.
+    takes none: fitting is the caller's job, not this generator's.
 
-    ``item_chunk`` controls how many offspring are grouped into one window, which is also how
-    often the cache and the per-complexity best cost are allowed to go stale *within* a single
-    generation:
+    **Steady-state protocol.** This yields a fixed-length sliding window (``EvolveBatch.tasks``,
+    length ``item_chunk``) rather than a whole generation. A slot is ``None`` once there is
+    nothing left to propose (the proposal budget is exhausted and the slot has nothing more to
+    give); otherwise it holds whatever task is currently assigned there. ``send()`` back a
+    same-length sequence where a slot is ``None`` if that task has not completed yet -- leave it
+    alone, it stays assigned -- or its ``(polish, search)`` wire-form outcome (what
+    :func:`_evolve_one` returns) if it has. Every newly-reported outcome is merged immediately
+    and its slot is refilled with a fresh proposal (or left ``None`` if nothing remains to
+    propose), and the updated window is yielded straight back. This lets ``item_chunk`` offspring
+    be genuinely in flight at once -- the caller holds up to that many futures outstanding and
+    only ever reports the ones that have actually finished -- without the generator itself ever
+    doing anything but strictly sequential bookkeeping between one reported outcome and the next.
 
-    * ``item_chunk=1`` reproduces the fully sequential evaluation this search has always used
-      single-process -- every offspring judged against the cache and best cost exactly as
-      updated by everything evaluated before it, this generation included.
-    * ``item_chunk`` at least ``population`` reproduces the whole-generation batch a
-      :class:`multiprocessing.pool.Pool` dispatch has always used, where every offspring in a
-      generation reads the cache and best cost as of the *start* of that generation -- the
-      staleness :meth:`_Evaluator.evaluate_all`'s executor branch already documents and
-      :func:`_screen_parallel` already accepts for tier 1's screen.
+    * ``item_chunk=1`` is the fully sequential case: exactly one slot, always resolved before the
+      next is proposed, which reproduces this search's original one-topology-at-a-time
+      behaviour byte-for-byte (there is never a "still pending" slot to distinguish).
+    * ``item_chunk>1`` is what a caller with a process pool or a browser's worker pool uses to
+      keep several offspring in flight, refilling each one as it completes rather than waiting
+      for the whole window. See :class:`_SteadyState` for the population-model change this
+      makes possible: parent selection at proposal time, not at a fixed generation boundary.
 
-    Neither choice is decided here, for the same reason it is not decided in :func:`screen_plan`:
-    whoever runs the fits -- one process, a pool of them, or a browser's Web Workers -- is the
-    only party that knows what it can parallelise.
+    In-process this is driven by :func:`_evolve`; in a browser it is driven the same way
+    exhaustive search already is, and neither gets to hold its own opinion about the window
+    width -- whoever runs the fits is the only party that knows what it can parallelise.
     """
     rng = np.random.default_rng(seed)
     cache: dict[str, Candidate | None] = {}
@@ -2493,115 +2824,112 @@ def evolve_plan(
 
     # The initial population has no parents: seeds come from the caller and the rest is random,
     # so every one of these is fitted by the global stage. That is also what fills ``best_cost``,
-    # which the warm starts are later judged against.
-    trees: list[_Offspring] = []
+    # which the warm starts are later judged against. Unchanged from this search's original
+    # construction -- only how it is *consumed* (one at a time, via `_SteadyState`) is new.
+    initial: list[_Offspring] = []
     for text in seeds or ():
-        trees.append((Circuit.parse(text).root, None))
-    while len(trees) < population:
+        initial.append((Circuit.parse(text).root, None))
+    while len(initial) < population:
         n = int(rng.integers(min_elements, max_elements + 1))
-        trees.append((random_topology(rng, pool, n), None))
+        initial.append((random_topology(rng, pool, n), None))
 
-    generation = 0
-    for generation in range(generations):
-        step = max(item_chunk, 1)
-        for start in range(0, len(trees), step):
-            window = trees[start : start + step]
-            prepared: list[_Prepared | None] = []
-            for node, parent in window:
-                try:
-                    circuit = Circuit(simplify(node))
-                except CircuitError:
-                    prepared.append(None)
-                    continue
-                key = circuit.canonical_form()
-                seen = key in cache
-                known = cache.get(key)
-                if seen and known is None:
-                    prepared.append(None)
-                    continue
-                if not seen and not is_plausible(circuit):
-                    cache[key] = None
-                    prepared.append(None)
-                    continue
-                warm = _warm_start_for(parent, circuit, known, warm_accept)
-                prepared.append(_Prepared(circuit, key, seen, known, warm))
+    state = _SteadyState(
+        rng=rng,
+        pool=pool,
+        max_elements=max_elements,
+        min_elements=min_elements,
+        population=population,
+        criterion=criterion,
+        weights=MUTATION_WEIGHTS,
+        initial=initial,
+    )
 
-            indices: list[int] = []
-            tasks: list[_EvolveTask] = []
-            for i, p in enumerate(prepared):
-                if p is None:
-                    continue
-                need_search = not p.seen
-                if p.warm is None and not need_search:
-                    continue
-                reference = best_cost.get(p.circuit.complexity)
-                indices.append(i)
-                tasks.append(
-                    (
-                        p.circuit.to_string(),
-                        seed,
-                        p.warm,
-                        reference,
-                        warm_accept,
-                        need_search,
-                        search_restarts,
-                        search_popsize,
-                        search_maxiter,
-                        search_tol,
-                    )
-                )
+    #: Total proposals across the whole run -- the same total work `generations * population`
+    #: has always meant, now spent continuously instead of one population-sized batch at a time.
+    max_proposals = generations * population
+    proposed = 0
 
-            outcomes: dict[int, tuple[Candidate | None, Candidate | None]] = {}
-            if tasks:
-                sent = yield EvolveBatch(tasks, list(scored), generation, len(cache))
-                for i, (polish_wire, search_wire) in zip(indices, sent, strict=True):
-                    p = prepared[i]
-                    assert p is not None
-                    outcomes[i] = (
-                        None
-                        if polish_wire is None
-                        else Candidate(p.circuit, FitResult.from_wire(polish_wire), generation),
-                        None
-                        if search_wire is None
-                        else Candidate(p.circuit, FitResult.from_wire(search_wire), generation),
-                    )
+    def _next_slot() -> _WindowSlot | None:
+        nonlocal proposed
+        while proposed < max_proposals:
+            node, parent = state.propose(cache, scored)
+            proposed += 1
+            try:
+                circuit = Circuit(simplify(node))
+            except CircuitError:
+                continue
+            key = circuit.canonical_form()
+            seen = key in cache
+            known = cache.get(key)
+            if seen and known is None:
+                continue
+            if not seen and not is_plausible(circuit):
+                cache[key] = None
+                continue
+            warm = _warm_start_for(parent, circuit, known, warm_accept)
+            need_search = not seen
+            if warm is None and not need_search:
+                continue
+            reference = best_cost.get(circuit.complexity)
+            task: _EvolveTask = (
+                circuit.to_string(),
+                seed,
+                warm,
+                reference,
+                warm_accept,
+                need_search,
+                search_restarts,
+                search_popsize,
+                search_maxiter,
+                search_tol,
+            )
+            return _WindowSlot(_Prepared(circuit, key, seen, known, warm), task)
+        return None
 
-            for i, p in enumerate(prepared):
-                if p is None:
-                    continue
-                polished, searched = outcomes.get(i, (None, None))
-                best = _cheaper(_cheaper(polished, searched), p.known)
-                cache[p.key] = best
-                if best is not None:
-                    cost = _fit_cost(best.result)
-                    if cost < best_cost.get(best.complexity, math.inf):
-                        best_cost[best.complexity] = cost
-                    scored.append(best)
-
-        alive = _unique_best(scored, criterion)
-        if not alive:
-            trees = []
-            for _ in range(population):
-                size = int(rng.integers(min_elements, max_elements + 1))
-                trees.append((random_topology(rng, pool, size), None))
-            continue
-
-        trees = _next_generation(
-            _breeding_pool(alive, criterion=criterion),
-            rng,
-            pool,
-            max_elements,
-            population,
-            criterion,
-            # Crowding is a property of the whole archive, not of the front the pool is
-            # (:func:`_complexity_frequencies`). Computed only when it can change something:
-            # the default scaling is zero and the count would otherwise walk the archive once
-            # per generation to be multiplied away.
-            frequencies=(_complexity_frequencies(alive) if PARSIMONY_SCALING else None),
-            known=cache.keys(),
+    def _merge(
+        slot: _WindowSlot, outcome: _EvolveOutcome
+    ) -> None:
+        p = slot.prepared
+        polish_wire, search_wire = outcome
+        polished = (
+            None
+            if polish_wire is None
+            else Candidate(p.circuit, FitResult.from_wire(polish_wire), state.vgen)
         )
+        searched = (
+            None
+            if search_wire is None
+            else Candidate(p.circuit, FitResult.from_wire(search_wire), state.vgen)
+        )
+        best = _cheaper(_cheaper(polished, searched), p.known)
+        cache[p.key] = best
+        if best is not None:
+            cost = _fit_cost(best.result)
+            if cost < best_cost.get(best.complexity, math.inf):
+                best_cost[best.complexity] = cost
+            scored.append(best)
 
-    return EvolvePlanResult(scored, len(cache), generation + 1)
+    window: list[_WindowSlot | None] = [_next_slot() for _ in range(max(item_chunk, 1))]
+    while any(window):
+        sent = yield EvolveBatch(
+            [slot.task if slot is not None else None for slot in window],
+            list(scored),
+            state.vgen,
+            len(cache),
+        )
+        for i, (slot, outcome) in enumerate(zip(window, sent, strict=True)):
+            if outcome is None:
+                continue
+            assert slot is not None, "an outcome was reported for a slot that had no task"
+            _merge(slot, outcome)
+            window[i] = _next_slot()
+
+    # `+1`: `state.vgen` is the 0-based index of the *last* virtual generation reached (matching
+    # `EvolveBatch.generation`'s own numbering, which by the same 0-indexing coincidence already
+    # equals "generations completed so far" at every yield -- see `_evolve`'s boundary check).
+    # This mirrors the original loop's own `generation + 1`: a report of "how many generations
+    # ran" is a count, not the last index.
+    return EvolvePlanResult(scored, len(cache), state.vgen + 1)
 
 
 def _best_text(scored: Sequence[Candidate], criterion: Criterion) -> str | None:
@@ -2651,15 +2979,17 @@ def _evolve(
     Tier 1 is driven from :func:`evolve_plan` -- the same generator a browser will eventually
     drive too -- rather than owning the generation loop itself. This function is now a thin
     dispatcher over it, exactly as :func:`_screen_all` is over :func:`screen_plan`: pick a
-    process pool or none, and for each yielded window either ``executor.map`` it or compute it
-    in this process, one topology at a time.
+    process pool or none, and keep its sliding window full -- one task at a time, single
+    process, or up to ``workers`` genuinely in flight at once, each refilled the instant it
+    completes rather than waiting for the rest of the window
+    (``docs/EVOLVE_COMPUTE_SKIP_PLAN.md`` section 3.1).
     """
     # Built unconditionally, exactly as `_exhaustive` builds one shared `FitContext` for its own
     # single-process path -- used only when `executor is None` below; a Pool's own workers build
     # and reuse their own via `_init_worker` regardless.
     context = FitContext.build(spectrum, weighting, None, 3.0)
-    with _worker_pool(workers, spectrum, weighting) as executor:
-        item_chunk = population if executor is not None else 1
+    with _evolve_worker_pool(workers, spectrum, weighting) as executor:
+        item_chunk = workers if executor is not None else 1
         plan = evolve_plan(
             pool=pool,
             generations=generations,
@@ -2683,41 +3013,91 @@ def _evolve(
         try:
             batch = next(plan)
             current_generation = batch.generation
-            while True:
-                # A generation, once begun, always finishes -- exactly as the loop this replaces
-                # always ran a whole `evaluate_all` before checking the clock. The check happens
-                # only where a *new* generation's first window arrives, so ``item_chunk=1``
-                # (many windows per generation) cannot stop mid-generation any more than
-                # ``item_chunk=population`` (one window per generation, where the two checks
-                # already coincide) could.
-                if batch.generation != current_generation:
-                    current_generation = batch.generation
-                    # `batch.scored` is "every candidate scored before this window" -- at a
-                    # generation boundary that is exactly everything the just-finished
-                    # generation produced, so this is the one place in the loop that can report
-                    # a *completed* generation rather than a partial one.
-                    if on_progress is not None:
-                        on_progress(
-                            current_generation, generations, _best_text(batch.scored, criterion)
-                        )
-                    if time_limit is not None and time.perf_counter() - started > time_limit:
-                        scored, cache_size, generations_run = (
-                            batch.scored,
-                            batch.cache_size,
-                            batch.generation,
-                        )
-                        plan.close()
-                        break
-                if executor is not None:
-                    outcomes = list(executor.map(_evolve_polish_then_search_worker, batch.tasks))
-                else:
-                    outcomes = [
-                        _evolve_one(task, spectrum, weighting=weighting, context=context)
-                        for task in batch.tasks
-                    ]
-                batch = plan.send(outcomes)
-        except StopIteration as done:
-            result = done.value
+            if executor is None:
+                # Sequential path: `item_chunk == 1`, so `batch.tasks` always has exactly one
+                # slot. This is strictly one-in-one-out -- nothing is ever "still pending" when
+                # this loop calls back -- so it reproduces this search's original
+                # one-topology-at-a-time behaviour byte-for-byte.
+                while True:
+                    if batch.generation != current_generation:
+                        current_generation = batch.generation
+                        if on_progress is not None:
+                            on_progress(
+                                current_generation,
+                                generations,
+                                _best_text(batch.scored, criterion),
+                            )
+                        if time_limit is not None and time.perf_counter() - started > time_limit:
+                            scored, cache_size, generations_run = (
+                                batch.scored,
+                                batch.cache_size,
+                                batch.generation,
+                            )
+                            plan.close()
+                            break
+                    task = batch.tasks[0]
+                    outcome: _EvolveOutcome | None = (
+                        None
+                        if task is None
+                        else _evolve_one(task, spectrum, weighting=weighting, context=context)
+                    )
+                    batch = plan.send([outcome])
+            else:
+                # Parallel path: keep up to `item_chunk` (= `workers`) futures outstanding at
+                # once, refilling a slot the instant it completes rather than waiting for the
+                # rest of the window -- the barrier idea 2c's own isolated benchmark measured a
+                # 33.6% win from removing (`docs/SEARCH_SPEEDUP_PLAN.md`).
+                futures: dict[int, concurrent.futures.Future[_EvolveOutcome]] = {}
+                for i, task in enumerate(batch.tasks):
+                    if task is not None:
+                        futures[i] = executor.submit(_evolve_polish_then_search_worker, task)
+                while futures:
+                    done, _ = concurrent.futures.wait(
+                        futures.values(), return_when=concurrent.futures.FIRST_COMPLETED
+                    )
+                    outcomes: list[_EvolveOutcome | None] = [None] * len(batch.tasks)
+                    finished: list[int] = []
+                    for i, fut in list(futures.items()):
+                        if fut in done:
+                            outcomes[i] = fut.result()
+                            finished.append(i)
+                            del futures[i]
+                    if batch.generation != current_generation:
+                        current_generation = batch.generation
+                        if on_progress is not None:
+                            on_progress(
+                                current_generation,
+                                generations,
+                                _best_text(batch.scored, criterion),
+                            )
+                        if time_limit is not None and time.perf_counter() - started > time_limit:
+                            # Drain whatever is still in flight -- at most `item_chunk`
+                            # individuals, a strictly smaller overshoot than waiting for up to
+                            # `population` stragglers the way a whole-generation batch would.
+                            concurrent.futures.wait(
+                                futures.values(), return_when=concurrent.futures.ALL_COMPLETED
+                            )
+                            drain: list[_EvolveOutcome | None] = [None] * len(batch.tasks)
+                            for i, fut in futures.items():
+                                drain[i] = fut.result()
+                            futures.clear()
+                            batch = plan.send(drain)
+                            scored, cache_size, generations_run = (
+                                batch.scored,
+                                batch.cache_size,
+                                batch.generation,
+                            )
+                            plan.close()
+                            break
+                    batch = plan.send(outcomes)
+                    for i in finished:
+                        task = batch.tasks[i]
+                        if task is not None:
+                            futures[i] = executor.submit(
+                                _evolve_polish_then_search_worker, task
+                            )
+        except StopIteration as done_iter:
+            result = done_iter.value
             scored, cache_size, generations_run = (
                 result.scored,
                 result.cache_size,
@@ -2816,15 +3196,25 @@ class Enumeration(NamedTuple):
     """
 
     texts: tuple[str, ...]
-    """Every candidate to screen, in ascending element count."""
+    """Every candidate to screen, in ascending level order (see :attr:`axis`)."""
     boundaries: tuple[tuple[int, int], ...]
-    """``(element count, topologies queued once that count was complete)`` per whole level."""
+    """``(level, topologies queued once that level was complete)`` per whole level, in whichever
+    currency :attr:`axis` counts -- elements, or free parameters."""
     floor: int
-    """Smallest element count enumerated. Above 1 there is no completeness claim to make."""
+    """Smallest level enumerated. Above 1 there is no completeness claim to make."""
+    axis: EnumerationAxis = "elements"
+    """Which currency :attr:`boundaries` counts in. ``"params"`` only when the caller passed a
+    parameter budget (docs/PARAM_BUDGET_PLAN.md section 6); the skeleton path is always
+    ``"elements"``, since :attr:`element_cost` is refused in combination with a skeleton."""
+    element_cost: int | None = None
+    """``m`` in the completeness lemma: the most expensive pool element, in free parameters.
+    Only set when :attr:`axis` is ``"params"`` -- it is what :meth:`element_coverage` divides by
+    to translate a parameter-axis level back into the element-axis claim every existing report
+    consumer reads. ``None`` on the element axis, where no translation is needed."""
 
     def coverage(self, n_scored: int) -> int | None:
-        """Largest element count whose topologies were *all* screened, from a screen that got
-        through ``n_scored`` of them.
+        """Largest level whose topologies were *all* screened, from a screen that got
+        through ``n_scored`` of them -- in :attr:`axis`'s own currency.
 
         Topologies are screened in size order, so a truncated screen -- out of time, or
         cancelled from a browser -- still covers whole levels, and this is what says how many.
@@ -2836,6 +3226,24 @@ class Enumeration(NamedTuple):
         if self.floor != 1:
             return None
         return next((n for n, end in reversed(self.boundaries) if end <= n_scored), None)
+
+    def element_coverage(self, n_scored: int) -> int | None:
+        """:meth:`coverage`, translated into elements -- the currency :attr:`DiscoveryResult
+        .complete_up_to` has always claimed, and keeps claiming regardless of :attr:`axis`.
+
+        On the element axis this *is* :meth:`coverage`. On the parameter axis it is
+        ``coverage() // element_cost``, the completeness lemma from
+        docs/PARAM_BUDGET_PLAN.md section 6: a parameter budget ``P`` contains every *n*-element
+        topology iff ``n <= P // m``. A result of 0 is passed through rather than turned into
+        ``None`` here -- ``DiscoveryResult.completeness`` already treats ``complete_up_to < 1``
+        as no completeness claim, so a second special case here would just be a second place for
+        that rule to drift out of sync with the first.
+        """
+        cov = self.coverage(n_scored)
+        if cov is None or self.axis == "elements":
+            return cov
+        assert self.element_cost is not None, "params axis must carry its element_cost"
+        return cov // self.element_cost
 
 
 def enumerate_candidates(
@@ -2849,6 +3257,7 @@ def enumerate_candidates(
     feasibility_filter: bool,
     feasibility_budget: int,
     extra: Sequence[str] | None = None,
+    max_params: int | None = None,
 ) -> Enumeration:
     """Everything the exhaustive stage will screen, and nothing about how to screen it.
 
@@ -2858,17 +3267,29 @@ def enumerate_candidates(
     stops being affordable, and what may then be claimed -- the last of which is the whole
     point of exhaustive discovery. It takes a spectrum only to derive the endpoint behaviour
     the feasibility filter tests against.
+
+    ``max_params`` switches the enumeration axis (docs/PARAM_BUDGET_PLAN.md section 6);
+    ``discover()`` refuses it in combination with a skeleton before this is ever reached, so
+    ``skeleton is not None`` and ``max_params is not None`` never hold together here.
     """
     behaviour = EndpointBehaviour.from_spectrum(spectrum) if feasibility_filter else None
 
     # Both level sources yield whole element counts in ascending order; the constrained one
     # grows the skeleton outwards and stops itself before materialising a level too large to
     # hold, which is the limit that binds first (docs/PARTIAL_TOPOLOGY_PLAN.md section 4.1).
+    axis: EnumerationAxis = "elements"
+    element_cost: int | None = None
     levels: Iterable[tuple[int, Iterable[Node]]]
-    if skeleton is None:
-        levels = ((n, enumerate_topologies(pool, n)) for n in range(floor, limit + 1))
-    else:
+    if skeleton is not None:
         levels = grow_up_to(skeleton, pool, limit, max_frontier=max_candidates * FRONTIER_HEADROOM)
+    elif max_params is not None:
+        axis = "params"
+        element_cost = _pool_max_params(pool)
+        levels = (
+            (p, enumerate_topologies_by_params(pool, p)) for p in range(floor, max_params + 1)
+        )
+    else:
+        levels = ((n, enumerate_topologies(pool, n)) for n in range(floor, limit + 1))
 
     texts: list[str] = []
     # (element count, how many topologies have been queued once that level is complete), used
@@ -2906,7 +3327,7 @@ def enumerate_candidates(
             seen.add(circuit.canonical_form())
             texts.append(circuit.to_string())
 
-    return Enumeration(tuple(texts), tuple(boundaries), floor)
+    return Enumeration(tuple(texts), tuple(boundaries), floor, axis, element_cost)
 
 
 def _exhaustive(
@@ -2932,11 +3353,15 @@ def _exhaustive(
     grow_to: int | None = None,
     growth_width: int = GROWTH_DEFAULT,
     screen_restarts: int = SCREEN_RESTARTS,
-) -> tuple[list[Candidate], int | None, int, int | None]:
+    max_params: int | None = None,
+) -> tuple[list[Candidate], int | None, int, int | None, int | None]:
     """Enumerate, screen, optionally grow past the limit, and refit.
 
-    Returns ``(candidates, complete_up_to, topologies seen, grown_to)``, where ``grown_to`` is
-    the largest element count the growth stage actually reached and ``None`` when it did not run.
+    Returns ``(candidates, complete_up_to, topologies seen, grown_to, complete_up_to_params)``,
+    where ``grown_to`` is the largest element count the growth stage actually reached (``None``
+    when it did not run) and ``complete_up_to_params`` is the raw parameter-axis coverage level
+    (``None`` unless ``max_params`` was given -- growth never runs under a parameter budget, so
+    there is no ambiguity about whether it is included).
 
     The growth stage sits **between** the two tiers rather than after them, and that placement is
     the point: it needs the tier-1 ranking of a completed level, which is exactly what
@@ -2954,6 +3379,7 @@ def _exhaustive(
         feasibility_filter=feasibility_filter,
         feasibility_budget=feasibility_budget,
         extra=extra,
+        max_params=max_params,
     )
     texts = list(plan.texts)
     budget = ScreenBudget(SCREEN_POPSIZE, SCREEN_MAXITER, max(screen_restarts, 1))
@@ -2978,7 +3404,8 @@ def _exhaustive(
             budget=budget,
             context=context,
         )
-        complete_up_to = plan.coverage(len(scored))
+        complete_up_to = plan.element_coverage(len(scored))
+        complete_up_to_params = plan.coverage(len(scored)) if plan.axis == "params" else None
         n_seen = len(scored)
 
         grown_to: int | None = None
@@ -3017,7 +3444,7 @@ def _exhaustive(
         candidates = _refit_shortlist(
             scored, spectrum, weighting, final_restarts, seed, n_refine, executor, criterion
         )
-    return candidates, complete_up_to, n_seen, grown_to
+    return candidates, complete_up_to, n_seen, grown_to, complete_up_to_params
 
 
 #: What the screen ranks by when the chosen criterion cannot be computed from a cost alone.
@@ -3053,9 +3480,22 @@ class Ranked[T](NamedTuple):
     stage's screen, a :class:`Candidate` for the genetic search's archive.
     """
 
-    n_elements: int
+    n_params: int
+    """Free parameter count -- the quota's bucket key (docs/PARAM_BUDGET_PLAN.md section 6).
+
+    Not element count. A ``C`` and a ``CPE`` are one element each but one and two parameters;
+    bucketing on element count let a CPE-heavy topology's extra parameters go unpenalised by the
+    *quota* even though :attr:`score` already penalises them by the *criterion* -- and it left
+    the bucket count itself wrong, [measured] 5 element-count buckets guarding a 19-value
+    :attr:`~autocircuit.core.circuit.Circuit.complexity` axis on the default pool's cap-5 space,
+    so the docstring's own promise ("the Pareto front has candidates at each complexity") was met
+    on a minority of it. Parameter count is not :attr:`~Circuit.complexity` either -- that axis
+    carries four surcharges (docs/PARAM_BUDGET_PLAN.md section 7) nobody had measured yet when
+    this was re-keyed, so keying the *quota* on it would have handed those surcharges control
+    over which topologies reach tier 2 at all before they had earned that.
+    """
     score: float
-    """Model-selection value, smaller better. Ranks *within* a size class."""
+    """Model-selection value, smaller better. Ranks *within* a bucket."""
     cost: float
     """Weighted sum of squared residuals. Only the near-tie rule reads this."""
     tiebreak: str
@@ -3070,21 +3510,30 @@ class Ranked[T](NamedTuple):
 
 
 def _quota_by_size[T](items: Sequence[Ranked[T]], n_refine: int) -> list[T]:
-    """Split ``n_refine`` into a per-element-count quota and take the best of each size.
+    """Split ``n_refine`` into a per-parameter-count quota and take the best of each bucket.
 
-    **The quota is per element count, and that is not a detail.** [measured] Ranking the whole
-    pool by cost puts nothing but the largest circuits on the shortlist: raw residual always
+    **The quota is per parameter count, and that is not a detail.** [measured] Ranking the whole
+    pool by cost puts nothing but the biggest circuits on the shortlist: raw residual always
     improves with parameters, so on the capacitor reference every one of the 60 best-scoring
     candidates had five elements and the four-element truth -- the circuit that generated the
     data -- never reached tier 2 at all. Two corrections, both needed:
 
-    * rank *within* a size by an information criterion rather than raw cost, so an extra CPE has
-      to earn its two parameters even against its own size class;
-    * give every size its own quota, so the Pareto front has candidates at each complexity
-      instead of a cluster at the top.
+    * rank *within* a bucket by an information criterion rather than raw cost, so an extra CPE
+      has to earn its two parameters even against its own bucket;
+    * give every bucket its own quota, so the Pareto front has candidates across the axis it is
+      actually drawn on instead of a cluster at the top.
 
-    Within a size the list is the score-best ``quota``, plus every candidate whose cost is
-    within :data:`REFINE_COST_FACTOR` of that size's best -- the near-tie rule, which is what
+    [measured, docs/PARAM_BUDGET_PLAN.md section 6] The bucket used to be element count, which
+    conflated two different axes: :func:`_screening_score` already charges for parameters, and
+    :attr:`~autocircuit.core.circuit.Circuit.complexity` (what the Pareto front actually
+    dominates on) is neither element count nor parameter count once ``W``/``CPE``/``SKINF``/
+    ``SKINW`` carry a surcharge. Bucketing on parameter count instead does not fully close that
+    gap -- :attr:`Ranked.n_params`'s docstring says why it stops short of ``complexity`` -- but it
+    turns the docstring's own promise from true on 26% of a real 19-value axis into a bucket
+    scheme with no unmeasured surcharge inside it.
+
+    Within a bucket the list is the score-best ``quota``, plus every candidate whose cost is
+    within :data:`REFINE_COST_FACTOR` of that bucket's best -- the near-tie rule, which is what
     stops an exact equivalent from being dropped because a sloppy fit ranked it one place too
     low. [measured] That rule needs a ceiling: at 1% noise a factor 10 in cost is only a factor
     3.2 in relative error, so hundreds of candidates land inside it and refitting them all cost
@@ -3094,15 +3543,15 @@ def _quota_by_size[T](items: Sequence[Ranked[T]], n_refine: int) -> list[T]:
     search making the same kind of claim as the exhaustive one; a second copy of it is a second
     thing that can drift (docs/EVOLVE_SEARCH_PLAN.md section 3.2).
     """
-    by_size: dict[int, list[Ranked[T]]] = {}
+    by_params: dict[int, list[Ranked[T]]] = {}
     for item in items:
-        by_size.setdefault(item.n_elements, []).append(item)
-    if not by_size:
+        by_params.setdefault(item.n_params, []).append(item)
+    if not by_params:
         return []
 
-    quota = max(MIN_REFINE_PER_SIZE, n_refine // len(by_size))
+    quota = max(MIN_REFINE_PER_SIZE, n_refine // len(by_params))
     keep: list[T] = []
-    for group in by_size.values():
+    for group in by_params.values():
         group.sort(key=lambda item: (item.score, item.cost, item.tiebreak))
         best_cost = min(item.cost for item in group)
         threshold = best_cost * REFINE_COST_FACTOR if best_cost > 0.0 else math.inf
@@ -3132,7 +3581,7 @@ def _shortlist(
         circuit = Circuit.parse(text)
         ranked.append(
             Ranked(
-                len(circuit.leaves),
+                circuit.n_params,
                 _screening_score(cost, circuit.n_params, n_data, criterion),
                 cost,
                 text,
@@ -3145,7 +3594,7 @@ def _shortlist(
 def _refit_order(
     candidates: Sequence[Candidate], criterion: Criterion = DEFAULT_CRITERION
 ) -> list[Candidate]:
-    """The shortlist in the order a *bounded* tier 2 should walk it: best of every size first.
+    """The shortlist in the order a *bounded* tier 2 should walk it: best of every bucket first.
 
     :func:`_quota_by_size` chooses *which* candidates are worth a full-budget refit and says
     nothing about the order, because the exhaustive stage refits all of them. The genetic
@@ -3153,23 +3602,24 @@ def _refit_order(
     wherever it has got to, so for that caller the order decides what is reported.
 
     [measured, docs/SEARCH_ALGORITHM_SCREENING.md section 4.6] Walking it in the order the
-    quota happens to build -- grouped by element count, the groups in whatever order the
-    archive first mentioned them -- lost the answer. At element cap 9, seed 0, the truth's
-    equivalence class was ranked **1 of 270** in the archive and sat at position 53 of a
-    73-candidate shortlist whose deadline cut fell at 40; sizes 6 and 8 were never attempted at
-    all, and the report contained no six-element row while the best thing the search had found
-    was one. Nothing was wrong with the search or with the shortlist. The report simply walked
-    away from the answer.
+    quota happens to build -- grouped by bucket, the groups in whatever order the archive first
+    mentioned them -- lost the answer. At element cap 9, seed 0, the truth's equivalence class
+    was ranked **1 of 270** in the archive and sat at position 53 of a 73-candidate shortlist
+    whose deadline cut fell at 40; two whole sizes were never attempted at all, and the report
+    contained no row for one of them while the best thing the search had found was there. Nothing
+    was wrong with the search or with the shortlist. The report simply walked away from the
+    answer.
 
-    So the order is a round robin over the size groups, taking each group's best before any
+    So the order is a round robin over the bucket groups, taking each group's best before any
     group's second, and ordering within a round by the score itself. Two properties follow, and
     they are the two the quota exists for: the archive's best-scoring candidate is always
-    attempted first, and any cut that leaves room for one refit per size leaves a Pareto front
-    that still spans the complexities -- rather than however many sizes fitted inside the clock.
+    attempted first, and any cut that leaves room for one refit per bucket leaves a Pareto front
+    that still spans a wide slice of the parameter axis -- rather than however many buckets
+    fitted inside the clock.
     """
-    by_size: dict[int, list[Candidate]] = {}
+    by_params: dict[int, list[Candidate]] = {}
     for candidate in candidates:
-        by_size.setdefault(len(candidate.circuit.leaves), []).append(candidate)
+        by_params.setdefault(candidate.circuit.n_params, []).append(candidate)
 
     def key(candidate: Candidate) -> tuple[float, float, str]:
         score = candidate.score(criterion)
@@ -3180,7 +3630,7 @@ def _refit_order(
         )
 
     ordered: list[tuple[int, tuple[float, float, str], Candidate]] = []
-    for group in by_size.values():
+    for group in by_params.values():
         group.sort(key=key)
         ordered.extend((rank, key(candidate), candidate) for rank, candidate in enumerate(group))
     ordered.sort(key=lambda item: (item[0], item[1]))
@@ -3204,7 +3654,7 @@ def _shortlist_candidates(
     return _quota_by_size(
         [
             Ranked(
-                len(candidate.circuit.leaves),
+                candidate.circuit.n_params,
                 candidate.score(criterion),
                 candidate.result.statistics.ssr,
                 candidate.circuit.canonical_form(),
@@ -3337,7 +3787,7 @@ def refit_plan(
 
     The reason this exists is the same as for the screen: the decisions must have exactly one
     implementation. Which topologies are worth a full-budget refit is :func:`_shortlist`, and
-    gate G1 rests on its per-element-count quota; what happens to a topology that cannot be
+    gate G1 rests on its per-parameter-count quota; what happens to a topology that cannot be
     fitted, and the ordering of what comes out, are decisions too. A browser driving this from
     JavaScript fans out the fits and nothing else.
 
@@ -3491,6 +3941,32 @@ def _worker_pool(
         return
     with multiprocessing.Pool(
         processes=workers,
+        initializer=_init_worker,
+        initargs=(spectrum.f, spectrum.z, weighting),
+    ) as executor:
+        yield executor
+
+
+@contextlib.contextmanager
+def _evolve_worker_pool(
+    workers: int, spectrum: Spectrum, weighting: Weighting
+) -> Iterator[concurrent.futures.ProcessPoolExecutor | None]:
+    """:func:`_worker_pool`'s twin for :func:`_evolve`'s steady-state dispatch.
+
+    A :class:`concurrent.futures.ProcessPoolExecutor` rather than a bare
+    :class:`multiprocessing.pool.Pool`, because the steady-state driver needs individually
+    trackable :class:`~concurrent.futures.Future` objects to know *which* of several in-flight
+    tasks just completed (:func:`concurrent.futures.wait` with
+    ``return_when=FIRST_COMPLETED``) -- a ``Pool.map`` call cannot report a single completion
+    without waiting for the whole batch, which is exactly the barrier this driver removes. Same
+    ``workers<=1`` contract as :func:`_worker_pool`: nothing is created at all, the Pyodide-safe
+    path.
+    """
+    if not workers or workers <= 1:
+        yield None
+        return
+    with concurrent.futures.ProcessPoolExecutor(
+        max_workers=workers,
         initializer=_init_worker,
         initargs=(spectrum.f, spectrum.z, weighting),
     ) as executor:
@@ -3699,7 +4175,7 @@ def screen_plan(
     driver is :func:`_screen_all`; across processes it is :func:`_screen_parallel`; in a
     browser it is JavaScript fanning batches across Web Workers, and none of those get to hold
     their own opinion about ordering or abandonment. Gate G1 rests on this stage feeding the
-    per-element-count quota in :func:`_shortlist` correctly, and a second implementation of it
+    per-parameter-count quota in :func:`_shortlist` correctly, and a second implementation of it
     in another language is a second thing that can be wrong.
 
     ``chunk=1`` reproduces a strictly sequential screen, where every candidate is judged
@@ -4042,6 +4518,53 @@ def _breeding_key(node: Node) -> str | None:
         return None
 
 
+def _propose_child(
+    alive: list[Candidate],
+    rng: np.random.Generator,
+    pool: tuple[str, ...],
+    max_elements: int,
+    criterion: Criterion,
+    *,
+    frequencies: Mapping[float, float] | None,
+    parsimony: float,
+    weights: Sequence[float],
+    seen: set[str],
+) -> _Offspring | None:
+    """One bred child -- tournament selection, optional crossover, mutation -- retried up to
+    :data:`PROPOSE_RETRY_CAP` times against ``seen`` (mutated in place: a successful key is
+    added to it, exactly the dedup discipline :func:`_next_generation`'s docstring describes).
+
+    Returns ``None`` only when every retry produced an oversize child; the caller loops again
+    with a fresh draw, which is what makes an unbounded outer retry safe -- see
+    :func:`_next_generation` and :class:`_SteadyState` for the two loops built on top of this.
+    Factored out from :func:`_next_generation`'s own body so :func:`evolve_plan`'s steady-state
+    proposer (:class:`_SteadyState`) can share the identical per-child logic rather than a copy
+    of it -- this function's own behaviour is unchanged by that split.
+    """
+    child = parent = None
+    for _ in range(PROPOSE_RETRY_CAP):
+        parent = _tournament(
+            alive, rng, criterion=criterion, frequencies=frequencies, parsimony=parsimony
+        )
+        if rng.random() < 0.3 and len(alive) > 1:
+            other = _tournament(
+                alive, rng, criterion=criterion, frequencies=frequencies, parsimony=parsimony
+            )
+            child = crossover(parent.circuit.root, other.circuit.root, rng)
+        else:
+            child = parent.circuit.root
+        child = mutate(child, rng, pool, max_elements, weights=weights)
+        if count_elements(child) > max_elements:
+            child = None
+            continue
+        key = _breeding_key(child)
+        if key is None or key not in seen:
+            if key is not None:
+                seen.add(key)
+            break
+    return None if child is None else (child, parent)
+
+
 def _next_generation(
     alive: list[Candidate],
     rng: np.random.Generator,
@@ -4079,29 +4602,19 @@ def _next_generation(
 
     seen = set(known)
     while len(trees) < population:
-        child = parent = None
-        for _ in range(PROPOSE_RETRY_CAP):
-            parent = _tournament(
-                alive, rng, criterion=criterion, frequencies=frequencies, parsimony=parsimony
-            )
-            if rng.random() < 0.3 and len(alive) > 1:
-                other = _tournament(
-                    alive, rng, criterion=criterion, frequencies=frequencies, parsimony=parsimony
-                )
-                child = crossover(parent.circuit.root, other.circuit.root, rng)
-            else:
-                child = parent.circuit.root
-            child = mutate(child, rng, pool, max_elements, weights=weights)
-            if count_elements(child) > max_elements:
-                child = None
-                continue
-            key = _breeding_key(child)
-            if key is None or key not in seen:
-                if key is not None:
-                    seen.add(key)
-                break
-        if child is not None:
-            trees.append((child, parent))
+        offspring = _propose_child(
+            alive,
+            rng,
+            pool,
+            max_elements,
+            criterion,
+            frequencies=frequencies,
+            parsimony=parsimony,
+            weights=weights,
+            seen=seen,
+        )
+        if offspring is not None:
+            trees.append(offspring)
     return trees
 
 
@@ -4164,8 +4677,8 @@ def _refine(
     a second way to say it.
 
     A tier that can stop early owes an order to stop *in*, which is :func:`_refit_order`: the
-    shortlist arrives grouped by element count and is walked best-of-each-size first. Without
-    it a deadline drops whichever sizes the archive happened to mention last, first-ranked
+    shortlist arrives grouped by parameter count and is walked best-of-each-bucket first. Without
+    it a deadline drops whichever buckets the archive happened to mention last, first-ranked
     candidate included.
 
     ``executor`` parallelises this tier exactly as :func:`_refit_shortlist` already does for the

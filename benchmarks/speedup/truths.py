@@ -97,7 +97,11 @@ SRF_WINDOW = (1e1, 1e10)
 
 
 def tune(
-    truth: Truth, *, seed: int = 0, maxiter: int = 400, ranges: dict[str, tuple[float, float]] | None = None
+    truth: Truth,
+    *,
+    seed: int = 0,
+    maxiter: int = 400,
+    ranges: dict[str, tuple[float, float]] | None = None,
 ) -> tuple[dict[str, float], float]:
     """Local copy of ``six_plus.truths.tune``, parameterised on a wider range dict (adds CPE)."""
     ranges = ranges if ranges is not None else TUNE_RANGES
@@ -344,7 +348,9 @@ def tune_srf(
     f0_first_lo = log_f_min + SRF_EDGE_MARGIN_DECADES
     f0_first_hi = log_f_max - SRF_EDGE_MARGIN_DECADES - span
     if f0_first_hi <= f0_first_lo:
-        raise ValueError(f"{truth.id}: separation {separation} decades leaves no room in the window")
+        raise ValueError(
+            f"{truth.id}: separation {separation} decades leaves no room in the window"
+        )
 
     # variables: [log10(f0_first), rho_1..rho_n (log10 ohms), R_1..R_n (log10 ohms)]
     bounds = (
@@ -401,8 +407,8 @@ def resonant_frequencies(truth: Truth) -> dict[str, float]:
 
     for label_c, label_l in re.findall(r"C(\d+),R\d+-L(\d+)", truth.circuit):
         c = truth.params[f"C{label_c}.C"]
-        l = truth.params[f"L{label_l}.L"]
-        out[f"C{label_c}/L{label_l}"] = 1.0 / (2.0 * math.pi * math.sqrt(l * c))
+        inductance = truth.params[f"L{label_l}.L"]
+        out[f"C{label_c}/L{label_l}"] = 1.0 / (2.0 * math.pi * math.sqrt(inductance * c))
     return out
 
 

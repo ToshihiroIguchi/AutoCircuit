@@ -64,7 +64,10 @@ def wilson(ok: int, total: int, z: float = 1.959964) -> tuple[float, float]:
 
 
 def wilson_overlap(a: tuple[float, float], b: tuple[float, float]) -> bool:
-    """True iff the two Wilson intervals overlap -- "not significant" under this repo's convention."""
+    """True iff the two Wilson intervals overlap.
+
+    That is "not significant" under this repo's convention.
+    """
     return a[0] <= b[1] and b[0] <= a[1]
 
 

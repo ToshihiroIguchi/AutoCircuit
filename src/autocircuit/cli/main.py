@@ -329,6 +329,10 @@ def cmd_discover(args: argparse.Namespace) -> int:
     # for.
     if args.excluded_equivalents and not args.skeleton:
         raise SystemExit("error: --excluded-equivalents needs --skeleton")
+    if args.max_params is not None and args.skeleton:
+        raise SystemExit("error: --max-params cannot be combined with --skeleton")
+    if args.max_params is not None and args.growth_width > 0:
+        raise SystemExit("error: --max-params cannot be combined with --growth-width > 0")
 
     if args.skeleton:
         print(_skeleton_plan(args.skeleton, args.exhaustive_limit, args.max_candidates))
@@ -341,6 +345,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
         skeleton=args.skeleton,
         mode=args.mode,
         exhaustive_limit=args.exhaustive_limit,
+        max_params=args.max_params,
         max_candidates=args.max_candidates,
         workers=args.workers,
         feasibility_filter=not args.no_feasibility_filter,
@@ -689,6 +694,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="largest *total* element count to enumerate (default 5, or the skeleton's own "
         "size plus 5 when --skeleton is given; either way a level that would pass "
         "--max-candidates is dropped and the reported coverage falls with it)",
+    )
+    p_disc.add_argument(
+        "--max-params", type=int, default=None,
+        help="budget the exhaustive enumeration by free parameters instead of raw element "
+        "count -- a capacitor costs one, a CPE two, so an element cap is a different amount "
+        "of model freedom in every pool (docs/PARAM_BUDGET_PLAN.md). Off by default, which "
+        "leaves --exhaustive-limit in force unchanged. Cannot be combined with --skeleton or "
+        "--growth-width > 0",
     )
     p_disc.add_argument(
         "--max-candidates", type=int, default=20000,

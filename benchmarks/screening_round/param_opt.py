@@ -278,7 +278,9 @@ def lshade(
     return run
 
 
-def jade(np_mult: float = 18.0, p_min_frac: float = 0.05, c: float = 0.1) -> Callable[[Counted, int], Float]:
+def jade(
+    np_mult: float = 18.0, p_min_frac: float = 0.05, c: float = 0.1
+) -> Callable[[Counted, int], Float]:
     """JADE (Zhang & Sanderson, 2009): SHADE's ancestor.
 
     Same `current-to-pbest/1` mutation and archive as `lshade()`, but adaptation is a single
@@ -426,9 +428,11 @@ def ga_sbx(
         best_x, best_f = pop[:, best_i].copy(), float(fitness[best_i])
 
         while c.n < cap:
-            i1, i2 = rng.integers(0, pop_size, size=pop_size), rng.integers(0, pop_size, size=pop_size)
+            i1 = rng.integers(0, pop_size, size=pop_size)
+            i2 = rng.integers(0, pop_size, size=pop_size)
             sel1 = np.where(fitness[i1] < fitness[i2], i1, i2)
-            i3, i4 = rng.integers(0, pop_size, size=pop_size), rng.integers(0, pop_size, size=pop_size)
+            i3 = rng.integers(0, pop_size, size=pop_size)
+            i4 = rng.integers(0, pop_size, size=pop_size)
             sel2 = np.where(fitness[i3] < fitness[i4], i3, i4)
             p1, p2 = pop[:, sel1], pop[:, sel2]
 

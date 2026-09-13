@@ -80,6 +80,22 @@ differently depending on which penalty function `f` is. AIC's `2k`, BIC's `k*log
 class. The near-tie rule around this quota (`REFINE_COST_FACTOR`, same section) works off raw cost,
 not the criterion, so it does not erase this effect.
 
+**[2026-09-11] This mechanism is retired.** `docs/PARAM_BUDGET_PLAN.md` §6 re-keyed the quota
+bucket from element count to parameter count precisely because of the effect described in this
+paragraph. Inside a fixed-parameter-count bucket, every scored criterion is `deviance(cost)` plus
+a constant that does not depend on cost, so the within-bucket order — and therefore the tier-1
+shortlist itself — is now **provably criterion-invariant** (a unit test in
+`tests/test_discover_exhaustive.py` asserts this, and a companion test pins down the retired
+mechanism above as the reason a fixed test is needed at all). Measured, not just argued: a
+before/after run of this project's own Q1/Q3 slice (`criterion_selection.py`, 24 cells) shows
+`recommended_circuit` identical on all 24 cells across the re-key, with the one row that moved at
+all (`by_criterion_disagrees`/`by_criterion_overfits` on one `six_plus/par5` cell) moving in the
+favourable direction the re-key's own §6 predicted. So "whether the *screening-stage* ranking
+`criterion` does control ever changes which topologies survive" — this section's own scoping
+question — now has a structural answer of "it cannot", not merely an empirically low rate; that
+narrows what a future revisit of `DEFAULT_CRITERION` needs to check, but changes nothing already
+shipped from §9/§10 below, which were measured before this re-key existed.
+
 **(b) `by_criterion`** (`discover.py:531-559`) — the value the report shows as "what the chosen
 criterion picks", printed alongside `recommended` in `summary()` whenever the two disagree
 (`discover.py:576` and the printing logic around `914-916`). This is a real, user-visible number

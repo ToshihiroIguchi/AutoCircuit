@@ -22,7 +22,6 @@
 import type {
   CandidateRowWire,
   EvolveOutcomeWire,
-  EvolveTaskWire,
   ReportWire,
   SearchLevelWire,
   SearchPlanWire,
@@ -299,16 +298,23 @@ export class SearchRun {
     job: string,
     evolving: { completeUpTo: number | null; maxElements: number },
   ): Promise<void> {
-    let outcomes: EvolveOutcomeWire[] | null = null;
+    let outcomes: (EvolveOutcomeWire | null)[] | null = null;
     this.emit({ stage: "evolving", evolving }, true);
     for (;;) {
       const step = await this.client.discoverEvolve(job, outcomes);
       this.emit({ generation: step.generation, generations: step.generations }, true);
       const tasks = step.tasks;
       if (tasks === null || this.cancelled) return;
-      outcomes = await this.pool.map(tasks.length, (client, index) =>
-        client.evolveTask(this.spectrum, tasks[index] as EvolveTaskWire, this.options),
-      );
+      // A null slot -- nothing left to propose for it, `evolve_plan`'s own sliding-window
+      // protocol -- is dispatched to nobody and reported back as null, unchanged.
+      outcomes = await this.pool.map(tasks.length, (client, index) => {
+        // `?? null` only normalises the array-index type (`index < tasks.length` always holds
+        // here); the real null case is a genuinely empty slot, not an out-of-range access.
+        const task = tasks[index] ?? null;
+        return task === null
+          ? Promise.resolve(null)
+          : client.evolveTask(this.spectrum, task, this.options);
+      });
       if (this.cancelled) return;
     }
   }

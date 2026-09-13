@@ -43,7 +43,7 @@ import numpy as np
 _SPEEDUP_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_SPEEDUP_DIR))
 
-from truths import MW4CPE, MW5, MW6, SRF2, SRF2_CLOSE, SRF3, SRF3_CLOSE, spectrum_for  # noqa: E402
+from truths import spectrum_for  # noqa: E402
 
 #: True reactive-element count (McMillan degree of Z(s)) for each truth built from ideal R/L/C.
 #: mw4cpe is excluded: a CPE makes Z(s) non-rational, so "order" is not well defined for it.
@@ -80,10 +80,8 @@ def estimate_order_gap(s: np.ndarray) -> int:
 
 
 def estimate_order_threshold(s: np.ndarray, noise: float, factor: float = 5.0) -> int:
-    if noise <= 0.0:
-        floor = s[-1] * 10.0  # noise-free: use the numerical floor itself, scaled up a bit
-    else:
-        floor = factor * s[0] * noise
+    # noise-free: use the numerical floor itself, scaled up a bit
+    floor = s[-1] * 10.0 if noise <= 0.0 else factor * s[0] * noise
     return int(np.sum(s > floor))
 
 

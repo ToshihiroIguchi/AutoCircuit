@@ -273,7 +273,20 @@ static-site Web UI running the same core via WASM (Pyodide).
    whose only disclaimer was an eleven-point caption in the header. The load state now sits in the
    content column, the tab strip marks what is not live, and the finish is announced instead of
    merely ceasing — and there is still no progress bar, because `loadPackage` reports no bytes and
-   an animated bar would look identical to a dead worker.
+   an animated bar would look identical to a dead worker. **§9, added 2026-09-13, prices the one
+   lever §8.3 left unpriced: is the stdlib bytecode (2.5 MB -> 7.1 MB, `precompile.mjs`) worth its
+   4.51 MB over a real link, measured rather than assumed from a Node-only, no-transfer-cost
+   number.** A byte-rate-limited server (`web/scripts/serve-throttled.mjs`) and a variant build
+   that ships the stdlib pristine (`set-stdlib-variant.mjs`) found **the bytecode wins at every
+   rung tested, cold and warm** — including 0.67 MB/s, this project's own measured GitHub Pages
+   rate: the pristine build is slower to "data ready" (27.13 s vs 25.61 s) and "fit ready"
+   (56.95 s vs 55.00 s) even there, because compiling 559 stdlib modules in an interpreter
+   already measured 3-5x slower than CPython costs more than the transfer it saves. The warm-
+   cache gap is the sharper number: with no transfer cost to offset in either build, the pristine
+   stdlib still costs 1.4-1.6 s more on *every single revisit*, because the browser's Python
+   process never persists a `__pycache__` the way an installed interpreter would. Nothing ships
+   from this section — the pre-registered rule for dropping the bytecode was not met, decisively
+   rather than marginally — but the reusable instrument stays for pricing the next such proposal.
 9. `docs/SCHEMATIC_PLAN.md` — how the Fit screen draws the circuit. **Implemented; gates S1–S4
    measured.** The picture is computed rather than laid out: `web/src/core/schematic.ts` turns the
    parsed tree into coordinates, which is what makes "every wire is axis-aligned", "no wire ends
@@ -358,7 +371,28 @@ static-site Web UI running the same core via WASM (Pyodide).
    against `discover(mode="auto")` on a spectrum engineered to make the fallback fire for a real
    reason — passed on every compared field, JSON export included, with a byte-identical
    fingerprint (`benchmarks/ev5_fingerprint.py --mode evolve`) proving both of the fallback's own
-   tiers refactor-safe first.
+   tiers refactor-safe first. **§3.6 Step 7 and §3.7 Step 8, added 2026-09-12, are now measured
+   at pilot scale.** Step 7: the loop's only stopping conditions are a generation cap, `time_limit`
+   checked at generation boundaries, and a tier-2 refit deadline — no plateau/stagnation/diversity
+   check at all. Two candidate fixes were measured against a false-stop-rate bar on a frozen-table
+   simulation (480 seeds, two arenas): plateau-based stopping is **rejected outright** (54-74%
+   false-stop rate on the harder arena at every `K` tried — a plateau of several generations is
+   normal in a run that later succeeds, exactly as §1.1's own table already warned), and
+   archive-diversity-collapse detection is safe (0% false stop) but too conservative to be useful
+   as tested (fired on 11/480 and 0/480 runs). Nothing ships. **[measured, live, 2026-09-12]**
+   the diversity-collapse rule was re-tested on real `discover(mode="evolve")` runs rather than
+   the frozen-table proxy (`benchmarks/six_plus/stopping_live.py`, new; drives the real
+   `evolve_plan` through `_evolve`'s own dispatch loop): all nine `six_plus` truths × 3 seeds,
+   same grid. **The live result matches the pilot exactly** — zero false stops wherever the rule
+   ever fired (2/27 and 1/27 at the two loosest settings, 0/27 everywhere else in the grid) —
+   confirming "safe but too conservative to be useful" on real search trajectories, not only a
+   simulation. Nothing ships. Step 8: `random_topology`'s
+   series/parallel seeding bias showed the exact `mut_series_hi`/`mut_par_hi` signature §3.5.2
+   already established for the mutation operator — measured on 480 seeds across three arenas
+   (adding a cap-7 series arena to separate the effect from a cap confound, per §3.5.3's own
+   precedent) — and was **shipped**, `0.55` → `0.5`, with the measurement in the function's own
+   docstring. The tournament/elite-width sweep and the two lower-priority items were not
+   attempted.
 
 11. `docs/KK_RESONANCE_PLAN.md` — the Lin-KK test and the resonance its basis cannot express.
    **Implemented; gates K1–K4 measured.** Its §2 is the one to read, and it is the whole point
@@ -583,8 +617,9 @@ static-site Web UI running the same core via WASM (Pyodide).
    it. **§3.1 implemented and shipped, §3.2 measured and its fix rejected, §4.2 measured and
    its flag rejected, §4.1 measured and its own decision rule keeps it a lever rather than a
    default, §4.3 implemented and shipped, §3.3 implemented and shipped in half (the CPE kernel
-   substitution ships, the buffer-reuse half measured inside the noise floor and does not), the
-   rest is still plan only.** It is deliberately *not* about the 13x F2
+   substitution ships, the buffer-reuse half measured inside the noise floor and does not), §3.5
+   measured at full scale and rejected, the rest is still plan only.** It is deliberately *not*
+   about the 13x F2
    gap `SEARCH_ALGORITHM_SCREENING.md`
    measured: it collects the F1 and F3 levers the earlier rounds set aside — the per-topology
    setup that is 23–33% of a screen and mostly per-*dataset* work recomputed 2,976 times, a
@@ -695,7 +730,52 @@ static-site Web UI running the same core via WASM (Pyodide).
    phenomenon and not the section's own example: an over-parameterised superset topology whose
    extra element gets fitted to irrelevance lands on exactly its subset's cost, which the
    same-size breakdown shows is not the whole story — genuine same-size duplication is large on
-   its own. All seven steps of section 7's order of work are done.
+   its own. All seven steps of section 7's order of work are done. **§3.5 proposed thinning the
+   frequency points fed to the DE global stage during screening** (correctness constraint:
+   `w_re`/`w_im` sliced with the same index set as `omega`/`z`; pre-registered bar: a fancier
+   thinning method must beat plain uniform decimation, not merely beat no thinning). **[measured,
+   480 seeds, 2026-09-12] Rejected.** A 60-seed pilot had found hit rate unaffected and 25-52%
+   wall-clock reduction, but wide enough Wilson CIs that the section's own rule withheld a verdict
+   pending the full run. The full 480-seed run confirms hit rate really is unaffected (McNemar
+   `p=0.48`/`p=0.64`) but finds **no wall-clock reduction at all once machine contention from
+   concurrent work is removed** — a first run (concurrent with other experiments) reproduced a
+   large-looking gap that halved uniformly across all three conditions on a clean, isolated
+   re-run, leaving the *relative* pattern flat (if anything marginally worse for the thinned
+   conditions). The likely mechanism, matching `docs/SEARCH_SPEEDUP_PLAN.md` ideas C/D's own
+   finding elsewhere in this document: at `SCREEN_POPSIZE=8, SCREEN_MAXITER=40`, per-iteration
+   dispatch overhead dominates the wall-clock at this problem size, so shrinking the array these
+   calls operate over does not move the total. H2 (method comparison) was never evaluated on its
+   own terms, since it is conditioned on H1 shipping a baseline to compare against; the harness
+   built for it still measured a real, informative result on one dataset (`adaptive` thinning beat
+   `uniform` significantly, `p=0.0005`, on `zenodo-21700-id15`'s genuinely irregular frequency
+   axis) which is recorded as a number only, not a verdict. `core/fit.py` is unchanged.
+   **§8, added 2026-09-13 (`benchmarks/speedup/where_time_goes.py`), is a direct decomposition
+   of one `screen()` call rather than another lever -- nothing ships from it.** §1's own
+   27.6-36.1% DE-bookkeeping share came from one `cProfile` run and had never been cross-checked
+   by an unbiased method; an unbiased null-cost/real-cost comparison (normalized per DE
+   iteration, since the null arm was measured to still converge early even with a real-valued,
+   non-constant cost -- it collapses the population's spread in exactly the coordinate the
+   convergence test watches) finds **48-67%**, confirming §1's number rather than overturning it.
+   A `cProfile` decomposition of a full `screen()` call (after fixing a found-and-corrected
+   cold-start artifact: the first topology profiled with no warm-up call read as 89% "other")
+   agrees in order of magnitude (30-39%), and separately prices the finite-difference Jacobian
+   `least_squares(method="trf")` relies on everywhere in this codebase at ~44-49% of the local-
+   polish stage's own time -- real, but that whole stage is only 2.8-4.2% of a screen because
+   `abandon_above` skips it for most candidates, so an analytic Jacobian would save at most
+   ~1.5-2% of total screen time. Four named micro-inefficiencies (a constant-impedance element's
+   redundant allocation, a per-leaf dict lookup already resolved in `Circuit._specs`, a doubly-
+   entered `np.errstate`, omega-only subexpressions recomputed on every population evaluation)
+   were priced individually and are each real in percentage terms (+28% to +99% depending on the
+   pair) but **collectively under 0.05% of one screen's total time**, arithmetically too small
+   to matter regardless of the percentages. One of these microbenchmarks was also measured to
+   *flip direction* depending on what ran earlier in the same process (+31% one way in isolation,
+   -218% the other immediately after this script's own DE-heavy stages) -- fixed by having
+   `--profile`/`--micro` skip the unrelated stage by default rather than trusting numbers taken
+   back-to-back with it. The section's own conclusion: the only lever with real, uncommitted
+   headroom is SciPy's own DE bookkeeping (48-67%), not shipped or attempted this round --
+   `docs/PARAM_OPTIMIZER_PLAN.md` already measured a *different* optimizer replacement (L-SHADE)
+   regressing a known-hard reference before being withdrawn, so this is recorded as a priced,
+   ranked candidate for a future round, not a recommendation to act on unmeasured.
 
 18. `docs/DISCOVER_UX_PLAN.md` — usability fixes on the Discover path, from two rounds of user
    review of the CLI and web front ends. **Implemented, items A-G; verified by `npm run check`,
@@ -736,7 +816,23 @@ static-site Web UI running the same core via WASM (Pyodide).
    startup library-loading concern is two already-closed questions —
    `STARTUP_AND_EDITING_PLAN.md` §3's staging and `METRICS_AND_UX_PLAN.md` §1.5's rejected
    prefetch — plus a scipy replacement, which is a different scale of project than anything else
-   in this document and was not attempted without being asked for specifically.
+   in this document and was not attempted without being asked for specifically. **A fourth review
+   round, 2026-09-12, found and fixed the one remaining gap**: both front ends already narrated
+   the escalation live (`cli/main.py`'s `on_stage`, `web/src/components/SearchProgress.tsx`'s
+   `"evolving"` banner, confirmed still correct by actually driving both), but the *persisted*
+   report — what `summary()` prints and what `report.completeness` renders on the Report screen —
+   said nothing beyond "over N generations" once the fallback ran, because
+   `DiscoveryResult.completeness()` had a sentence for pool-widening and one for growth but none
+   for the fallback itself. Fixed with `_with_evolve_note` (`discover.py`, wired through
+   `_with_refit_note`, the common wrapper every `completeness()` path already passes through, so
+   both front ends' persisted reports picked it up with zero React changes — confirmed with
+   Playwright against a live `npm run dev` session, not merely read from the component source).
+   Scoped to `mode == "auto"`, since an explicit `mode="evolve"` request is the caller's own
+   choice and already gets its own "sampled, not exhaustive" sentence. No wire-schema field was
+   added (`generations > 0` is already public); verified with new tests
+   (`tests/test_discover_exhaustive.py`, `tests/test_discover_growth.py`, an extra assertion on
+   gate W-EV1 in `tests/test_web_job.py`), `mypy --strict`, `ruff check`, the full relevant
+   `pytest` suite, `npm run check`, and `npm run smoke`.
 
 19. `docs/CRITERION_SELECTION_PLAN.md` — whether `DEFAULT_CRITERION` (`stats.py:39`) was the
    right default against BIC, CAIC, HQC or AICc, which no document had measured before this.
@@ -837,6 +933,220 @@ static-site Web UI running the same core via WASM (Pyodide).
     experimental `core/lshade.py` module was removed rather than left unused in the production
     tree, and the benchmark harness's new arms stay as a measurement instrument, the same way
     CMA-ES and Sobol multi-start already did from the round that rejected them.
+
+22. `docs/PARAM_BUDGET_PLAN.md` — whether the exhaustive search should be budgeted by free
+    parameters rather than raw element count, since a `C` costs one and a `CPE` costs two.
+    **Phases 0-7 done (all seven items of that plan's §9); phase 8 (moving the default) is
+    blocked on E.2's stop rule below, phase 9 (browser) not attempted.**
+    `discover(max_params=...)` and `--max-params` ship as an opt-in lever, default `None`, and no
+    default has moved. The originally suspected mechanism does not exist: tier 1 and
+    tier 2 already feed `n_params` to the chosen criterion, and `recommended`'s first key,
+    `Circuit.complexity`, **was** a weighted sum rather than a count — see item 6/7 below for why
+    that is now stated in the past tense — so no code path lets a CPE win a
+    comparison for being counted as one element. What *is* raw element count, unconditionally, is
+    the budget, the `complete_up_to` coverage claim and the tier-2 refit quota, and those are
+    measurably distorted — at element cap 5 on the default pool, 79% of the enumerated space
+    carries more free parameters than the entire `R,C,L` cap-5 space allows, while a parameter
+    budget of 6 costs about a quarter *less* work (the topology-count view said "+8%"; that is the
+    wrong quantity, because the mix shifts away from the expensive element, 84.9%→32.3%
+    CPE-bearing) and reaches every six-element `R,C,L` topology exhaustively — the reach
+    `TOPOLOGY_6PLUS_PLAN.md` built the whole growth stage for and still ships off by default. The
+    plan's own §8 records what its first draft missed before any code was written: no truth
+    anywhere in this repository is small in elements and large in parameters, so every existing
+    benchmark would return a vacuous pass and parameter-dense negative controls have to be built
+    before anything is wired (§9 phase 2); a parameter budget is derivable from the spectrum's own
+    `n_data` in a way an element count never could be, which `CLAUDE.md`'s own "derived from the
+    spectrum's own shape" rule was not checked against until this pass. Every phase states in
+    advance what result means "do not ship," and a null result is acceptable after phase 1.
+    **Phase 1 [measured]**: the parameter-axis enumerator (`core/enumerate.py`'s
+    `enumerate_topologies_by_params`/`enumerate_up_to_params`/`count_topologies_by_params`, plus
+    `core/circuit.py`'s `count_params`) reproduces the element-axis enumerator exactly on
+    unit-parameter-cost pools and agrees with an independent naive filter on mixed-cost pools;
+    `tests/test_enumerate.py` is untouched byte-for-byte, and `ev5_fingerprint.py` is
+    byte-identical before/after, since nothing in `discover.py` calls the new code yet.
+    **Phase 2 [measured]**: three parameter-dense negative-control truths built
+    (`benchmarks/six_plus/param_dense_truths.py`, ratio 1.4-1.6, all passing the same four-part
+    admission screen `six_plus/truths.py` uses) since F7 found none exist anywhere in this
+    repository. Even on today's element axis, with the truth's own topology exhaustively
+    enumerated, recovery of these CPE/SKINF-dense truths is seed-dependent and well under
+    100% (1/3, 2/3, 1/3 recommended across seeds) — the basin-lottery mechanism
+    `TOPOLOGY_6PLUS_PLAN.md` §2(a) already measured for tier-1 screening, now confirmed on the
+    class this plan's Phase 3 will budget. `benchmarks/measured/`'s real-data R2/R3 gates were
+    re-run as the "before" baseline (R2 1/7 in-band, R3 2/7 stable at 29% against an 80% bar,
+    both consistent with `IMPACT_PLAN.md` §4's existing numbers) — with a caveat worth carrying
+    forward: `measured.py`'s default `--time-limit` is unbounded, and one real dataset's
+    `mode="auto"` fallback ran for approximately two hours of continuous CPU time before being
+    killed, so every future run of that script needs an explicit `--time-limit`.
+    **Phase 3 [measured]**: the budget is wired opt-in — `Enumeration` carries its own `axis` and
+    `element_cost`, `complete_up_to` keeps its exact meaning and is *derived* as
+    `complete_up_to_params // m` rather than repurposed, the parameter-budget path prints a
+    coverage sentence of its own that states which element count it does cover and why the next
+    one up is outside the budget, and `max_params` is refused outright with `skeleton` or
+    `growth_width > 0`. The non-negotiable gate — `ev5_fingerprint.py` byte-identical on the
+    element path — **passed only on the second attempt**, and the first is the part to remember:
+    adding the three new fields to `to_dict()` changed the fingerprint on every reference while
+    changing no number, because EV5 fingerprints that dict and an always-null key is still a key.
+    The wire schema keeps them out until phase 9; `completeness()`'s prose carries them meanwhile.
+    **G1 passed on both axes** (all three `REFERENCES`, two seeds: `reported`/`on_front`/
+    `recommended` 6/6 either way), and the cost proxy F6 predicted from topology counts held in
+    direction but not in size once it was real fits — 3.5-4.3x faster on the widest pool, a wash
+    on one, 15% *slower* on the one whose pool prices `W` at one parameter, so a later ladder over
+    `P` has to be read per pool. **E.1's honesty reading tripped its own pre-registered stop rule,
+    unanimously (9/9 runs), and that is the most useful result the phase produced**: under a
+    budget outside a truth's own cost, the search correctly failed to find it and *every* run
+    instead recommended a wrong five-element circuit with `n_unresolved = 0`, under a coverage
+    sentence claiming completeness only to three elements — true in every clause, misleading
+    regardless, the exact shape `docs/HANDOFF.md` §3 already lists several of. Fixed rather than
+    shelved, since the rule's own wording asked for a fix: `DiscoveryResult
+    ._with_recommendation_note` now says so whenever a recommendation's size exceeds
+    `complete_up_to`, worded like the growth stage's own equivalent note, and — the detail worth
+    keeping — the gap was never parameter-specific (a `seeds=` circuit or the genetic fallback
+    could always have triggered it on the element axis; nothing ever checked), so the fix applies
+    on both axes. Re-verified byte-identical on the element path after the fix. **E.2 [measured,
+    2026-09-10] tripped the lever's own stop rule.** Re-running `benchmarks/measured/measured.py`
+    pipeline/split-half at `--max-params 6 --time-limit 60` against the element-axis baseline
+    above: R2 is unchanged (1/7 in-band either way, the same dataset), but R3 falls from 2/7
+    (29%) to **0/7 (0%)** — stop rule (e), "E.2's R3 falls," as written. Both numbers sit far
+    below the 80% bar and the swing is two datasets out of seven, so this is not chased further
+    as a mechanism this round, but it is recorded as the trip it is rather than read past on
+    sample size — a plausible cause is the same one G1 already measured for this pool shape,
+    `--pool auto`'s wider CPE/W-heavy candidates pushing `complete_up_to` down to as little as 3
+    elements under a budget of 6, so odd/even halves are compared inside a smaller, more
+    screening-dependent region than the element-cap-5 baseline explores. This changes nothing
+    about the shipped, off-by-default status, but it means `docs/PARAM_BUDGET_PLAN.md`'s item 8
+    (moving the default) is now explicitly blocked on addressing this finding rather than merely
+    pending E.2's measurement. **Item 5 (X4 at P=7) [measured, 2026-09-10]: the parameter budget
+    does not make `TOPOLOGY_6PLUS_PLAN.md`'s growth stage unnecessary.** `--max-params 7` on an
+    `R,C,L`-only pool enumerates exhaustively to exactly seven elements, the same reach `grow`
+    gets from growth; scored against the pre-registered rule ("supersedes growth iff it beats
+    `grow` on `reported` for the six/seven-element truths on every shape and matches `base` on
+    the control") on the same nine `six_plus` truths × 3 seeds `TOPOLOGY_6PLUS_PLAN.md` X4 used.
+    The rule fails on its first tested shape: `params7` **loses** to `grow` on `ser6`'s
+    `reported` (0/3 against 2/3), so it does not beat `grow` on every shape, regardless of tying
+    or even winning elsewhere (`par6`/`mix6`/`par7`/`mix7` tie 3/3=3/3; `ser7`'s `reported` goes
+    0/3 → 3/3 but its `recommended` stays 0/3 either way, so nothing the report says changes) —
+    and it costs 2.3-2.8x more than growth on the six/seven-element cells for a recovery rate
+    that is, at best, tied. Both single-truth swings are most likely the same tier-1
+    screening-lottery noise `TOPOLOGY_6PLUS_PLAN.md` §2(a) and `SEARCH_TIME_PLAN.md` §4.3 already
+    measured for this exact shape at a single screening seed, not chased further because the
+    decision rule does not need the mechanism resolved to give its verdict. `GROWTH_DEFAULT`
+    stays `0` and nothing about `max_params`'s shipped, off-by-default status changes.
+    **Item 6 (re-key the tier-2 quota) [shipped, all gates measured 2026-09-11].** `_quota_by_size`
+    bucketed the tier-2 refit shortlist on element count while `_screening_score` already charged
+    for parameters and the Pareto front dominates on `Circuit.complexity` — 5 buckets guarding a
+    19-value axis on the default pool's cap-5 space. Re-keyed to `n_params`; `MIN_REFINE_PER_SIZE`
+    lowered `5 → 3` by a pre-registered rule read off a free, no-fitting replay of a frozen
+    21,057-topology landscape before any code changed. Ships a provable, tested corollary: inside
+    a fixed-parameter-count bucket every scored criterion is `deviance(cost)` plus a constant, so
+    the tier-1 shortlist is now criterion-invariant, voiding `docs/CRITERION_SELECTION_PLAN.md`
+    §2(a)'s mechanism by construction rather than merely by low measured rate (updated there in
+    the same commit). Full-cost G1 (`discovery_v2.py gate`, 3 references × 2 seeds, before/after)
+    is 6/6 both before and after with **byte-identical recommended circuits on every cell**;
+    `criterion_selection.py`'s Q1/Q3 slice (24 cells, before/after) shows `recovered` unfallen at
+    100%/100% and `by_criterion_overfits` not risen (aic falls 83.3%→75.0%, bic unchanged), with
+    23 of 24 cells identical on every field and the one that differs moving only the secondary
+    `by_criterion` line, never `recommended`.
+    **Item 7 (the `Circuit.complexity` surcharges) [measured and shipped 2026-09-12: a clean
+    tie].** Four elements (`W`, `CPE`, `SKINF`, `SKINW`) carried a surcharge above their own
+    parameter count; `Element.complexity`'s comment called this "deliberately expensive" for
+    elements that "absorb a lot of unexplained behaviour", a rationale `HN`'s own value (`4.0`,
+    no surcharge at all) already contradicted. An arm A (today's table) / arm B
+    (`complexity = n_params`) comparison, run against the pre-registered rule from item 6's own
+    §7, tied on every cell that could move it: 0 of 12 `criterion_selection.py` negative-control
+    cells differ on `recovered`/`recommended_correct`/`by_criterion_overfits`, and 0 of 9
+    `param_dense_truths.py` cells differ on `reported`/`on_front`/`recommended` — the param-dense
+    `reported` total (4/9) reproduces Phase 2's own basin-lottery baseline (1/3, 2/3, 1/3) exactly
+    on both arms. Neither clause of the rule fired, so the surcharge collapsed:
+    `Element.complexity` is now a property returning `float(self.n_params)` for every element,
+    replacing twelve per-class constants that could drift out of sync with `n_params` on their
+    own; `Circuit.complexity` keeps its own name so a future weighting has one place to be
+    reintroduced if a measurement ever justifies one. EV5 before/after (all three `REFERENCES`):
+    `n_evaluated`, `complete_up_to` and `recommended` byte-identical on all six rows; the Pareto
+    front's *membership* shifts on two of three references in the direction the mechanism
+    predicts (a surcharged element's complexity falling to match a plain R/C/L candidate's changes
+    which one dominates) — explicable, not a regression, and `recommended` never moved.
+
+23. `docs/EVOLVE_COMPUTE_SKIP_PLAN.md` — what the genetic fallback already skips (a persistent
+    best-wins canonical-form cache, propose-until-unique breeding dedup, two-tier screening, and
+    warm-start inheritance with a "close enough" skip — but no early-abandon in tier 1, unlike the
+    exhaustive path), and four proposed additions. **Written 2026-09-12; §3.1 (idea 2c
+    integration) built, measured and shipped 2026-09-13 -- the broad, steady-state scope; §3.2
+    built, measured and reverted 2026-09-12; §3.4's cheap proxy count also ran 2026-09-12; §3.3
+    still plan-only.** **§3.1 [measured, shipped, 2026-09-13]**: `evolve_plan` is now a true
+    steady-state (overlapping-generation) proposer rather than a discrete-generation loop --
+    parent selection at proposal time against a live-updated archive, not at a fixed generation
+    boundary, which is what `docs/SEARCH_SPEEDUP_PLAN.md`'s own idea 2c write-up said the real win
+    needed. A new `_SteadyState` class proposes one individual at a time (elite repeats first,
+    against the *true* `population`'s own quota rather than a dispatch window's width, then
+    tournament-bred children via `_propose_child`, factored out of `_next_generation`'s own body
+    so both share one implementation, verified behaviour-preserving before anything else changed);
+    `evolve_plan`'s protocol became a **sliding window** (`EvolveBatch.tasks:
+    list[_EvolveTask | None]`, a fixed-length window continuously refilled slot-by-slot as
+    outcomes return) rather than a whole-generation batch. Both gates passed decisively:
+    **`workers=1` byte-identity held exactly** (four real `discover(mode="evolve")` configurations,
+    compared field-for-field including the full candidate list, against the unmodified code in a
+    disposable `git worktree`), the 480-seed McNemar quality gate found no hit-rate drop on either
+    frozen arena (`land_rcl6.json` 245/480 vs 247/480, p = 0.9007; `land_series_rcl6.json` 253/480
+    vs 254/480, p = 1.0000), and the `workers=8`/300s throughput gate **roughly doubled**
+    `n_evaluated` on both truths (`par6` 1366 → 2835, `ser6` 1095 → 2310) against the post-T4
+    baseline. The CLI driver moved to `concurrent.futures.ProcessPoolExecutor` +
+    `wait(FIRST_COMPLETED)`; the browser gained an `evolve_chunk` constructor parameter (default
+    `REFIT_CHUNK`) so it dispatches its own worker-pool width instead of exactly one offspring at a
+    time regardless of how many Web Workers it has -- four JS/Python test drivers that unpacked
+    every window slot unconditionally needed the same one-line fix (skip a `None` slot, report
+    `None` back). Full suite green: `pytest` 1125 passed/19 skipped/0 failed (one test that spied
+    on `_next_generation` directly was updated to spy on `_breeding_pool` instead, since the
+    steady-state path no longer calls `_next_generation` at all), `mypy --strict`/`ruff` clean,
+    `npm run check`/`npm run smoke` clean including the browser's own genetic-fallback check at
+    its new default width. `_next_generation` itself is untouched and still real, shipped code for
+    every other caller. Idea 2c's underlying dispatch-mechanism speedup was already measured in
+    isolation before this: 33.6% from replacing a generation's synchronous `executor.map` barrier
+    with continuous dispatch (`docs/SEARCH_SPEEDUP_PLAN.md`), never inside the real loop until now.
+    **§3.2 [measured, 2026-09-12]**: `fit()` gained an `abandon_above` parameter
+    mirroring `screen()`'s own (an abandoned candidate keeps a real, finite-AICc `FitResult`, its
+    Jacobian from a cheap finite difference, rather than a degenerate one), wired into
+    `_evolve_one`'s search-stage call at `ABANDON_FACTOR * reference`. Correctness held at reduced
+    scale (3 seeds, `workers=1`: `recommended` and the full Pareto front byte-identical with the
+    check on or forced off) — but the speed clause failed: 99 real search-stage calls from a live
+    evolve run, replayed with and without the check, showed 26% triggering the abandon path for
+    only a **3.5% wall-clock reduction**, the same "the shortened stage isn't the dominant cost"
+    shape `docs/SEARCH_TIME_PLAN.md` §3.5 found for spectrum thinning that same week. **Reverted**
+    (`fit.py` and `discover.py` both, via `git checkout`) rather than left shipped-but-useless;
+    `tests/test_fit.py`'s 46 tests re-run clean after the revert. **The cheap count (§3.4)** found
+    that of 21 archived candidates from one `discover(mode="evolve")` run on a 10-element truth, 12
+    numeric equivalence classes formed, 7 of them multi-member, covering 76% of the archive —
+    extending `SEARCH_TIME_PLAN.md` §3.4's already-known frozen-table multiplicity finding to a
+    live evolve archive, on one run, without changing that finding's own disposition (still a
+    count, not a decision to build).
+
+24. `docs/ALGEBRAIC_EQUIVALENCE_PLAN.md` — preliminary experiments (not a build plan) for
+    detecting equivalent-circuit degeneracy algebraically or via a precomputed table, the two
+    heavier approaches beyond the numeric post-hoc clustering `SEARCH_TIME_PLAN.md` §3.4 already
+    measured. **Both spikes run 2026-09-12, the second with the user's explicit authorization to
+    install SymPy as a dev-only dependency; a full production build of either approach is not
+    attempted, and remains its own, separate decision.** The precomputed-
+    table spike found the opposite of what it expected: **size is not the binding constraint** —
+    the full `n<=8` default-pool table (1,205,566 topologies, measured by
+    `count_topologies`/`enumerate_topologies`, not projected) is ~43 MB raw JSON / ~5.7 MB
+    gzip-compressed, comfortably inside the 17–41 MB cold-start budget
+    `STARTUP_AND_EDITING_PLAN.md` §3 already fights to hold. **Build time is**: the only
+    dataset-independent way to populate such a table without a symbolic engine is to screen every
+    topology once and cluster by cost, and this project's own already-measured per-screen costs
+    put that at roughly 42–54 hours of continuous 8-worker compute for one pass — about two orders
+    of magnitude past this document's own "a few hours" bar, and a cost that recurs on every
+    canonicalization or pool change. This inverts the plan's original framing: a cheap dictionary
+    is not a free-standing alternative to the symbolic-engine spike, it is *downstream* of it (or
+    of an equally cheap algebraic shortcut), because only an algebraic method makes populating the
+    table's class assignments cheap in the first place. **The SymPy spike then ran and passed all
+    three of its own pre-registered clauses** (`benchmarks/speedup/idea_sympy_equivalence.py`):
+    zero false positives on 18 negative-control comparisons, both known equivalent-pair cases
+    (idea A's closed form, idea A2's order-2 Foster/Cauer pair) recognised — one to exact symbolic
+    zero, one to a 3.4e-20 relative residual, comfortably inside a 1e-6 tolerance the spike found
+    it genuinely needs (float-derived closed-form parameters essentially never cancel to a literal
+    `0`, a real correction to the plan's first-draft design, not a loosened bar) — and per-pair
+    timing (worst 0.11 s) well inside the "~1 s" ceiling. Confirmed at the scale tested (R/C/L
+    only, hand-supplied equivalent pairs); no general-purpose detector or production table was
+    built, and both remain the user's own decision to authorize.
 
 Update these when decisions change.
 

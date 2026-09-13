@@ -51,7 +51,6 @@ def block_frequency(params: dict[str, float], r_label: str, c_label: str) -> flo
 def main() -> None:
     truth = MW5
     blocks = re.findall(r"R(\d+),C(\d+)", truth.circuit)
-    n_blocks = len(blocks)
 
     within_one_decade = 0
     total = 0

@@ -43,7 +43,7 @@ from truths import MW4CPE, spectrum_for  # noqa: E402
 
 from autocircuit.core.circuit import Circuit  # noqa: E402
 from autocircuit.core.elements import BoundsContext  # noqa: E402
-from autocircuit.core.fit import SCREEN_LOCAL, _Problem  # noqa: E402
+from autocircuit.core.fit import _Problem  # noqa: E402
 
 sys.path.insert(0, str(_BENCH_DIR / "screening_round"))
 from param_opt import Counted, _polish  # noqa: E402
@@ -92,12 +92,16 @@ def _de_run(cost_fn, bounds, seed: int, counted: Counted) -> np.ndarray:
 
 def run_baseline(problem: _Problem, seed: int) -> tuple[float, int]:
     counted = Counted(problem)
-    x = _de_run(counted.batch, list(zip(problem.lower_x, problem.upper_x, strict=True)), seed, counted)
+    x = _de_run(
+        counted.batch, list(zip(problem.lower_x, problem.upper_x, strict=True)), seed, counted
+    )
     final_cost = _polish(problem, x)
     return final_cost, counted.n
 
 
-def run_reparam(problem: _Problem, ctx: BoundsContext, omega_ref: float, seed: int) -> tuple[float, int]:
+def run_reparam(
+    problem: _Problem, ctx: BoundsContext, omega_ref: float, seed: int
+) -> tuple[float, int]:
     names = list(problem.circuit.param_names)
     q_idx = [names.index(q) for q, _n in _cpe_param_names(problem.circuit)]
     n_idx = [names.index(n) for _q, n in _cpe_param_names(problem.circuit)]

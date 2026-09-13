@@ -26,8 +26,8 @@ sys.path.insert(0, str(_SPEEDUP_DIR))
 
 from truths import MW5, spectrum_for  # noqa: E402
 
+from autocircuit.core.circuit import Circuit, ElementNode, Parallel  # noqa: E402
 from autocircuit.core.enumerate import enumerate_topologies  # noqa: E402
-from autocircuit.core.circuit import Circuit, ElementNode, Parallel, Series  # noqa: E402
 from autocircuit.core.fit import screen  # noqa: E402
 
 N_ELEMENTS = 5

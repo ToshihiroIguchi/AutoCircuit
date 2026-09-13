@@ -8,8 +8,20 @@ ship either (gate T6 run, changed nothing on the nine truths); §4.3 implemented
 CPE kernel substitution, measured and not shipped for the buffer-reuse half); §3.4's class
 multiplicity is measured (4.4-5.9x, past the bound the section hoped would close it) but ships
 nothing, for reasons unaffected by the number. All seven steps of section 7's order of work are
-done.** Written 2026-09-02. Every number outside §3.1/§3.2/§4.1/§4.2/§4.3/§3.3/§3.4 and §6's
-T1/T2/T3/T6/T4/T5 entries is quoted from a document that measured it before this plan existed.
+done. §3.5 (spectrum thinning for the DE global stage) was added 2026-09-12 and its H1 question
+(does thinning help at all) is now measured at pilot scale (60 seeds): no hit-rate cost detected,
+25-52% wall-clock reduction, but Wilson CIs overlap too much at this sample size to license a
+ship decision -- the pilot's own recommendation is a full 480-seed follow-up, not yet run.**
+Written 2026-09-02. Every number outside §3.1/§3.2/§4.1/§4.2/§4.3/§3.3/§3.4 and §6's
+T1/T2/T3/T6/T4/T5 entries is quoted from a document that measured it before this plan existed,
+except §3.5, whose pilot-scale H1 result is new and whose H2 is still unmeasured. **§8, added
+2026-09-13, is the direct decomposition this plan's own §1 never had** — every share in §1 came
+from one arm of an A/B (`profile_eval.py`'s `cProfile`, run once), never checked against an
+unbiased measurement of the same quantity. §8 builds that check
+(`benchmarks/speedup/where_time_goes.py`) and finds §1's own numbers hold up: SciPy's DE loop is
+~30–42% of a screen depending on topology, confirmed by both an unbiased wall-clock method and
+`cProfile`, and prices four previously-only-named micro-inefficiencies (§3.3's own kernel
+substitution already shipped; these did not) without shipping any of them.
 
 ## 0. What this plan is and is not
 
@@ -311,6 +323,151 @@ holds a reference past its own use silently reads a later population's values.
   before screening), and the report still needs every member of a reported equivalence class
   refitted at tier 2 regardless, so this is recorded as a larger-than-hoped, still-unbuilt
   opportunity rather than a lever this plan ships.
+
+### 3.5 Spectrum thinning for the DE global stage -- H1 measured at pilot scale, H2 not run
+
+Not attempted in this document before now. Registered here as a hypothesis and a decision rule
+before any number existed to answer it, per this repository's own rule — H1 is now measured at
+pilot scale (below); H2 is not run. Nothing in `core/fit.py` changes here.
+
+**Where thinning would apply, and where it cannot.** `_global_stage` (`fit.py:796-840`) calls
+`scipy.optimize.differential_evolution(problem.cost_vectorized, ...)`; `cost_vectorized`
+(`fit.py:554-569`) is `O(N)` in frequency points on every one of the roughly `maxiter + 1 = 41`
+iterations a screen runs, each over `popsize` candidates at once. The local polish that follows
+(`scipy.optimize.least_squares(problem.residuals, ...)`, `fit.py:664-673`) already runs on the
+full spectrum, and this section proposes no change there -- thinning the DE stage does not thin
+what the reported chi2/statistics are computed from, only what the *global search* sees while
+finding a basin to polish from.
+
+**Correctness constraint, stated before any harness is built.** `w_re`/`w_im`
+(`weighting.py`'s `weight_vectors`) are per-frequency arrays multiplied elementwise against real
+and imaginary deviations in both `residuals` and `cost_vectorized`; any thinned index set must
+slice `omega`, `z`, `w_re` and `w_im` together. `FitContext` (`fit.py:415-445`) does not itself
+carry `omega`/`z` -- only `w_re`, `w_im` and a `BoundsContext` -- so a thinned global stage needs
+either a thinned `Spectrum` with its own `FitContext` built from it, or explicit index-consistent
+slicing threaded through `_Problem` at construction. Either design must guarantee the *same*
+indices are used for `omega`, `z`, `w_re` and `w_im` inside one DE call; a mismatch here would
+silently score candidates against the wrong weight for each residual, which no downstream gate in
+this document would catch, since it is a correctness bug internal to one function rather than a
+change in the search's outcome shape.
+
+**The failure mode to test for, not assume away.** `docs/SEARCH_SPEEDUP_PLAN.md` ideas C and D
+already measured that *shrinking one dimension's search box* -- a CPE `Q -> Z0` reparameterisation,
+a decorrelated `(tau, R)` block reparameterisation -- does not move hit rate on 10-12-element
+topologies, because the bottleneck at that scale is the *joint* combinatorics of getting every
+free dimension into its own narrow basin at once inside a fixed small DE budget, not any one
+input's cost. Thinning attacks a different quantity (wall-clock per evaluation, not the number of
+dimensions or their box widths), so it is not automatically subject to the same failure -- but the
+hypothesis below must be tested directly rather than assumed to transfer, precisely because C and
+D looked like they should help for an analogous "shrink one cost" reason and did not.
+
+**H1 -- does thinning help at all.** Uniform index-decimation of the frequency array by a factor
+of 2-4x should cut `cost_vectorized`'s per-call cost roughly linearly (it is a vectorised
+elementwise operation over `N` points). Measure, on a frozen-landscape arena at an unsaturated
+budget (`SEARCH_TIME_PLAN.md` section 0's rule: "a saturated arena ranks nothing" -- reuse
+`benchmarks/screening_round/land_rcl6.json`/`land_series_rcl6.json` and the same 480-seed exact
+McNemar convention `docs/EVOLVE_SEARCH_PLAN.md` section 3.5.2 and this document's section 4.3 (T4)
+already use), whether hit rate against the untouched screen survives thinning at each factor.
+
+**H2 -- does the thinning *method* matter, the question the user actually asked.** Compare three
+methods: (a) uniform index-decimation; (b) log-frequency-uniform resampling (resample onto a new
+grid evenly spaced in `log10(f)`, then nearest-index snap back to real data points); (c)
+adaptive/importance-based thinning, keeping a higher density of points where `|dZ/df|` is largest
+(resonances, relaxations) and thinning more aggressively across flat stretches. **A confound to
+flag before running anything**: every synthetic reference in this repository is generated by
+`log_frequencies` (`simulate.py:14-20`, `np.logspace` over the sweep), so on synthetic data
+*uniform index-decimation is already log-frequency-uniform* -- methods (a) and (b) collapse to the
+same condition there. The method comparison is only informative on a spectrum with an irregular,
+non-log-uniform frequency axis, so H2 must run on a real dataset from
+`benchmarks/measured/datasets.py`'s `DATASETS` list (an instrument export, not a `log_frequencies`
+sweep) alongside the synthetic arenas used for H1.
+
+**Pre-registered pass bar, before any run.** Ships only if:
+
+1. Wall-clock or DE-fit-count falls by a real margin (recommend the same >=15% bar
+   section 3.1 originally set for itself) at preserved hit rate (no significant McNemar drop) on
+   an unsaturated frozen-landscape arena -- both halves of the claim, not the speed half alone,
+   per this document's own rule that "a stage winning and the total losing is the normal case."
+2. If a method more complex than plain uniform decimation (log-uniform resampling, adaptive
+   importance-weighting) is proposed for shipping, it must clear its own significance bar *against
+   uniform decimation*, not merely against no thinning at all -- mirroring
+   `docs/EVOLVE_SEARCH_PLAN.md` section 3.5.2's finding that `mut_uniform` tied the shipped,
+   more complex mutation-weight tuple on two of three arenas: this project ships the simplest
+   mechanism that clears its own bar, not the most sophisticated one that merely beats doing
+   nothing.
+
+**Scope for this pass.** Build a standalone benchmark script under `benchmarks/` if the harness is
+cheap to assemble (reusing `benchmarks/speedup/harness.py`'s Wilson-CI/McNemar instrumentation);
+do not touch `core/fit.py`'s production `_global_stage`, `screen()`, or `fit()` in this pass.
+
+**[measured, pilot scale, 2026-09-12] H1 was run; H2 (method comparison) was not.**
+`benchmarks/speedup/idea_thinning.py` (new) fits a 10-element, 5-block Maxwell-Wagner-style
+topology (`p(R1,C1)-p(R2,C2)-p(R3,C3)-p(R4,C4)-p(R5,C5)`, the same "10-12 free parameters"
+regime `docs/SEARCH_SPEEDUP_PLAN.md` ideas C/D used) at the production tier-1 screen budget —
+`SCREEN_POPSIZE=8, SCREEN_MAXITER=40, SCREEN_RESTARTS=1`, and, caught only after an initial run
+ran far slower than the per-screen cost this document's own §1 quotes, `local=SCREEN_LOCAL`
+explicitly, since `fit()`'s own default local-polish budget is `PUBLISH_LOCAL`
+(`max_nfev=20000`), not the cheap tier-1 one, regardless of the DE popsize/maxiter passed — using
+`fit()` rather than `screen()` (which returns only a cost, no parameter vector) so the fitted
+parameters can be re-evaluated against the *full*, untouched spectrum via `relative_error`
+(weighting-independent), making costs computed on different-sized data comparable on one scale.
+60 seeds (a stated, explicit reduction from the 480-seed convention used elsewhere in this
+document — a pilot, not a final rigor level) at three conditions: full spectrum, uniform 2x
+decimation, uniform 4x decimation.
+
+| condition | median relative error | mean wall-clock per fit | hits (error < 5%) |
+|---|---:|---:|---:|
+| full (1x, 81 points) | 1.320% | 1.029 s | 41/60 |
+| half (2x, 41 points) | 1.357% | 0.771 s (-25%) | 46/60 |
+| quarter (4x, 21 points) | 1.403% | 0.494 s (-52%) | 44/60 |
+
+Wilson 95% CIs on hit rate overlap heavily and are wide at this sample size (full 0.56-0.79, half
+0.65-0.86, quarter 0.61-0.83) — **per this pilot's own pre-registered reading, this is not
+evidence that thinning helps or hurts hit rate**, only that a real difference, if one exists, is
+not visible at 60 seeds. What is visible, and repeatable in direction across both thinning
+factors, is the wall-clock reduction (25% at 2x, 52% at 4x) with **no hint of a hit-rate cost** —
+neither thinned condition trended worse than the full-spectrum control, which is the direction
+`docs/SEARCH_SPEEDUP_PLAN.md` ideas C/D's own "joint combinatorics bottleneck, not any one
+input's cost" finding would have predicted thinning *could* fail in (a cheaper-but-less-informative
+per-evaluation cost could, in principle, cost more basin-finding attempts than it saves — that
+failure mode is not what this pilot saw, but 60 seeds cannot rule it out either).
+
+**Per this document's own pre-registered rule, this pilot does not license a ship/reject verdict
+— it licenses a specific recommendation: run the full 480-seed version of H1 next**, on this same
+harness, before touching H2 (the uniform-vs-log-uniform-vs-adaptive method comparison, which still
+needs a real, non-`log_frequencies`-generated dataset from `benchmarks/measured/` to be
+informative at all, per this section's own note above) — because H1's own answer is not yet
+resolved at a confidence level worth building H2 on top of. Not run this session:
+`core/fit.py`'s production `_global_stage`/`screen()`/`fit()` are unchanged.
+
+**[measured, 480 seeds, 2026-09-12] H1 is rejected.** `idea_thinning.py` was rebuilt into a
+resumable, argparse-driven benchmark using `benchmarks/speedup/harness.py`'s `wilson`/
+`mcnemar_exact` (the pilot had computed neither), keeping `local=SCREEN_LOCAL` on the one fit
+call site. The first full-scale run (concurrent with other experiments in the same session) found
+hit rate unchanged (McNemar `p=0.4769` at 2x, `p=0.6445` at 4x — confirming the pilot's own
+"no hint of a hit-rate cost" at real statistical power) but wall-clock **flat across all three
+conditions** (0.735 s / 0.724 s / 0.734 s mean per fit) — nothing like the pilot's 25-52%
+reduction. Re-run alone, with no concurrent load, to rule out resource contention as the cause:
+mean time roughly halved for every condition (0.366 s / 0.370 s / 0.377 s, confirming the first
+run *was* contention-affected on its absolute numbers), but the **relative pattern held exactly
+— no speedup, and if anything the thinned conditions are marginally slower.** Hit counts were
+bit-identical between the contended and clean runs (371/381/378 of 480, as they must be —
+`fit()` is deterministic given a seed, so hit rate cannot depend on machine load). **This clears
+neither clause of section 3.5's own pass bar**: clause 1 needed a real, non-contention-artifact
+wall-clock win at preserved hit rate, and none exists. The most likely mechanism, consistent with
+`docs/SEARCH_SPEEDUP_PLAN.md` ideas C/D's own finding for this document: at
+`SCREEN_POPSIZE=8, SCREEN_MAXITER=40`, per-iteration Python/scipy dispatch overhead inside
+`differential_evolution` and `least_squares` dominates the wall-clock at this problem size, so
+shrinking the array `cost_vectorized`/`residuals` operate over (81 → 21 points) does not move the
+total meaningfully — the same "joint combinatorics, not any one input's cost" shape those ideas
+already found for a different lever. **H2 was not evaluated on its own merits**: it is
+conditioned on H1 shipping (a candidate to compare against uniform decimation, which this
+section rejects), so the id15/id34 results the H2 harness produced (`adaptive_2x` beating
+`uniform_2x` significantly, `p=0.0005`, on the one informative real dataset; `loguniform_2x`
+losing to it significantly, `p<0.0001`; `id34` saturated at 0/480 hits under every condition, an
+uninformative arena for a shape-comparison question) are recorded as raw numbers only, not as an
+H2 verdict — there is no baseline left to be a fancier alternative *to*. `core/fit.py`'s
+production `_global_stage`/`screen()`/`fit()` remain unchanged; nothing from this section ships.
 
 ## 4. Levers on F3 and on the fallback's throughput
 
@@ -651,3 +808,172 @@ number is reported as a pair, rested and loaded, per `WEB_UI_PLAN.md`'s W3 prece
    equivalence-class member regardless) are unaffected by the count.
 
 All seven steps of this order of work are done.
+
+## 8. A direct decomposition of one `screen()` call (2026-09-13)
+
+**Nothing in this section ships.** It answers a question this plan's own §1 never actually
+asked — what a screen's time breaks down into, measured directly and cross-checked by two
+independent methods, rather than read off one arm of an A/B built for a different comparison —
+and prices four previously-unquantified micro-inefficiencies. `benchmarks/speedup/
+where_time_goes.py` is the instrument; `--all` runs everything, `--profile`/`--micro` alone
+skip the unrelated stage (see §8.4 for why that split exists).
+
+### 8.1 The unbiased number: null-cost vs real-cost, per DE iteration
+
+§1's 27.6–36.1% for `differential_evolution` bookkeeping came from one `cProfile` run, and
+`cProfile` charges per Python call — biased toward overstating exactly the Python-heavy code
+that is under suspicion. This checks it a different way: run the production DE call
+(`_global_stage`'s own kwargs, copied verbatim and parity-checked against the real function)
+twice, once with the real `cost_vectorized` and once with a cost function that does no model
+evaluation at all, and compare wall-clock time per iteration.
+
+The first design (`_null_cost` returning a constant) was rejected before it was even run:
+SciPy's convergence test is `std(energies) <= atol + tol*|mean(energies)|`, so an all-zero
+population converges at generation 1. The fix tried next — return the population's own first
+free coordinate, which has real spread — was **measured to still converge early**, because
+that coordinate *is* the quantity DE is minimizing, so DE dutifully collapses the population's
+spread in exactly the dimension the convergence test watches (nit=22 vs nit=39 on the smallest
+topology). Rather than chase a landscape that resists convergence, the comparison normalizes by
+each arm's own iteration count instead of requiring equal `nit` — DE's per-generation
+bookkeeping (population update, mutation, crossover, bound clipping) is population-shape-
+dependent but cost-function-independent, so time-per-iteration is the right unit regardless of
+how many iterations either arm ran.
+
+Six topologies, 3–6 free parameters (element count and free-parameter count deliberately
+diverge — a CPE costs one element but two parameters, `PARAM_BUDGET_PLAN.md`'s own point), half
+CPE-bearing:
+
+| topology | n_free | null/it (ms) | real/it (ms) | share |
+|---|---:|---:|---:|---:|
+| 3-element R/C | 3 | 0.210 | 0.315 | 66.8% |
+| 4-element R/C/L | 4 | 0.204 | 0.327 | 62.3% |
+| 5-element R/C | 5 | 0.339 | 0.584 | 58.1% |
+| 3-element R/CPE | 4 | 0.216 | 0.387 | 55.7% |
+| 4-element R/CPE/L | 5 | 0.416 | 0.863 | 48.2% |
+| 5-element R/C/CPE | 6 | 1.227 | 2.343 | 52.3% |
+
+**This is the number of record.** DE's own bookkeeping is 48–67% of the global stage's
+per-iteration cost — a real, large, and *already-paid* cost that has nothing to do with
+AutoCircuit's own arithmetic, confirming §1's cProfile-derived estimate rather than
+overturning it (§8.2 finds the same range by the biased method, for the same reason: the two
+agree here, so cProfile's bias is not distorting this particular number by much on these
+topologies).
+
+**A side finding, not the question asked, worth recording anyway**: both `null/it` and
+`real/it` jump sharply between the two highest-`n_free` rows (0.416 to 1.227 ms null, 0.863 to
+2.343 ms real) — far more than the population-size ratio (`popsize * n_free`, 40 to 48, a 20%
+step) predicts. Because this shows up in the *null* arm too, which never touches AutoCircuit's
+arithmetic, it is DE's own per-generation bookkeeping scaling worse than linearly with
+dimension, not a property of anything this project could fix. A future budget decision that
+scales `n_free` (a wider default pool, `max_params`) should expect superlinear DE overhead
+alongside it, not just a linear one.
+
+### 8.2 The biased decomposition: `cProfile` on a full `screen()` call
+
+Self-time (`tottime`, which does not double-count nested calls) bucketed by source file, same
+six topologies, `cProfile` over 5 full `screen()` calls per topology after one untimed warm-up
+call (§8.4 explains why the warm-up is not optional):
+
+| topology | DE bookkeeping | local polish (excl. Jacobian) | Jacobian (`_numdiff`) | impedance kernel | residual assembly | other |
+|---|---:|---:|---:|---:|---:|---:|
+| 3-element R/C | 37.8% | 1.6% | 1.4% | 16.2% | 8.3% | 34.8% |
+| 4-element R/C/L | 35.5% | 1.8% | 1.5% | 18.3% | 8.3% | 34.5% |
+| 5-element R/C | 39.3% | 1.2% | 1.0% | 25.7% | 7.1% | 25.7% |
+| 3-element R/CPE | 33.4% | 1.6% | 1.3% | 24.3% | 7.6% | 32.0% |
+| 4-element R/CPE/L | 37.1% | 1.2% | 1.1% | 29.4% | 6.9% | 24.3% |
+| 5-element R/C/CPE | 29.7% | 2.2% | 2.1% | 34.4% | 6.5% | 25.1% |
+
+DE bookkeeping (30–39%) agrees with §8.1's unbiased 48–67% share only in rough order of
+magnitude, not exactly — expected, since §8.1 measures the global stage alone and this measures
+a whole `screen()` call including local polish and setup, and `cProfile`'s per-call bias runs
+the other way here (undercounting, not overcounting, DE's C-level inner loop relative to
+Python-level bookkeeping it does still charge for). The impedance kernel's share rises with
+`n_free` and much more so with CPE (16% to 34% from smallest to largest, CPE-bearing
+topologies consistently higher at the same element count than non-CPE ones) — consistent with
+`SEARCH_ALGORITHM_SCREENING.md`'s already-measured CPE cost gap, now seen inside a single
+screen's own internal split rather than only in total wall-clock. "Other" (numpy internals,
+dispatch overhead, `_Problem` setup) is 24–35%, in the same range §1's "per-topology setup"
+bucket already reported (25.4–33.1%) — this project's own `FitContext` hoist (§3.1) already
+addresses the cross-topology-shared part of that; what remains is genuinely per-call overhead.
+
+**A methodological pitfall found and fixed before trusting this table, not a caveat added
+after**: the first topology profiled with no warm-up call read as 89% "other" and single digits
+everywhere else — a one-time cost (first-call scipy submodule imports, allocator/thread-pool
+warm-up) dominating a profile this short (5 calls). One untimed `screen()` call before
+`profiler.enable()`, per topology, removed it entirely; every row above reflects steady-state
+cost, not cold start.
+
+### 8.3 The local polish's own Jacobian share
+
+`least_squares(method="trf")` is given no analytic Jacobian anywhere in this codebase — both
+tier-1 (`SCREEN_LOCAL`) and tier-2 (`PUBLISH_LOCAL`) budgets rely on `scipy.optimize._numdiff`'s
+finite-difference approximation, costing `n_free` extra full `residuals` evaluations per
+Jacobian. Isolated from §8.2's own profile:
+
+| topology | Jacobian's share of (polish + Jacobian) |
+|---|---:|
+| 3-element R/C | 45.7% |
+| 4-element R/C/L | 44.9% |
+| 5-element R/C | 44.3% |
+| 3-element R/CPE | 44.4% |
+| 4-element R/CPE/L | 47.0% |
+| 5-element R/C/CPE | 49.3% |
+
+The Jacobian really is close to half the local-polish stage's own cost, as the "no analytic
+Jacobian" observation would predict. **It still does not matter to the whole screen**, because
+the polish stage itself is only 2.8–4.2% of `screen()`'s total self-time (polish + Jacobian
+columns of §8.2's table, summed) — `screen()`'s own `abandon_above` early-abandon skips polish
+for most candidates, and `SCREEN_LOCAL.max_nfev = 2000` caps what remains. An analytic Jacobian
+would roughly halve a 3–4% slice, i.e. save on the order of 1.5–2% of a screen's total time —
+real, but not where this round's evidence says to look.
+
+### 8.4 Four named micro-inefficiencies, priced individually — and a second pitfall
+
+Microbenchmarks only; nothing wired into `core/`. Best-of-7 mean over batched calls (a single-
+call timer was tried first and rejected: several of these are sub-microsecond, at or under
+`time.perf_counter`'s effective resolution once Python's own call overhead is subtracted, and a
+single-call read hit a `ZeroDivisionError` computing the percentage more than once):
+
+| item | current | alternative | effect |
+|---|---:|---:|---|
+| `Resistor.impedance`'s `np.ones_like` allocation | 13.9 us | `np.broadcast_to` (10.0 us) | +28.2% if switched |
+| `elements.get()` per leaf per evaluation vs a cached reference | 48 ns | 28 ns | +42.6% if switched |
+| `np.errstate` entered twice (`Circuit.impedance`, then `cost_vectorized`) vs once | 726 ns | 1532 ns (current) | +111.1% overhead from the nesting |
+| `log(1j*omega)` recomputed every evaluation vs hoisted | 9325 ns | 77 ns | +99.2% if hoisted |
+
+**A second methodological pitfall, of the same family as §8.2's cold-start one**: the smallest
+of these (the `Resistor` pair, ~10–14 us either way) was measured to *flip direction* depending
+on what ran earlier in the same process. Isolated in a fresh process, five independent runs
+agreed to within a few percent (+25% to +31%, `broadcast_to` faster). Run immediately after
+this same script's own §8.1/§8.2 workload in one `--all` invocation, the same comparison read
+anywhere from a 218% loss to a 6% win — almost certainly leftover CPU frequency scaling or
+cache state from the preceding DE-heavy work, not a property of the code being compared. The
+shipped script now skips §8.1 by default when only `--micro` is requested (rather than running
+it and discarding the result), and `--all` prints an explicit warning before this table pointing
+at a standalone `--micro` run instead of trusting numbers measured back-to-back with §8.1/§8.2.
+
+**None of these four are worth building**, and the reason is arithmetic, not the percentages
+above: every one of them fires on the order of once per leaf or once per `cost_vectorized` call
+(tens of times per screen), each saving single-digit microseconds to sub-microsecond amounts.
+Summed across a whole screen (~41 `cost_vectorized` calls, a handful of leaves each), the total
+addressable time from all four combined is on the order of hundreds of microseconds — against
+an 0.87–1.77 s screen (`SEARCH_ALGORITHM_SCREENING.md` §4.6), that is **under 0.05% of the
+total**, regardless of how large the per-call percentage looks. A large relative saving on a
+tiny absolute cost is still a tiny absolute saving; this is recorded so the four are not
+independently rediscovered and mistaken for real levers.
+
+### 8.5 What this round actually says to build, if anything
+
+**Not four small kernel tweaks (§8.4) — they are individually and collectively too small.**
+**Not an analytic Jacobian (§8.3) — real, but bounded at roughly 1.5–2% of a screen.** The one
+number this round found that is both large and real is §8.1's: SciPy's own DE bookkeeping is
+48–67% of the global stage regardless of topology or CPE content, confirmed by an unbiased
+method and roughly corroborated by `cProfile`. That is not a lever this round built or
+recommends building — replacing `scipy.optimize.differential_evolution` with a
+purpose-written vectorized DE loop is a substantial undertaking with its own correctness risk
+(this project's own `PARAM_OPTIMIZER_PLAN.md` already measured a *different* optimizer
+replacement, L-SHADE, tying or losing on both benchmark arenas and regressing a known-hard
+`LARGE_REFERENCES` entry from 5/12 seeds reaching the noise floor to 0/12 before being
+withdrawn) — but it is the only place this round found real, uncommitted headroom, and it is
+recorded here as a priced, ranked candidate for a future measured round rather than left
+unquantified the way it was before this section existed.

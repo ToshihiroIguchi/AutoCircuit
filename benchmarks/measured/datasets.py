@@ -41,14 +41,16 @@ class MeasuredDataset:
     reader_hints: dict[str, Any] = field(default_factory=dict)
     """Extra keyword hints forwarded to ``autocircuit.io.read``.
 
-    Used only where this project's own alias-based column detection is ambiguous for a header
-    spelling it has not seen before (e.g. ``Real_Ohm``/``Imag_Ohm``, or a ``-Z''`` column whose
-    sign this project's existing convention -- deliberately unchanged here, see
-    ``io/generic_csv.py``'s own ``_IMAG_NEGATE_RAW`` comment -- does not resolve the same way a
-    physical read of the data does). Forcing the positional branch with ``has_header=False``
-    plus explicit ``col_f``/``col_re``/``col_im`` is the mechanism: the header row is then just
-    a row that fails to parse as floats and is silently skipped, not a row whose alias table
-    has to grow to cover it.
+    Used only where this project's own alias-based column detection cannot resolve a header on
+    its own -- today that is a single case, a ``-Z''`` column whose sign this project's existing
+    convention -- deliberately unchanged here, see ``io/generic_csv.py``'s own
+    ``_IMAG_NEGATE_RAW`` comment -- does not resolve the same way a physical read of the data
+    does, so ``negate_imag=True`` is passed explicitly. This used to also cover a header
+    spelling generic_csv's alias tables had not seen before (``Real_Ohm``/``Imag_Ohm``, forced
+    through the positional ``has_header=False`` branch); ``_classify_header`` now recognizes a
+    unit-suffixed header as a fallback, so that workaround is gone -- see
+    ``tests/test_io/test_sniff_and_errors.py::test_zenodo_header_reads_without_positional_hints``
+    for the equality check that licensed dropping it.
     """
 
     @property
@@ -122,7 +124,6 @@ DATASETS: list[MeasuredDataset] = [
         license="CC-BY-4.0",
         artefact="a real battery Nyquist shape: an inductive loop at high frequency (positive "
         "Im Z) crossing into a capacitive tail at low frequency, at milliohm scale",
-        reader_hints={"has_header": False, "col_f": 0, "col_re": 1, "col_im": 2},
     ),
     MeasuredDataset(
         id="zenodo-21700-id34",
@@ -136,7 +137,6 @@ DATASETS: list[MeasuredDataset] = [
         license="CC-BY-4.0",
         artefact="cell-to-cell variation on a nominally identical part -- the same reader, "
         "pool and recommendation rule applied to two real cells rather than one",
-        reader_hints={"has_header": False, "col_f": 0, "col_re": 1, "col_im": 2},
     ),
     MeasuredDataset(
         id="zenodo-kendall-electrode",
