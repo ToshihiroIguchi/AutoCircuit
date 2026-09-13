@@ -29,6 +29,7 @@ import { ExcludedPanel } from "../components/ExcludedPanel";
 import { ExportPanel, type ExportItem } from "../components/ExportPanel";
 import { ObjectivePanel } from "../components/ObjectivePanel";
 import { ParetoTable } from "../components/ParetoTable";
+import { PoolNote } from "../components/PoolNote";
 import { SkeletonFindings } from "../components/SkeletonFindings";
 import { RuntimeNotice } from "../components/RuntimeNotice";
 
@@ -166,6 +167,7 @@ export function ReportScreen({
           {/* The CLI's own sentence, verbatim: what a constrained or partial search may claim is
               exactly the part a paraphrase would get subtly wrong. */}
           <p className="discover-report__completeness">{report.completeness}</p>
+          <PoolNote pool={report.pool} poolChoice={report.pool_choice} />
 
           {report.refit_progress !== null && (
             <p className="discover-report__warning" role="alert">
