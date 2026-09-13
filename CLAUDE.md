@@ -959,7 +959,9 @@ static-site Web UI running the same core via WASM (Pyodide).
 22. `docs/PARAM_BUDGET_PLAN.md` — whether the exhaustive search should be budgeted by free
     parameters rather than raw element count, since a `C` costs one and a `CPE` costs two.
     **Phases 0-7 done (all seven items of that plan's §9); phase 8 (moving the default) is
-    blocked on E.2's stop rule below, phase 9 (browser) not attempted.**
+    blocked on R3's absolute level, not on E.2's stop rule below — that trip was re-measured at a
+    proper seed axis and retracted, see the correction after item 5 below — phase 9 (browser) not
+    attempted.**
     `discover(max_params=...)` and `--max-params` ship as an opt-in lever, default `None`, and no
     default has moved. The originally suspected mechanism does not exist: tier 1 and
     tier 2 already feed `n_params` to the chosen criterion, and `recommended`'s first key,
@@ -1037,7 +1039,14 @@ static-site Web UI running the same core via WASM (Pyodide).
     screening-dependent region than the element-cap-5 baseline explores. This changes nothing
     about the shipped, off-by-default status, but it means `docs/PARAM_BUDGET_PLAN.md`'s item 8
     (moving the default) is now explicitly blocked on addressing this finding rather than merely
-    pending E.2's measurement. **Item 5 (X4 at P=7) [measured, 2026-09-10]: the parameter budget
+    pending E.2's measurement. **Retracted, 2026-09-14 (`docs/SMALL_SAMPLE_REVIEW.md` A-2):** the
+    element-axis baseline this trip rests on turned out non-reproducible — two byte-identical
+    invocations of it disagree on `impedancepy-zplot`, the one dataset the "2/7" has ever been
+    stable on — and the full 7-dataset × 5-seed grid on both axes found 8/35 (22.9%) elements vs
+    **14/35 (40.0%) params≤6**, the opposite direction from the original trip, 16 discordant
+    pairs giving real power, exact McNemar p = 0.2101 — not significant. The stop-rule trip is
+    withdrawn; item 8 stays blocked only on R3's absolute level (23–40%, either axis, against an
+    80% bar), a different and still-open reason. **Item 5 (X4 at P=7) [measured, 2026-09-10]: the parameter budget
     does not make `TOPOLOGY_6PLUS_PLAN.md`'s growth stage unnecessary.** `--max-params 7` on an
     `R,C,L`-only pool enumerates exhaustively to exactly seven elements, the same reach `grow`
     gets from growth; scored against the pre-registered rule ("supersedes growth iff it beats
@@ -1048,11 +1057,15 @@ static-site Web UI running the same core via WASM (Pyodide).
     or even winning elsewhere (`par6`/`mix6`/`par7`/`mix7` tie 3/3=3/3; `ser7`'s `reported` goes
     0/3 → 3/3 but its `recommended` stays 0/3 either way, so nothing the report says changes) —
     and it costs 2.3-2.8x more than growth on the six/seven-element cells for a recovery rate
-    that is, at best, tied. Both single-truth swings are most likely the same tier-1
-    screening-lottery noise `TOPOLOGY_6PLUS_PLAN.md` §2(a) and `SEARCH_TIME_PLAN.md` §4.3 already
-    measured for this exact shape at a single screening seed, not chased further because the
-    decision rule does not need the mechanism resolved to give its verdict. `GROWTH_DEFAULT`
-    stays `0` and nothing about `max_params`'s shipped, off-by-default status changes.
+    that is, at best, tied. **Corrected, 2026-09-14 (`docs/SMALL_SAMPLE_REVIEW.md` A-1): the
+    original "most likely the tier-1 screening lottery" guess for both single-truth swings was
+    wrong.** Re-measured at n=33 seeds, both sharpened into decisive, opposite-signed effects
+    rather than washing out: `grow` reaches `ser6`'s class 17/33 against `params7`'s 0/33
+    (p < 0.0001); `params7` reaches `ser7`'s class 12/33 against `grow`'s 0/33 (p = 0.0005). The
+    mechanism was not chased further — out of that re-measurement's own scope — but the effect is
+    real. `recommended` still never moved (0/33 either truth under `params7`), so the ship
+    verdict is unchanged: `GROWTH_DEFAULT` stays `0` and nothing about `max_params`'s shipped,
+    off-by-default status changes.
     **Item 6 (re-key the tier-2 quota) [shipped, all gates measured 2026-09-11].** `_quota_by_size`
     bucketed the tier-2 refit shortlist on element count while `_screening_score` already charged
     for parameters and the Pareto front dominates on `Circuit.complexity` — 5 buckets guarding a
@@ -1197,6 +1210,37 @@ static-site Web UI running the same core via WASM (Pyodide).
     monkeypatch harness, the pipeline/known-trap/recovery scripts, and a new arm in
     `param_opt.py::ARMS`) stay in the tree per this project's own standing precedent for
     measurement code, whatever the ship verdict.
+
+26. `docs/SMALL_SAMPLE_REVIEW.md` — a pass over this repository's own decision record looking for
+    one specific failure shape: a change rejected, or a default left unmoved, on a negative
+    reading from very few seeds or very few real datasets while every other reading was healthy.
+    **Two of three candidates re-measured; the third deliberately not, and why is recorded rather
+    than left pending.** **A-1** (`docs/PARAM_BUDGET_PLAN.md` item 5's `ser6`/`ser7` swing,
+    attributed to "the tier-1 screening lottery" on n=3 seeds): **[measured] the guess was
+    wrong.** At n=33 both swings sharpened into decisive, opposite-signed effects rather than
+    washing out — `grow` 17/33 vs `params7` 0/33 on `ser6` (p<0.0001), `params7` 12/33 vs `grow`
+    0/33 on `ser7` (p=0.0005) — a real, size/shape-dependent effect, not noise; `recommended`
+    still never moved, so nothing about `max_params`'s off-by-default status changes. **A-2**
+    (`docs/PARAM_BUDGET_PLAN.md` E.2's real-data split-half stability, a 2/7→0/7 swing under
+    `--max-params 6`): **[measured] withdrawn, and the mechanism is sharper than "small sample"**
+    — the command itself is not reproducible at the `--time-limit` it was measured under (two
+    byte-identical invocations disagree on the one dataset the "2/7" was ever stable on), and the
+    full 7×5 seed grid found 8/35 (23%) elements vs 14/35 (40%) params≤6, the *opposite*
+    direction, 16 discordant pairs, p=0.21 — not significant. Item 8 (moving the default) stays
+    blocked, now only on R3's absolute level failing its 80% bar, a different and still-open
+    reason. **A-3** (`docs/IMPACT_PLAN.md` §2.4's `weighting="auto"` N2, a 1-seed,
+    2-of-3-reference regression): **deliberately not re-measured** — the wider 37-cell grid would
+    only ask whether that regression is mechanistic, and cannot remove the actual block, since
+    §4.3's gate R2 already found `weighting="auto"`'s `chi2_reduced` 1000×-30000× outside its own
+    assumed band on six of seven real spectra, independent of N2's sample size. Two near-misses
+    already caught and resolved inside their own rounds (`docs/DE_KERNEL_PLAN.md` clause 3's
+    12-seed illusion; `docs/EVOLVE_SEARCH_PLAN.md` §§3.4.4/3.5's 120-seed "significant" arms
+    demoted at 480) are recorded as not needing re-measurement, alongside
+    `docs/PARAM_OPTIMIZER_PLAN.md`'s L-SHADE withdrawal, which is convergent evidence (a
+    regression plus independent test failures) rather than a lucky draw and so is not a candidate
+    either. New shared instrument: `benchmarks/paired_stats.py::mcnemar_exact`, the same exact
+    two-sided binomial `benchmarks/screening_round/arms.py::_sign_test` already used, factored out
+    for reuse rather than re-derived.
 
 Update these when decisions change.
 

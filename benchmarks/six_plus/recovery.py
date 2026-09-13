@@ -52,7 +52,9 @@ import numpy as np
 
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
+sys.path.insert(0, str(_HERE.parent))
 
+from paired_stats import mcnemar_exact  # noqa: E402
 from truths import TRUTHS, Truth, spectrum_for  # noqa: E402
 
 from autocircuit.core.circuit import Circuit, CircuitError, count_elements  # noqa: E402
@@ -262,6 +264,53 @@ def summarise(rows: Sequence[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+#: docs/PARAM_BUDGET_PLAN.md item 5's own recorded reading for the `ser6`/`ser7` swing: "most
+#: likely the tier-1 screening lottery... not chased further, because the rule does not need the
+#: mechanism resolved". This is that mechanism check, run separately from the ship verdict (which
+#: does not depend on it -- see docs/SMALL_SAMPLE_REVIEW.md).
+PAIRED_FIELD = "reported"
+
+
+def paired_summary(
+    rows: Sequence[dict[str, Any]], arm_a: str, arm_b: str, truth_ids: Sequence[str]
+) -> str:
+    """Exact McNemar on `arm_a` vs `arm_b`, paired by (truth, seed), one row per truth.
+
+    A pair counts only where both arms have a row for that (truth, seed) -- an incomplete run
+    contributes nothing rather than a silent False. Reports the discordant count beside the
+    p-value, per this repository's own rule that a test run on too few discordant pairs must say
+    so rather than be read as "no difference" (`docs/DE_KERNEL_PLAN.md` clause 3).
+    """
+    lines = [f"## Paired: `{arm_a}` vs `{arm_b}`, `{PAIRED_FIELD}` (exact McNemar)", ""]
+    lines.append(
+        "| truth | both | only " + arm_a + " | only " + arm_b + " | neither | discordant | p |"
+    )
+    lines.append("|---|---:|---:|---:|---:|---:|---:|")
+    for truth_id in truth_ids:
+        a_by_seed = {
+            r["seed"]: r[PAIRED_FIELD]
+            for r in rows
+            if r["truth"] == truth_id and r["arm"] == arm_a
+        }
+        b_by_seed = {
+            r["seed"]: r[PAIRED_FIELD]
+            for r in rows
+            if r["truth"] == truth_id and r["arm"] == arm_b
+        }
+        seeds = sorted(set(a_by_seed) & set(b_by_seed))
+        both = sum(1 for s in seeds if a_by_seed[s] and b_by_seed[s])
+        only_a = sum(1 for s in seeds if a_by_seed[s] and not b_by_seed[s])
+        only_b = sum(1 for s in seeds if not a_by_seed[s] and b_by_seed[s])
+        neither = sum(1 for s in seeds if not a_by_seed[s] and not b_by_seed[s])
+        discordant = only_a + only_b
+        p = mcnemar_exact(only_a, only_b)
+        lines.append(
+            f"| {truth_id} | {both} | {only_a} | {only_b} | {neither} | {discordant} "
+            f"| {p:.4f} |"
+        )
+    return "\n".join(lines)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, required=True)
@@ -269,6 +318,15 @@ def main() -> None:
     parser.add_argument("--arms", default=None, help="comma-separated arm names")
     parser.add_argument("--truths", default=None, help="comma-separated truth ids")
     parser.add_argument("--seeds", default=None, help="comma-separated noise seeds")
+    parser.add_argument(
+        "--pair",
+        default=None,
+        help=(
+            "two comma-separated arm names to compare with exact McNemar on `reported`, "
+            "paired by (truth, seed) -- e.g. 'grow,params7'. Uses every truth selected by "
+            "--truths (or all TRUTHS if omitted)."
+        ),
+    )
     args = parser.parse_args()
 
     arms = [a for a in ARMS if args.arms is None or a.name in args.arms.split(",")]
@@ -294,9 +352,14 @@ def main() -> None:
                 print(json.dumps(row), flush=True)
                 args.out.write_text(json.dumps(rows, indent=2), encoding="utf-8")
 
+    summary = summarise(rows)
+    if args.pair:
+        arm_a, arm_b = args.pair.split(",")
+        summary += "\n\n" + paired_summary(rows, arm_a, arm_b, [t.id for t in truths])
+
     print()
-    print(summarise(rows))
-    args.out.with_suffix(".md").write_text(summarise(rows), encoding="utf-8")
+    print(summary)
+    args.out.with_suffix(".md").write_text(summary, encoding="utf-8")
 
 
 if __name__ == "__main__":

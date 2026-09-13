@@ -253,20 +253,27 @@ need each other's evidence and conflating them was scope creep this revision rem
   bound; it is gated instead by N4. This replaces the original wording's "within a factor of 1.5
   at 90% of points", which the first implementation was never actually checked against; the
   median-based form is what §2.2's investigation used throughout.
-- **N2 (ratchet on recovery) — measured on a 1-seed slice, fails; stays an opt-in lever.** The
-  full plan is the 37 matched cells of `docs/CRITERION_SELECTION_PLAN.md` §9 re-run under
-  `auto`, not yet run. A 3-reference, 1-seed slice was run instead as a fast first read (`--n2
-  -seeds 1`, ~7 discover() calls, ~20 minutes single-threaded): `recovered` held on all three
-  (the truth's equivalence class always reached the front), but **`recommended_correct` flipped
-  from `True` to `False` on two of three references** — the capacitor and Randles both changed
-  which candidate the parsimony rule picked, though not whether the truth was reachable. Two
-  regressions is exactly the threshold this section's own rule names ("two or more and the
-  default does not flip"), so the rule is doing its job: **`weighting="auto"` ships as an
-  explicit opt-in only, on no path does it become a default**, pending the wider grid. One seed
-  per reference is too little to say whether this is a real, mechanistic sensitivity (the
-  reweighted chi² shifting which candidate falls inside `_well_fitting`'s band) or a coincidence
-  of these particular noise draws; that question is exactly what the deferred 9-seed/37-cell run
-  would answer; the deferred 37-cell grid is union, not replaced, with this 1-seed reading.
+- **N2 (ratchet on recovery) — measured on a 1-seed slice, fails; stays an opt-in lever, and the
+  wider grid is deliberately not scheduled (`docs/SMALL_SAMPLE_REVIEW.md` A-3).** A 3-reference,
+  1-seed slice was run as a fast first read (`--n2-seeds 1`, ~7 discover() calls, ~20 minutes
+  single-threaded): `recovered` held on all three (the truth's equivalence class always reached
+  the front), but **`recommended_correct` flipped from `True` to `False` on two of three
+  references** — the capacitor and Randles both changed which candidate the parsimony rule
+  picked, though not whether the truth was reachable. Two regressions is exactly the threshold
+  this section's own rule names ("two or more and the default does not flip"), so the rule is
+  doing its job: **`weighting="auto"` ships as an explicit opt-in only, on no path does it become
+  a default.** One seed per reference is too little to say on its own whether this is a real,
+  mechanistic sensitivity or a coincidence of these particular noise draws, and the full 37
+  matched cells of `docs/CRITERION_SELECTION_PLAN.md` §9 re-run under `auto` would answer that
+  narrower question — **but this is not what stands between `weighting="auto"` and a default**,
+  and running the wider grid would not remove the block. §4.3's gate R2, measured after this
+  section, found `weighting="auto"`'s `chi2_reduced` at 1.6–3.1e4 on seven real spectra — six of
+  seven land 1000×–30000× outside the [0.5, 3] band N2's own decision rule assumes — while
+  `relative_error` stays a normal 0.16–12.5%, i.e. the fits are fine and the σ estimate is not.
+  A clean synthetic-only N2 at 37 cells cannot promote a default that real data independently
+  rules out, so the wider grid is recorded here as **deliberately not run**, not merely pending:
+  see `docs/SMALL_SAMPLE_REVIEW.md` A-3 for the decision and what would reopen it (a σ estimator
+  that survives a real 43–72-point sweep).
 - **N3 (the capacitor's ESR) — re-measured after the GCV fix; now mixed rather than uniform,
   withdrawn either way.** The prediction was that `auto` reports a *smaller* relative standard
   error than `modulus` for the capacitor's ESR, because `modulus` under-weights it by a factor

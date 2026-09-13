@@ -1,9 +1,10 @@
 # PARAM_BUDGET_PLAN.md — should the exhaustive search be budgeted by free parameters instead of elements?
 
-**Status: Phases 0-7 done (items 1-7 of §9); phase 8 (moving the default) is blocked on E.2's
-stop rule (below) and phase 9 (browser) is not attempted. Phases run in order; each states in
-advance what result means "do not ship" and a null result is an acceptable outcome of any phase
-after Phase 1.**
+**Status: Phases 0-7 done (items 1-7 of §9); phase 8 (moving the default) is blocked on R3's
+absolute level, not on E.2's stop rule -- that trip was re-measured at a proper seed axis and
+retracted (`docs/SMALL_SAMPLE_REVIEW.md` A-2) -- and phase 9 (browser) is not attempted. Phases
+run in order; each states in advance what result means "do not ship" and a null result is an
+acceptable outcome of any phase after Phase 1.**
 
 ## 1. Why this needs an experiment before it needs an opinion
 
@@ -489,6 +490,22 @@ Each phase names, in advance, what would make it not ship.
    framing E.2 carried above: the stop rule has now fired once, on the gate closest to this
    project's actual use case, and any future move toward promoting `max_params` past an opt-in
    default (item 8 below) has to address this finding rather than cite E.2 as still pending.
+   **Withdrawn, 2026-09-14: `docs/SMALL_SAMPLE_REVIEW.md` A-2 re-measured this at a seed axis
+   with real power, and the 2/7 -> 0/7 swing does not replicate.** First, the baseline itself was
+   shown non-reproducible: two byte-identical invocations of the element-axis command (
+   `--time-limit 60`, `seed=0`) disagreed on `impedancepy-zplot` -- stable in one run, not the
+   other -- which is the *only* dataset this plan's own R3 baseline has ever reported stable
+   (compare this section's "2/7 (29%)" against `docs/IMPACT_PLAN.md` §4's earlier "1/7 (14%)" on
+   the same nominal gate: the two counts were called consistent at the time and are not
+   identical, and this is why). Then the full 7-dataset x 5-seed grid was run on both axes: 8/35
+   (22.9%) stable under the element axis, 14/35 (40.0%) under `--max-params 6` -- the *opposite*
+   direction from the original trip -- with 16 discordant pairs giving the paired McNemar test
+   real power, exact p = 0.2101, not significant. **The stop-rule trip is retracted**: it was one
+   wall-clock-dependent draw per axis on a command already shown non-deterministic, not a
+   measurement of the parameter budget's effect. This does not by itself unblock item 8 --
+   R3's absolute level (23-40%, either axis) still fails the 80% bar by a wide margin -- but the
+   specific objection E.2 raised against `max_params` no longer stands. Full numbers in
+   `docs/SMALL_SAMPLE_REVIEW.md` A-2.
 4. **E.3's ladder over P, and E.4's data-derived cap.** E.4 may end in a null result.
    **E.3, first leg [measured, 2026-09-09]: the three `REFERENCES` at P ∈ {5, 7}, two seeds each**
    (`--max-params`, `workers=4`; P=6 already measured in Phase 3's G1). Combined with that P=6
@@ -621,13 +638,15 @@ Each phase names, in advance, what would make it not ship.
    growth.** The control is a clean tie (9/9 either way, no over-growing), which is the half of
    the rule that *did* hold. `ser7` moves the other way — `params7` finds a truth-equivalent on
    every seed where `grow` finds none — but the final `recommended` column stays 0/3 for both, so
-   it changes nothing the report says. Both single-truth swings (`ser6` down, `ser7` up) are most
-   likely the tier-1 screening lottery `TOPOLOGY_6PLUS_PLAN.md` §2(a) already measured and
-   `SEARCH_TIME_PLAN.md` §4.3 already caught flipping `ser6`'s own `reported` flag between two
-   otherwise-identical runs — both arms here run at `screen_restarts=1`, a single seed draw per
-   topology, and `ser6`/`ser7` are exactly the shape that grid already named as the one every
-   basin-lottery and identifiability measurement in this repository agrees is thinnest. Not
-   chased further, because the rule does not need the mechanism resolved to give its verdict:
+   it changes nothing the report says. **Corrected, 2026-09-14
+   (`docs/SMALL_SAMPLE_REVIEW.md` A-1): the "most likely the screening lottery" guess above was
+   wrong, and re-measuring at n=33 seeds made both swings sharper rather than washing them out.**
+   `grow` reaches `ser6`'s truth-equivalence class 17/33 (52%) against `params7`'s 0/33
+   (p < 0.0001); `params7` reaches `ser7`'s 12/33 (36%) against `grow`'s 0/33 (p = 0.0005). Both
+   are decisive, opposite-signed, and not attributable to single-seed noise — the mechanism was
+   not chased further (out of this round's own scope), but the effect is real, not a lottery.
+   `recommended` still never moved (0/33 under `params7` on both truths, matching the n=3
+   reading), so nothing the report says changes either way:
    full parameter-axis enumeration to seven elements is **more expensive** than growth (2.3-2.8x
    on the six/seven-element cells, ~2x on the control) for a **tied-at-best** recovery rate, so
    item 5's question is answered — no, the budget does not make growth unnecessary, and `grow`

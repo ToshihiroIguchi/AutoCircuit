@@ -44,13 +44,17 @@ Run with the package on the path (it is not pip-installed on the dev machine)::
 from __future__ import annotations
 
 import argparse
+import json
 import sys
+import time
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parent))
-
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from datasets import DATASETS, MeasuredDataset  # noqa: E402 -- needs the sys.path insert above
+from paired_stats import mcnemar_exact  # noqa: E402 -- needs the sys.path insert above
 
 from autocircuit.core.circuit import Circuit
 from autocircuit.core.discover import DiscoveryResult, discover
@@ -138,39 +142,121 @@ def _split_half(spectrum: Spectrum) -> tuple[Spectrum, Spectrum]:
     return odd, even
 
 
+def _axis_label(max_params: int | None) -> str:
+    return "elements" if max_params is None else f"params<={max_params}"
+
+
 def run_split_half(
-    weighting: str = "auto", time_limit: float | None = None, max_params: int | None = None
+    weighting: str = "auto",
+    time_limit: float | None = None,
+    max_params: int | None = None,
+    seeds: tuple[int, ...] = (0,),
+    out: Path | None = None,
 ) -> bool:
+    """R3, and (with `seeds` beyond the default) `docs/SMALL_SAMPLE_REVIEW.md`'s A-2 grid.
+
+    `seeds` varies `discover(seed=...)` on *both* halves of a pair identically -- it is a search
+    RNG axis, the same knob `benchmarks/six_plus/recovery.py` calls a noise seed's opposite
+    number. The default `(0,)` reproduces every prior invocation of this function byte-for-byte
+    (same single call, same return value), so nothing about R3 as already recorded changes
+    unless `--seeds` is passed explicitly.
+    """
     print("R3: split-half stability (stricter than equivalence-class-aware -- see docstring)")
-    n_stable = 0
-    n_checked = 0
+    rows: list[dict[str, Any]] = []
+    if out is not None and out.exists():
+        rows = json.loads(out.read_text(encoding="utf-8"))
+        print(f"  resuming with {len(rows)} rows already on disk", flush=True)
+    done = {(r["dataset"], r["axis"], r["seed"]) for r in rows}
+    axis = _axis_label(max_params)
+
     for ds in DATASETS:
         spectrum = _load(ds)
         if spectrum.n < 8:
             print(f"  skip {ds.id}: only {spectrum.n} points, too few to split meaningfully")
             continue
         odd, even = _split_half(spectrum)
-        odd_result = discover(  # type: ignore[arg-type]
-            odd, weighting=weighting, seed=0, time_limit=time_limit, max_params=max_params
-        )
-        even_result = discover(  # type: ignore[arg-type]
-            even, weighting=weighting, seed=0, time_limit=time_limit, max_params=max_params
-        )
-        odd_rec = odd_result.recommended
-        even_rec = even_result.recommended
-        n_checked += 1
-        if odd_rec is None or even_rec is None:
-            print(f"  FAIL {ds.id}: no recommendation on one half")
-            continue
-        stable = odd_rec.circuit.canonical_form() == even_rec.circuit.canonical_form()
-        n_stable += int(stable)
-        print(
-            f"  {'ok  ' if stable else 'diff'} {ds.id:<24} "
-            f"odd={odd_rec.circuit.canonical_form():<24} even={even_rec.circuit.canonical_form()}"
-        )
+        for seed in seeds:
+            if (ds.id, axis, seed) in done:
+                continue
+            started = time.perf_counter()
+            odd_result = discover(  # type: ignore[arg-type]
+                odd, weighting=weighting, seed=seed, time_limit=time_limit, max_params=max_params
+            )
+            even_result = discover(  # type: ignore[arg-type]
+                even,
+                weighting=weighting,
+                seed=seed,
+                time_limit=time_limit,
+                max_params=max_params,
+            )
+            elapsed = time.perf_counter() - started
+            odd_rec = odd_result.recommended
+            even_rec = even_result.recommended
+            row: dict[str, Any] = {
+                "dataset": ds.id,
+                "axis": axis,
+                "max_params": max_params,
+                "seed": seed,
+                "time_limit": time_limit,
+                "seconds": round(elapsed, 1),
+                "odd_circuit": None if odd_rec is None else odd_rec.circuit.canonical_form(),
+                "even_circuit": None if even_rec is None else even_rec.circuit.canonical_form(),
+                "stable": (
+                    odd_rec is not None
+                    and even_rec is not None
+                    and odd_rec.circuit.canonical_form() == even_rec.circuit.canonical_form()
+                ),
+            }
+            rows.append(row)
+            tag = "FAIL" if odd_rec is None or even_rec is None else (
+                "ok  " if row["stable"] else "diff"
+            )
+            print(
+                f"  {tag} {ds.id:<24} seed={seed} "
+                f"odd={row['odd_circuit']!s:<24} even={row['even_circuit']}"
+            )
+            if out is not None:
+                out.write_text(json.dumps(rows, indent=2), encoding="utf-8")
+
+    checked = [r for r in rows if r["axis"] == axis]
+    n_checked = len(checked)
+    n_stable = sum(1 for r in checked if r["stable"])
     frac = n_stable / n_checked if n_checked else 0.0
     print(f"R3: {n_stable}/{n_checked} stable ({frac:.0%}); bar is 80%")
     return frac >= 0.8
+
+
+def run_compare_split_half(a_path: Path, b_path: Path) -> None:
+    """Exact McNemar between two `run_split_half(..., out=...)` JSON files, paired by (dataset,
+    seed).
+
+    Written for `docs/SMALL_SAMPLE_REVIEW.md` A-2: comparing the element axis against a
+    `--max-params` axis at the same seeds, rather than reading a 7-dataset, single-seed swing
+    (2/7 -> 0/7) as though it settled the question.
+    """
+    rows_a = json.loads(a_path.read_text(encoding="utf-8"))
+    rows_b = json.loads(b_path.read_text(encoding="utf-8"))
+    by_key_a = {(r["dataset"], r["seed"]): r["stable"] for r in rows_a}
+    by_key_b = {(r["dataset"], r["seed"]): r["stable"] for r in rows_b}
+    keys = sorted(set(by_key_a) & set(by_key_b))
+    both = sum(1 for k in keys if by_key_a[k] and by_key_b[k])
+    only_a = sum(1 for k in keys if by_key_a[k] and not by_key_b[k])
+    only_b = sum(1 for k in keys if not by_key_a[k] and by_key_b[k])
+    neither = sum(1 for k in keys if not by_key_a[k] and not by_key_b[k])
+    p = mcnemar_exact(only_a, only_b)
+    axis_a = {r["axis"] for r in rows_a}
+    axis_b = {r["axis"] for r in rows_b}
+    print(f"Paired split-half stability: {axis_a} ({a_path.name}) vs {axis_b} ({b_path.name})")
+    print(f"  pairs compared: {len(keys)} (of {len(rows_a)}/{len(rows_b)} rows on file)")
+    print(f"  both stable={both}  only {a_path.name}={only_a}  only {b_path.name}={only_b}  "
+          f"neither={neither}")
+    print(f"  exact McNemar p={p:.4f} on {only_a + only_b} discordant pairs")
+    if only_a + only_b < 10:
+        print(
+            "  fewer than 10 discordant pairs: this test has little power here -- "
+            "report the p-value beside the count, do not read it alone as 'no difference' "
+            "(docs/DE_KERNEL_PLAN.md clause 3)."
+        )
 
 
 def run_literature(weighting: str = "auto", time_limit: float | None = None) -> None:
@@ -202,7 +288,12 @@ def run_literature(weighting: str = "auto", time_limit: float | None = None) -> 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("gate", choices=["readers", "pipeline", "split-half", "literature", "all"])
+    parser.add_argument(
+        "gate",
+        choices=[
+            "readers", "pipeline", "split-half", "literature", "all", "compare-split-half",
+        ],
+    )
     parser.add_argument("--weighting", default="auto")
     parser.add_argument("--pool", default=None, help="comma-separated element codes, e.g. R,C,L")
     parser.add_argument(
@@ -218,16 +309,36 @@ def main() -> int:
         help="budget the exhaustive stage by free parameters instead of raw element count "
         "(docs/PARAM_BUDGET_PLAN.md); applies to pipeline and split-half only",
     )
+    parser.add_argument(
+        "--seeds",
+        default=None,
+        help="comma-separated discover() seeds for split-half (default: 0 only, "
+        "reproducing every prior R3 invocation byte-for-byte)",
+    )
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="split-half only: write/resume per-(dataset,seed) rows as JSON to this path",
+    )
+    parser.add_argument("--a", type=Path, default=None, help="compare-split-half: first JSON file")
+    parser.add_argument("--b", type=Path, default=None, help="compare-split-half: second JSON file")
     args = parser.parse_args()
+
+    seeds = (0,) if args.seeds is None else tuple(int(s) for s in args.seeds.split(","))
 
     if args.gate in ("readers", "all"):
         run_readers()
     if args.gate in ("pipeline", "all"):
         run_pipeline(args.weighting, args.pool, args.time_limit, args.max_params)
     if args.gate in ("split-half", "all"):
-        run_split_half(args.weighting, args.time_limit, args.max_params)
+        run_split_half(args.weighting, args.time_limit, args.max_params, seeds, args.out)
     if args.gate in ("literature", "all"):
         run_literature(args.weighting, args.time_limit)
+    if args.gate == "compare-split-half":
+        if args.a is None or args.b is None:
+            raise SystemExit("compare-split-half needs --a and --b")
+        run_compare_split_half(args.a, args.b)
     return 0
 
 

@@ -1,0 +1,5 @@
+Paired split-half stability: {'elements'} (a2_determinism_run1.json) vs {'elements'} (a2_determinism_run2.json)
+  pairs compared: 7 (of 7/7 rows on file)
+  both stable=1  only a2_determinism_run1.json=0  only a2_determinism_run2.json=1  neither=5
+  exact McNemar p=1.0000 on 1 discordant pairs
+  fewer than 10 discordant pairs: this test has little power here -- report the p-value beside the count, do not read it alone as 'no difference' (docs/DE_KERNEL_PLAN.md clause 3).
