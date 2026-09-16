@@ -290,7 +290,12 @@ export function DiscoverScreen({
       />
 
       {running && search !== null && (
-        <SearchProgressPanel progress={search.progress} poolSize={search.workers} />
+        <SearchProgressPanel
+          progress={search.progress}
+          poolSize={search.workers}
+          client={client}
+          ready={ready}
+        />
       )}
 
       {!running && (search?.stoppedEarly ?? false) && (

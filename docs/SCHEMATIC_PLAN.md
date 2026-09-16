@@ -50,9 +50,31 @@ on Pyodide.
 * **The rest have no standard symbol, and the code does not pretend otherwise.** A survey of
   ZView, Gamry Echem Analyst, EC-Lab and the EIS literature found no agreed drawing for a CPE and
   none for the Warburg family: what practitioners share is the *code* (CPE, W, Ws, Wo, G), not a
-  shape. So CPE gets the one departure that is widely readable — a capacitor whose plates are
-  curved, "a capacitor, but distributed" — and every other element is drawn as a box carrying its
-  own code, which is what a tool draws for something the reader has to be told the name of.
+  shape. So every non-IEC element is drawn as a box carrying its own code, which is what a tool
+  draws for something the reader has to be told the name of.
+* **Correction, 2026-09-13: CPE's earlier departure from that rule is withdrawn.** This section
+  used to give CPE a glyph of its own — a capacitor whose plates both bow outward, "a capacitor,
+  but distributed." That collided with IEC 60617 rather than merely extending it: the standard
+  already assigns a curved plate to the polarized/electrolytic capacitor (one straight plate, one
+  curved), and the withdrawn glyph's outward-bowed right-hand plate read as exactly that symbol,
+  mirrored — a misreading in-domain for a tool whose users measure real electrolytic capacitors.
+  The IEC collision is a citable fact about the standard this section already invokes for R/C/L,
+  not a stylistic preference, so it was enough evidence to change away from the glyph without
+  needing a replacement convention agreed first. CPE is now drawn with `C`'s own straight-plate
+  shape plus its code beneath the wire (`ElementSymbol.tsx`'s `SELF_IDENTIFYING` set) — "a
+  capacitor the reader must be told the name of," the same treatment every other non-IEC element
+  already gets, minus the box. `npm run schematic`'s S1 geometry gate and the S3 two-theme
+  screenshot (`R1-p(C1,R2-W1)-p(L1,SKINF1,CPE1)`) were re-run and re-taken against this change.
+* **The Warburg family was re-surveyed at the same time, and the original finding holds.** A
+  fresh check specifically asked whether ZSimpWin or RelaxIS (not in the original survey) or the
+  two standard EIS references — Orazem & Tribollet's *Electrochemical Impedance Spectroscopy* and
+  Barsoukov & Macdonald's *Impedance Spectroscopy* — show any de-facto Warburg glyph. None do, as
+  far as public documentation, manuals and academic citations reveal: every source found uses the
+  letter code alone (`W`, `Ws`, `Wo`, `O`, `G`), including NOVA (not in the original survey
+  either). No IEC 60617 entry exists for a diffusion element. So `W`, `Ws`, `Wo` and `G` stay
+  labelled boxes, deliberately, and this is recorded so the question is not re-asked from
+  scratch: the bar for adding a Warburg glyph is a documented majority convention across these
+  sources, and it is not met.
 * That fallback is also why the palette's promise still holds. The catalogue comes from the
   registry in the running build, so an element added to Python appears in the palette without a
   change here; it now appears on the canvas too, as a labelled box, rather than as a symbol this

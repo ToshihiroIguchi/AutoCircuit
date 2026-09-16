@@ -1,0 +1,4 @@
+Paired split-half stability: {'elements'} (a2_grid_elements.json) vs {'params<=6'} (a2_grid_params6.json)
+  pairs compared: 35 (of 35/35 rows on file)
+  both stable=3  only a2_grid_elements.json=5  only a2_grid_params6.json=11  neither=16
+  exact McNemar p=0.2101 on 16 discordant pairs

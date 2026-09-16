@@ -294,6 +294,30 @@ BREEDING_EXTRA = 0
 #: operator, and not of `discover()`, for the reason :data:`BREEDING_EXTRA` is not.
 MUTATION_WEIGHTS: tuple[float, float, float, float] = (0.35, 0.25, 0.25, 0.15)
 
+#: Chance that `mutate`'s `insert_series`/`insert_parallel` places **two** fresh elements
+#: (`series(A,B)`/`parallel(A,B)`, an even coin, both drawn from `pool`) instead of one.
+#:
+#: [`docs/EVOLVE_SEARCH_PLAN.md` section 3.8] A frozen-table sweep at 480 seeds found
+#: `motif_rate=0.30` wins on a parallel/CPE-dense arena (p=0.0085) and does not lose on two
+#: series arenas (p=0.125 both) -- but a frozen table has no fitting in it, so shipping needed
+#: the real-fit gate that measurement explicitly deferred. [measured,
+#: `benchmarks/six_plus/motif_gate.py`, 30 seeds x 2 real arenas x 2 arms at
+#: `time_limit=300s, workers=8`] `motif_rate=0.30` evaluates 19-23% more topologies per second
+#: than the unpatched operator on both arenas (p<0.001, a significant *speed-up*, not merely
+#: "not worse"), with no significant difference in the best criterion score reached, and does
+#: not raise `PROPOSE_RETRY_CAP` exhaustion -- mean `mutate` calls per evaluated candidate
+#: *fell* (par6: 263.72 -> 202.12; ser6: 404.72 -> 308.98), the throughput gain's own mechanism:
+#: a two-element move lands in already-visited territory *less* often than a one-element move
+#: in this small a search space, not more, which was section 3.8's open question. Recovery
+#: (`reported`) could not be read at this budget: `par6` saturates at 30/30 on both arms (the
+#: mirror of the frozen round's `land_rcl6` trap, at real-fit scale on the arena that carried
+#: the frozen win) and `ser6`'s 6 discordant pairs fall short of the pre-registered 10-pair
+#: floor, so the ship decision rests on throughput and score alone, exactly as that round's
+#: rule said it would if this happened. Kept at `0.0` here regardless -- this round shipped the
+#: *lever*, not a new default, on the same reasoning as :data:`BREEDING_EXTRA`. A parameter of
+#: `mutate` and of `_next_generation`/`_SteadyState`, not of `discover()`.
+MOTIF_RATE = 0.0
+
 #: How many times the breeding loop retries a child whose canonical form is already in
 #: `_Evaluator.cache` before accepting the duplicate anyway.
 #:
@@ -1416,12 +1440,20 @@ def mutate(
     max_elements: int,
     *,
     weights: Sequence[float] = MUTATION_WEIGHTS,
+    motif_rate: float = MOTIF_RATE,
 ) -> Node:
     """Apply one random structural or element-type change.
 
     ``weights`` is :data:`MUTATION_WEIGHTS` and is a parameter only so that the benchmarks can
     sweep it; it is not reachable from :func:`discover`, for the reason
-    :data:`BREEDING_EXTRA` is not.
+    :data:`BREEDING_EXTRA` is not. ``motif_rate`` is :data:`MOTIF_RATE`, for the same reason --
+    see that constant's docstring for what was measured.
+
+    The ``motif_rate`` draw short-circuits on ``motif_rate`` itself (``if motif_rate and
+    rng.random() < motif_rate``) rather than always drawing: at the shipped default of ``0.0``
+    this consumes no extra random draw, so every existing evolve RNG stream is unchanged and
+    ``benchmarks/ev5_fingerprint.py``'s byte-identity gate is unaffected by this parameter's
+    mere existence.
     """
     operations = ["retype", "insert_series", "insert_parallel", "delete"]
     active = np.array(weights, dtype=float)
@@ -1445,7 +1477,12 @@ def mutate(
     paths = subtree_paths(node)
     path = paths[int(rng.integers(len(paths)))]
     subtree = subtree_at(node, path)
-    fresh = ElementNode(str(rng.choice(pool)))
+    if motif_rate and rng.random() < motif_rate and count_elements(node) + 2 <= max_elements:
+        a = ElementNode(str(rng.choice(pool)))
+        b = ElementNode(str(rng.choice(pool)))
+        fresh: Node = series(a, b) if rng.random() < 0.5 else parallel(a, b)
+    else:
+        fresh = ElementNode(str(rng.choice(pool)))
     combined = series(subtree, fresh) if operation == "insert_series" else parallel(subtree, fresh)
     return replace_subtree(node, path, combined)
 
@@ -2709,6 +2746,7 @@ class _SteadyState:
     #: Consumed first, in order -- the same seeded-then-random initial population
     #: :func:`evolve_plan` has always built. Virtual generation 0 covers exactly these.
     initial: list[_Offspring]
+    motif_rate: float = MOTIF_RATE
     #: Virtual generations whose proposal quota has been fully handed out. Starts at 0 (the
     #: initial population is generation 0, matching :func:`evolve_plan`'s historical numbering
     #: exactly) and is bumped by :meth:`_start_vgen` the instant the *next* population-sized
@@ -2761,6 +2799,7 @@ class _SteadyState:
                 frequencies=self._frequencies,
                 parsimony=PARSIMONY_SCALING,
                 weights=self.weights,
+                motif_rate=self.motif_rate,
                 seen=self._seen,
             )
         return offspring
@@ -2842,6 +2881,7 @@ def evolve_plan(
         criterion=criterion,
         weights=MUTATION_WEIGHTS,
         initial=initial,
+        motif_rate=MOTIF_RATE,
     )
 
     #: Total proposals across the whole run -- the same total work `generations * population`
@@ -4528,6 +4568,7 @@ def _propose_child(
     frequencies: Mapping[float, float] | None,
     parsimony: float,
     weights: Sequence[float],
+    motif_rate: float = MOTIF_RATE,
     seen: set[str],
 ) -> _Offspring | None:
     """One bred child -- tournament selection, optional crossover, mutation -- retried up to
@@ -4553,7 +4594,7 @@ def _propose_child(
             child = crossover(parent.circuit.root, other.circuit.root, rng)
         else:
             child = parent.circuit.root
-        child = mutate(child, rng, pool, max_elements, weights=weights)
+        child = mutate(child, rng, pool, max_elements, weights=weights, motif_rate=motif_rate)
         if count_elements(child) > max_elements:
             child = None
             continue
@@ -4576,6 +4617,7 @@ def _next_generation(
     frequencies: Mapping[float, float] | None = None,
     parsimony: float = PARSIMONY_SCALING,
     weights: Sequence[float] = MUTATION_WEIGHTS,
+    motif_rate: float = MOTIF_RATE,
     known: AbstractSet[str] = frozenset(),
 ) -> list[_Offspring]:
     """Elitism over the Pareto front, then tournament selection with mutation/crossover.
@@ -4611,6 +4653,7 @@ def _next_generation(
             frequencies=frequencies,
             parsimony=parsimony,
             weights=weights,
+            motif_rate=motif_rate,
             seen=seen,
         )
         if offspring is not None:

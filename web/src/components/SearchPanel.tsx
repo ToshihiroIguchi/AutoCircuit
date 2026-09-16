@@ -5,7 +5,7 @@
 import type { CatalogueWire, CriterionWire } from "../core/types";
 import { AUTO_POOL, CUSTOM_POOL } from "../core/types";
 import { MAX_WORKERS } from "../worker/pool";
-import { SymbolPreview } from "./ElementSymbol";
+import { elementTitle, SymbolPreview } from "./ElementSymbol";
 
 export interface SearchPanelProps {
   /** The model-selection menu, from the running core's own registry rather than from here. */
@@ -212,7 +212,7 @@ export function SearchPanel(props: SearchPanelProps) {
                   const checked = props.customPool.includes(element.code);
                   return (
                     <li key={element.code}>
-                      <label title={element.name}>
+                      <label title={elementTitle(element)}>
                         <input
                           type="checkbox"
                           checked={checked}

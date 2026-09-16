@@ -392,7 +392,46 @@ static-site Web UI running the same core via WASM (Pyodide).
    (adding a cap-7 series arena to separate the effect from a cap confound, per §3.5.3's own
    precedent) — and was **shipped**, `0.55` → `0.5`, with the measurement in the function's own
    docstring. The tournament/elite-width sweep and the two lower-priority items were not
-   attempted.
+   attempted. **§3.8, added 2026-09-13, measured a two-element insertion step** (a web-UI review
+   question: should the search emit motifs like `p(R,C)` as a set? A hard-coded motif *library*
+   is ruled out on inspection alone as the same shape-bet §3.5.2 already rejected; the narrower,
+   testable version is `mutate` sometimes inserting `series(A,B)`/`parallel(A,B)` — an even coin,
+   both drawn from `pool` — instead of one element). **[measured, `motif_rate=0.30`, 480 seeds]
+   passes its own pre-registered symmetry rule**: wins on the one informative parallel/CPE-dense
+   arena (`land_rclcpe6`, p=0.0085) and does not lose on either series arena (p=0.125 both,
+   numerically ahead on both) — the plain R/C/L parallel arena (`land_rcl6`) saturated at 100%
+   both ways and settled nothing, the same saturated-arena trap `SEARCH_ALGORITHM_SCREENING.md`
+   §4.2 already names. `motif_rate=0.15` fails the win clause (p=0.0147, short of the 0.01 bar).
+   This is the first operator in this document to clear its own symmetry rule rather than be
+   rejected by it. Two mistakes were caught and corrected before trusting any number: a first
+   pilot at `arms.py`'s own `--budget 450` default hung for minutes, traced by profiling the
+   *unmodified* `arm_ga_bounded` to `_unique_best` recomputing `canonical_form()` over an
+   ever-growing, never-deduplicated archive every generation — a pre-existing property of the
+   shipped arm, not of the new code, fixed by giving the new benchmark's `--budget` no default
+   and pointing at this section's own established unsaturated budgets (150 / 40); and the first
+   `land_series_rcl7` sweep silently ran at `--max-elements` 6 instead of 7, caught because its
+   hit counts were suspiciously identical to the cap-6 arena's, and re-run correctly. **Nothing
+   shipped to `discover.py` this round** — scope was measurement and a verdict only; production
+   wiring still needs an EV3-style real-fit throughput/recovery gate first, per every other step
+   in this document. **That gate ran 2026-09-15/16** (`benchmarks/six_plus/motif_gate.py`, 30
+   seeds x 2 real arenas x 2 arms, `discover(mode="evolve")` at `time_limit=300s, workers=8`,
+   sized by a pre-registered pilot): throughput rose significantly on both arenas (19-23%
+   faster, p<0.001), score showed no significant difference, and `PROPOSE_RETRY_CAP` exhaustion
+   *fell* under the motif operator rather than rising — the opposite of the interaction this
+   round worried about. Recovery could not be read at this budget (`par6` saturates 30/30 on
+   both arms, `ser6` falls short of the pre-registered 10-discordant-pair floor), so the ship
+   decision rests on the fallback basis the pre-registered rule named in advance for exactly
+   this case, not on a demonstrated recovery win. **Shipped**: `discover.py` gains
+   `MOTIF_RATE = 0.0` and a `motif_rate` keyword threaded through `mutate`/`_propose_child`/
+   `_next_generation`/`_SteadyState` the same way `MUTATION_WEIGHTS` is — reachable from the
+   benchmarks, not from `discover()`. `ev5_fingerprint.py --mode exhaustive,auto,evolve` is
+   byte-identical on all three `REFERENCES` at the shipped default; four new tests in
+   `tests/test_discover.py` cover the operator, its `max_elements` decline, the RNG
+   short-circuit, and its absence from `discover()`'s signature. **The default stays `0.0`** —
+   this round shipped the lever, not a new default, since recovery evidence (as opposed to
+   absence-of-harm on two proxies) was never obtained. See `docs/EVOLVE_SEARCH_PLAN.md` §3.8 for
+   the full numbers, including a bug in this round's own analysis code (a non-inferiority clause
+   that failed on a significant *improvement*) caught and fixed before any verdict was drawn.
 
 11. `docs/KK_RESONANCE_PLAN.md` — the Lin-KK test and the resonance its basis cannot express.
    **Implemented; gates K1–K4 measured.** Its §2 is the one to read, and it is the whole point
@@ -938,7 +977,14 @@ static-site Web UI running the same core via WASM (Pyodide).
 22. `docs/PARAM_BUDGET_PLAN.md` — whether the exhaustive search should be budgeted by free
     parameters rather than raw element count, since a `C` costs one and a `CPE` costs two.
     **Phases 0-7 done (all seven items of that plan's §9); phase 8 (moving the default) is
-    blocked on E.2's stop rule below, phase 9 (browser) not attempted.**
+    blocked on R3's absolute level, not on E.2's stop rule below — that trip was re-measured at a
+    proper seed axis and retracted, see the correction after item 5 below — phase 9 (browser) not
+    attempted.** R3 was then re-measured with the equivalence-class-aware check
+    `docs/IMPACT_PLAN.md` §4.4 had left unbuilt (`docs/SMALL_SAMPLE_REVIEW.md` A-2 follow-up,
+    2026-09-14): 31% (elements) / 60% (`params<=6`), both still short of the 80% bar, so item 8's
+    blocker does not move — but `params<=6`'s advantage over the element axis is now
+    statistically significant (p=0.0129, robust to the weighting used, p=0.0074 under
+    `modulus`) where the strict `stable` field saw none (p=0.2101).
     `discover(max_params=...)` and `--max-params` ship as an opt-in lever, default `None`, and no
     default has moved. The originally suspected mechanism does not exist: tier 1 and
     tier 2 already feed `n_params` to the chosen criterion, and `recommended`'s first key,
@@ -1016,7 +1062,14 @@ static-site Web UI running the same core via WASM (Pyodide).
     screening-dependent region than the element-cap-5 baseline explores. This changes nothing
     about the shipped, off-by-default status, but it means `docs/PARAM_BUDGET_PLAN.md`'s item 8
     (moving the default) is now explicitly blocked on addressing this finding rather than merely
-    pending E.2's measurement. **Item 5 (X4 at P=7) [measured, 2026-09-10]: the parameter budget
+    pending E.2's measurement. **Retracted, 2026-09-14 (`docs/SMALL_SAMPLE_REVIEW.md` A-2):** the
+    element-axis baseline this trip rests on turned out non-reproducible — two byte-identical
+    invocations of it disagree on `impedancepy-zplot`, the one dataset the "2/7" has ever been
+    stable on — and the full 7-dataset × 5-seed grid on both axes found 8/35 (22.9%) elements vs
+    **14/35 (40.0%) params≤6**, the opposite direction from the original trip, 16 discordant
+    pairs giving real power, exact McNemar p = 0.2101 — not significant. The stop-rule trip is
+    withdrawn; item 8 stays blocked only on R3's absolute level (23–40%, either axis, against an
+    80% bar), a different and still-open reason. **Item 5 (X4 at P=7) [measured, 2026-09-10]: the parameter budget
     does not make `TOPOLOGY_6PLUS_PLAN.md`'s growth stage unnecessary.** `--max-params 7` on an
     `R,C,L`-only pool enumerates exhaustively to exactly seven elements, the same reach `grow`
     gets from growth; scored against the pre-registered rule ("supersedes growth iff it beats
@@ -1027,11 +1080,15 @@ static-site Web UI running the same core via WASM (Pyodide).
     or even winning elsewhere (`par6`/`mix6`/`par7`/`mix7` tie 3/3=3/3; `ser7`'s `reported` goes
     0/3 → 3/3 but its `recommended` stays 0/3 either way, so nothing the report says changes) —
     and it costs 2.3-2.8x more than growth on the six/seven-element cells for a recovery rate
-    that is, at best, tied. Both single-truth swings are most likely the same tier-1
-    screening-lottery noise `TOPOLOGY_6PLUS_PLAN.md` §2(a) and `SEARCH_TIME_PLAN.md` §4.3 already
-    measured for this exact shape at a single screening seed, not chased further because the
-    decision rule does not need the mechanism resolved to give its verdict. `GROWTH_DEFAULT`
-    stays `0` and nothing about `max_params`'s shipped, off-by-default status changes.
+    that is, at best, tied. **Corrected, 2026-09-14 (`docs/SMALL_SAMPLE_REVIEW.md` A-1): the
+    original "most likely the tier-1 screening lottery" guess for both single-truth swings was
+    wrong.** Re-measured at n=33 seeds, both sharpened into decisive, opposite-signed effects
+    rather than washing out: `grow` reaches `ser6`'s class 17/33 against `params7`'s 0/33
+    (p < 0.0001); `params7` reaches `ser7`'s class 12/33 against `grow`'s 0/33 (p = 0.0005). The
+    mechanism was not chased further — out of that re-measurement's own scope — but the effect is
+    real. `recommended` still never moved (0/33 either truth under `params7`), so the ship
+    verdict is unchanged: `GROWTH_DEFAULT` stays `0` and nothing about `max_params`'s shipped,
+    off-by-default status changes.
     **Item 6 (re-key the tier-2 quota) [shipped, all gates measured 2026-09-11].** `_quota_by_size`
     bucketed the tier-2 refit shortlist on element count while `_screening_score` already charged
     for parameters and the Pareto front dominates on `Circuit.complexity` — 5 buckets guarding a
@@ -1176,6 +1233,37 @@ static-site Web UI running the same core via WASM (Pyodide).
     monkeypatch harness, the pipeline/known-trap/recovery scripts, and a new arm in
     `param_opt.py::ARMS`) stay in the tree per this project's own standing precedent for
     measurement code, whatever the ship verdict.
+
+26. `docs/SMALL_SAMPLE_REVIEW.md` — a pass over this repository's own decision record looking for
+    one specific failure shape: a change rejected, or a default left unmoved, on a negative
+    reading from very few seeds or very few real datasets while every other reading was healthy.
+    **Two of three candidates re-measured; the third deliberately not, and why is recorded rather
+    than left pending.** **A-1** (`docs/PARAM_BUDGET_PLAN.md` item 5's `ser6`/`ser7` swing,
+    attributed to "the tier-1 screening lottery" on n=3 seeds): **[measured] the guess was
+    wrong.** At n=33 both swings sharpened into decisive, opposite-signed effects rather than
+    washing out — `grow` 17/33 vs `params7` 0/33 on `ser6` (p<0.0001), `params7` 12/33 vs `grow`
+    0/33 on `ser7` (p=0.0005) — a real, size/shape-dependent effect, not noise; `recommended`
+    still never moved, so nothing about `max_params`'s off-by-default status changes. **A-2**
+    (`docs/PARAM_BUDGET_PLAN.md` E.2's real-data split-half stability, a 2/7→0/7 swing under
+    `--max-params 6`): **[measured] withdrawn, and the mechanism is sharper than "small sample"**
+    — the command itself is not reproducible at the `--time-limit` it was measured under (two
+    byte-identical invocations disagree on the one dataset the "2/7" was ever stable on), and the
+    full 7×5 seed grid found 8/35 (23%) elements vs 14/35 (40%) params≤6, the *opposite*
+    direction, 16 discordant pairs, p=0.21 — not significant. Item 8 (moving the default) stays
+    blocked, now only on R3's absolute level failing its 80% bar, a different and still-open
+    reason. **A-3** (`docs/IMPACT_PLAN.md` §2.4's `weighting="auto"` N2, a 1-seed,
+    2-of-3-reference regression): **deliberately not re-measured** — the wider 37-cell grid would
+    only ask whether that regression is mechanistic, and cannot remove the actual block, since
+    §4.3's gate R2 already found `weighting="auto"`'s `chi2_reduced` 1000×-30000× outside its own
+    assumed band on six of seven real spectra, independent of N2's sample size. Two near-misses
+    already caught and resolved inside their own rounds (`docs/DE_KERNEL_PLAN.md` clause 3's
+    12-seed illusion; `docs/EVOLVE_SEARCH_PLAN.md` §§3.4.4/3.5's 120-seed "significant" arms
+    demoted at 480) are recorded as not needing re-measurement, alongside
+    `docs/PARAM_OPTIMIZER_PLAN.md`'s L-SHADE withdrawal, which is convergent evidence (a
+    regression plus independent test failures) rather than a lucky draw and so is not a candidate
+    either. New shared instrument: `benchmarks/paired_stats.py::mcnemar_exact`, the same exact
+    two-sided binomial `benchmarks/screening_round/arms.py::_sign_test` already used, factored out
+    for reuse rather than re-derived.
 
 Update these when decisions change.
 

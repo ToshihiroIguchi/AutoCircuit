@@ -1,0 +1,9 @@
+R3: split-half stability (stricter than equivalence-class-aware -- see docstring)
+  diff impedancepy-generic      seed=0 odd=[L-p(CPE,[C-L-R])]       even=[R-p(CPE,[CPE-R])]
+  diff impedancepy-gamry        seed=0 odd=p(R,[CPE-p(CPE,R)])      even=p(CPE,[C-p(C,R)])
+  diff impedancepy-biologic     seed=0 odd=p(R,[CPE-R])             even=[R-p(C,R)]
+  ok   impedancepy-zplot        seed=0 odd=[L-p(C,R,[CPE-R])]       even=[L-p(C,R,[CPE-R])]
+  ok   zenodo-21700-id15        seed=0 odd=[R-p(C,[CPE-R])]         even=[R-p(C,[CPE-R])]
+  diff zenodo-21700-id34        seed=0 odd=[CPE-p(R,[CPE-R])]       even=[R-p(C,[CPE-R])]
+  diff zenodo-kendall-electrode seed=0 odd=p(R,[CPE-p(CPE,[C-R])])  even=[CPE-p(CPE,CPE,R)]
+R3: 2/7 stable (29%); bar is 80%

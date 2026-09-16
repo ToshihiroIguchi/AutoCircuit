@@ -17,7 +17,15 @@ diminishing-returns variant (c) was not attempted. **§3.7 (Step 8) — the hype
 no measurement — is now measured for its centerpiece finding.** `random_topology`'s series/
 parallel seeding bias showed the exact `mut_series_hi`/`mut_par_hi` signature (480 seeds, three
 arenas) and was shipped `0.55` → `0.5`. The tournament-size/elite-width joint sweep and the two
-lower-priority items were not attempted this pass.
+lower-priority items were not attempted this pass. **§3.8 (a two-element insertion, `motif_rate`)
+is now measured on both a frozen table and a real-fit gate, and shipped as a lever.** The frozen
+round found `motif_rate=0.30` passes its own symmetry rule at 480 seeds; the real-fit gate
+(`benchmarks/six_plus/motif_gate.py`, 30 seeds x 2 real arenas x 2 arms) found a significant
+throughput improvement (19-23% faster, p<0.001 both arenas) and no significant score difference,
+with recovery unreadable at this budget (one arena saturates 30/30 both arms, the other falls
+short of the discordant-pair floor) — so the ship decision rests on the pre-registered fallback
+basis, not a demonstrated recovery win. `discover.py` gains `MOTIF_RATE = 0.0`
+(`ev5_fingerprint.py` byte-identical at the default); the default itself does not move.
 Prerequisite reading: `docs/DISCOVERY_V2_PLAN.md` §1 and §3.3 (why enumeration took over from the
 genetic search, and the measurement that says a cheaper screen trades the answer for the clock).
 
@@ -1576,6 +1584,195 @@ three-dimensional grid, this is the dimension to drop, on the base-rate evidence
 
 Step 2 is severable and worth landing on its own even if 3–5 are never done: it is the only step
 that fixes something wrong rather than something slow.
+
+### 3.8 A two-element insertion step, measured against section 3.5.2's own symmetry rule
+
+A web-UI review asked whether the genetic search should be able to emit common EIS "motifs"
+(`p(R,C)` and the like) as a set. A hard-coded motif *library* is ruled out on inspection alone,
+without needing a measurement: it is exactly the shape of bet section 3.5.2 already measured and
+rejected for `MUTATION_WEIGHTS` — a change that wins on parallel-shaped truths and loses on
+series-shaped ones — made worse by the motifs carrying electrochemical names that would make the
+bias read as domain knowledge the search is not supposed to have.
+
+The version that is not a shape bet, and is genuinely testable, is narrower: `mutate`'s insertion
+sometimes places **two** fresh elements instead of one — `series(A,B)` or `parallel(A,B)`, an
+exactly even coin (mirroring `random_topology`'s own 0.5, section 3.7 Step 8), `A` and `B` drawn
+from `pool` — rather than a fixed pair. This is a claim about step size (crossing the
+"worse-intermediate" valley a single-element insertion must otherwise cross over two,
+usually-worse generations), not about which shapes exist.
+
+**Method.** `benchmarks/screening_round/motif_probe.py` (new), which does not edit `discover.py`
+or `arms.py`: it monkeypatches the module-level `discover.mutate` name for the duration of one
+`Trace`, so the search loop under test is `arm_ga_bounded`'s exact, unmodified
+`_next_generation`/`_propose_child`/`_tournament`, per this file's own "a reimplementation would
+measure this file" rule. `motif_rate ∈ {0.15, 0.30}`; the operator declines the two-element
+insertion (falling back to one, as today) whenever it would exceed `max_elements`. Every result
+below is 480 seeds, exact McNemar via `arms.py`'s own `_sign_test`, paired by seed against
+`motif_rate=0.0` (identical to today's `mutate` up to one extra, always-unused RNG draw).
+
+**A budget mistake, caught and corrected before any number was trusted.** The pilot's first run
+used `--budget 450`, `arms.py`'s own CLI default — and both the new arm and, when re-checked,
+today's *unmodified, unpatched* `arm_ga_bounded` hung for minutes on a single seed. Profiling the
+unmodified library code (not this file) found why: `_unique_best` recomputes
+`circuit.canonical_form()` over the *entire*, never-deduplicated `scored` archive once per
+generation, and that archive grows every generation regardless of duplicates, so cost rises
+sharply with generation count. This is a pre-existing property of the shipped, published
+`arm_ga_bounded`, confirmed by profiling the untouched code, not a defect this file introduces —
+and it is exactly why section 3.4.3 and 3.5.2 calibrated their own "unsaturated" budgets at 150
+fits (`land_rcl6`/`land_rclcpe6`-family arenas) and 40 fits (`land_series_rcl6`/`_rcl7`) rather
+than at the CLI's 450 default. `motif_probe.py --budget` therefore has **no default** and its
+`--help` states this reasoning, so the mistake cannot be silently repeated.
+
+**A second mistake, caught after the first full sweep.** The initial `land_series_rcl7` runs
+(the cap-7 series arena) were launched without `--max-elements 7`, silently leaving the CLI's
+`--max-elements` default of 6 — capping the search exactly as tightly as the cap-6 arena and
+producing suspiciously identical hit counts to `land_series_rcl6` (258/480 at every rate on
+both). Re-run at `--max-elements 7`: the counts changed (292/480 base), confirming the first
+`ser7` numbers were void and not merely coincidental. **The corrected numbers below are the
+`--max-elements 7` re-run**, and the discarded run is not reported as a result.
+
+**Results, 480 seeds each, `mcnemar_p` from `arms.py`'s exact `_sign_test`:**
+
+| arena | shape | budget | rate | base hits | motif hits | discordant (only-base / only-motif) | p |
+|---|---|---:|---:|---:|---:|---:|---:|
+| `land_rcl6` | parallel | 150 | 0.15 | 480/480 | 480/480 | 0 / 0 | 1.0 (saturated, uninformative) |
+| `land_rcl6` | parallel | 150 | 0.30 | 480/480 | 480/480 | 0 / 0 | 1.0 (saturated, uninformative) |
+| `land_rclcpe6` | parallel, CPE-dense | 150 | 0.15 | 268/480 | 301/480 | 70 / 103 | **0.0147** |
+| `land_rclcpe6` | parallel, CPE-dense | 150 | 0.30 | 268/480 | 304/480 | 71 / 107 | **0.0085** |
+| `land_series_rcl6` | series | 40 | 0.15 | 258/480 | 262/480 | 21 / 25 | 0.659 |
+| `land_series_rcl6` | series | 40 | 0.30 | 258/480 | 272/480 | 29 / 43 | 0.125 |
+| `land_series_rcl7` | series, cap 7 | 40 | 0.15 | 292/480 | 299/480 | 20 / 27 | 0.382 |
+| `land_series_rcl7` | series, cap 7 | 40 | 0.30 | 292/480 | 306/480 | 29 / 43 | 0.125 |
+
+**`land_rcl6` saturates at 100% both ways and settles nothing** — zero discordant pairs is a
+test with no power at all, the same shape of trap section 3.4.4 and
+`docs/SEARCH_ALGORITHM_SCREENING.md` §4.2 already name for a smaller arena that cannot separate
+arms. This is exactly why `land_rclcpe6` was included in the plan alongside it rather than
+substituted in afterward: it is the parallel-shaped, CPE-dense arena that carries the actual
+signal when the plainer R/C/L one saturates.
+
+**Verdict against the pre-registered rule** ("ships only if it wins on the parallel arena and
+does not lose on either series arena; p < 0.01 for the win, p > 0.05 for no-loss," reading
+`land_rclcpe6` in the parallel arena's role since `land_rcl6` returned no information):
+
+- **`motif_rate = 0.30` passes.** Wins on `land_rclcpe6` (p = 0.0085 < 0.01) and does not lose on
+  `land_series_rcl6` (p = 0.125) or `land_series_rcl7` (p = 0.125) — on both series arenas the
+  motif arm is numerically *ahead*, not behind, so this is a clean pass on both clauses rather
+  than a near-miss on the second one.
+- **`motif_rate = 0.15` does not pass.** Its `land_rclcpe6` result (p = 0.0147) is short of the
+  0.01 bar. Failing the win clause is enough on its own; the series clauses are moot for this
+  rate.
+
+**This is the first operator this document has measured that clears its own symmetry rule going
+*in* rather than being rejected by it** — unlike the mutation-weight and seeding-bias sweeps
+(sections 3.5.2, 3.7 Step 8), which found a real asymmetry and had to hold a parameter fixed to
+avoid it, a two-element insertion at an even series/parallel coin never loses on the shapes
+tested and wins on the one informative arena that was not saturated. That is consistent with the
+step-size framing above: nothing about *which* two elements or *which* connective is chosen
+favours one shape over the other, so there is no shape bet to detect.
+
+**Scope of what this measurement licenses, and what it does not.** Per this section's own
+pre-registration, this round is measurement and a written verdict only — `discover.py` is
+unchanged and no default has moved. Wiring `motif_rate = 0.30` as a real (off-by-default, or
+on-by-default) option in `mutate` would still need the two checks every other step in this
+document has needed before shipping: an EV3-style two-sided real-fit throughput/recovery gate
+(a frozen-table win is not yet a real-search win, section 3.3's own caution), and a check that it
+does not interact badly with `PROPOSE_RETRY_CAP` or the steady-state proposer's duplicate
+handling, since a two-element move lands in already-visited territory more often than a
+one-element move.
+
+**The real-fit gate [measured, 2026-09-15/16, `benchmarks/six_plus/motif_gate.py`, new].** Two
+real arenas: `par6` (`p(R1,C1)-p(R2,C2)-p(R3,C3)`, `pool=("R","C","L","CPE")`) as the real-fit
+analogue of the frozen `land_rclcpe6` — deliberately built from `truths.py`'s *tuned* `par6`
+values rather than `INCUMBENT_PAR6`'s, since the incumbent fails its own four-part
+identifiability screen (0.700% leverage against 1% noise) and a recovery gate on a truth the
+data does not contain would measure the fitter, not the operator — and `ser6`
+(`C1-R1-L1-p(R2,C2-L2)`, `pool=("R","C","L")`) mirroring `land_series_rcl6`. Both at
+`max_elements=6`, matching the frozen arenas' own `n_max` exactly, since the operator's decline
+rule (`count_elements(node) + 2 <= max_elements`) makes a different cap a different operator.
+`discover(mode="evolve", workers=8, generations=10_000, time_limit=T)` so the wall clock binds,
+30 seeds per (arena, arm), both arms sharing one patched `discover.mutate` (the control is the
+patched operator at `motif_rate=0.0`, not the unpatched one, so the two arms' RNG streams cannot
+diverge for a reason unrelated to the operator). `T=300s` was set by a 3-seed pilot per this
+round's own pre-registered escalation rule (`reported >= 1/3` -> keep `T`; `0/3` -> escalate to
+600s and re-pilot once; `0/3` again -> record the arena as saturated and uninformative) — both
+arenas scored 3/3 at `T=300`, so the scored run kept it.
+
+**Two corrections to the frozen probe's own operator, both required before any number here was
+trusted, and both now folded into `discover.py`'s shipped `mutate` (see below):** the
+`rng.random()` motif draw now short-circuits on `motif_rate` (`if motif_rate and rng.random() <
+motif_rate`) rather than drawing unconditionally — the frozen probe's version cost it nothing
+(no byte-identity gate to hold), but shipped that way it would have consumed one extra draw per
+insertion even at `motif_rate=0.0` and shifted every existing evolve RNG stream; and the control
+arm is the *patched* operator at rate 0, not `discover.mutate` itself, restated here rather than
+left implicit.
+
+**Pre-registered rule, ships only if throughput and score are not significantly worse on either
+arena** (the frozen round's own win/no-loss shape was explicitly demoted to a secondary reading
+here, since an exact McNemar at n=30 needs roughly a 10:1 discordant split to clear 0.05 and the
+frozen effect, ~1.5:1, would land near p=0.7 — keeping it as a ship clause would guarantee a
+fail-by-no-power, the exact failure section 3.3.1 names in words); an unresolved recovery clause
+(fewer than 10 discordant pairs on `reported`) defers that arena's verdict to throughput and
+score alone rather than blocking on it, decided in advance rather than after seeing the count.
+
+**Result: throughput improved significantly on both arenas, score showed no significant
+difference, and recovery could not be read at this budget on either arena — so the ship
+decision rests on the fallback basis the rule anticipated, not on a demonstrated recovery
+non-inferiority.**
+
+| arena | throughput ratio (motif/base) | p | score, motif better/base better | p | `reported` base/motif | discordant |
+|---|---:|---:|---:|---:|---:|---:|
+| `par6` | **1.230** (23% faster) | <0.0001 | 9/2 (19 ties) | 0.065 | 30/30 vs 30/30 | 0 |
+| `ser6` | **1.189** (19% faster) | 0.0001 | 11/11 (8 ties) | 1.000 | 27/30 vs 25/30 | 6 |
+
+`par6` **saturates at 30/30 on both arms** — the mirror of the frozen round's `land_rcl6` trap,
+now seen at real-fit scale on the arena that carried the frozen round's own win signal, so
+recovery evidence is structurally unavailable there at `T=300s, workers=8` regardless of what
+the operator does. `ser6`'s 6 discordant pairs fall short of the pre-registered 10-pair floor.
+Per the fallback rule, both arenas are decided on throughput + score alone, and both pass on
+both: a significant *speed-up*, not merely "not worse."
+
+**The speed-up's own mechanism answers section 3.8's open question about `PROPOSE_RETRY_CAP`
+directly, and the answer is the opposite of the worry.** Mean `mutate` calls per evaluated
+candidate — this round's proxy for the retry rate, since there is no hook on `_propose_child`
+itself — *fell* under the motif operator: `par6` 263.72 -> 202.12, `ser6` 404.72 -> 308.98. A
+two-element move lands in already-visited territory *less* often than a one-element move in a
+search space this small (six elements over three or four codes), not more, which is a
+coherent, mechanistic explanation for the throughput gain rather than a coincidence sitting
+beside it.
+
+**A bug in this round's own analysis code, caught before any verdict was drawn from it.** The
+first pass at the throughput clause read `p_throughput > 0.05` unconditionally as "pass," which
+fails a *significant improvement* the same way it fails a significant regression — it read
+`par6`'s and `ser6`'s highly significant speed-ups (p<0.0001, p=0.0001) as clause failures.
+Fixed to a proper non-inferiority test (fails only when significant **and** in the direction
+unfavourable to motif) before the verdict below was written, the same discipline this document
+applies to every other gate's own instrument.
+
+**Shipped**: `discover.py` gains `MOTIF_RATE = 0.0` and a `motif_rate` keyword on `mutate`,
+`_propose_child`, `_next_generation` and `_SteadyState`, threaded through to `evolve_plan` the
+same way `MUTATION_WEIGHTS`/`BREEDING_EXTRA` are — reachable from the benchmarks, not from
+`discover()`'s own signature, for the reason `BREEDING_EXTRA` is not (CLAUDE.md: a search
+internal a non-expert cannot set correctly is not a knob). `benchmarks/ev5_fingerprint.py --mode
+exhaustive,auto,evolve` is **byte-identical** on all three `REFERENCES` before and after, so the
+lever's mere existence changes nothing at its shipped default. `tests/test_discover.py` gains
+four tests: the two-element insertion itself, its decline when it would exceed `max_elements`,
+the RNG short-circuit (an identically-seeded hand-reproduction of the pre-`motif_rate` insertion
+branch leaves the RNG in the same state, not merely returns the same tree), and that `motif_rate`
+is unreachable from `discover()`. **The default stays `0.0`** — this round shipped the lever, not
+a new default, on the same reasoning `BREEDING_EXTRA` and every other step in this document has
+used: recovery evidence is what a default needs and none was obtained here, only its absence of
+harm on two proxies. Moving the default to `0.30` is a separate, not-yet-attempted follow-up that
+would need an arena where `par6`-style saturation does not remove the recovery reading entirely —
+this round's own limitation, recorded rather than routed around.
+
+**Files.** `benchmarks/screening_round/motif_probe.py` (frozen-table probe, prior art);
+`benchmarks/six_plus/motif_gate.py` (new, the real-fit gate, reusing `Referee` from
+`benchmarks/six_plus/recovery.py` and `mcnemar_exact` from `benchmarks/paired_stats.py`); results
+under `benchmarks/six_plus/motif_pilot_300.json`, `motif_gate_scored.json`/`.md`; results under
+`benchmarks/screening_round/motif_results/`; `benchmarks/paired_stats.py` (`mcnemar_exact`,
+lifted out of `arms.py`'s `_sign_test` for reuse by other rounds — see
+`docs/SMALL_SAMPLE_REVIEW.md` for its first other user).
 
 ## 6. Risks
 

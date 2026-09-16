@@ -253,20 +253,27 @@ need each other's evidence and conflating them was scope creep this revision rem
   bound; it is gated instead by N4. This replaces the original wording's "within a factor of 1.5
   at 90% of points", which the first implementation was never actually checked against; the
   median-based form is what §2.2's investigation used throughout.
-- **N2 (ratchet on recovery) — measured on a 1-seed slice, fails; stays an opt-in lever.** The
-  full plan is the 37 matched cells of `docs/CRITERION_SELECTION_PLAN.md` §9 re-run under
-  `auto`, not yet run. A 3-reference, 1-seed slice was run instead as a fast first read (`--n2
-  -seeds 1`, ~7 discover() calls, ~20 minutes single-threaded): `recovered` held on all three
-  (the truth's equivalence class always reached the front), but **`recommended_correct` flipped
-  from `True` to `False` on two of three references** — the capacitor and Randles both changed
-  which candidate the parsimony rule picked, though not whether the truth was reachable. Two
-  regressions is exactly the threshold this section's own rule names ("two or more and the
-  default does not flip"), so the rule is doing its job: **`weighting="auto"` ships as an
-  explicit opt-in only, on no path does it become a default**, pending the wider grid. One seed
-  per reference is too little to say whether this is a real, mechanistic sensitivity (the
-  reweighted chi² shifting which candidate falls inside `_well_fitting`'s band) or a coincidence
-  of these particular noise draws; that question is exactly what the deferred 9-seed/37-cell run
-  would answer; the deferred 37-cell grid is union, not replaced, with this 1-seed reading.
+- **N2 (ratchet on recovery) — measured on a 1-seed slice, fails; stays an opt-in lever, and the
+  wider grid is deliberately not scheduled (`docs/SMALL_SAMPLE_REVIEW.md` A-3).** A 3-reference,
+  1-seed slice was run as a fast first read (`--n2-seeds 1`, ~7 discover() calls, ~20 minutes
+  single-threaded): `recovered` held on all three (the truth's equivalence class always reached
+  the front), but **`recommended_correct` flipped from `True` to `False` on two of three
+  references** — the capacitor and Randles both changed which candidate the parsimony rule
+  picked, though not whether the truth was reachable. Two regressions is exactly the threshold
+  this section's own rule names ("two or more and the default does not flip"), so the rule is
+  doing its job: **`weighting="auto"` ships as an explicit opt-in only, on no path does it become
+  a default.** One seed per reference is too little to say on its own whether this is a real,
+  mechanistic sensitivity or a coincidence of these particular noise draws, and the full 37
+  matched cells of `docs/CRITERION_SELECTION_PLAN.md` §9 re-run under `auto` would answer that
+  narrower question — **but this is not what stands between `weighting="auto"` and a default**,
+  and running the wider grid would not remove the block. §4.3's gate R2, measured after this
+  section, found `weighting="auto"`'s `chi2_reduced` at 1.6–3.1e4 on seven real spectra — six of
+  seven land 1000×–30000× outside the [0.5, 3] band N2's own decision rule assumes — while
+  `relative_error` stays a normal 0.16–12.5%, i.e. the fits are fine and the σ estimate is not.
+  A clean synthetic-only N2 at 37 cells cannot promote a default that real data independently
+  rules out, so the wider grid is recorded here as **deliberately not run**, not merely pending:
+  see `docs/SMALL_SAMPLE_REVIEW.md` A-3 for the decision and what would reopen it (a σ estimator
+  that survives a real 43–72-point sweep).
 - **N3 (the capacitor's ESR) — re-measured after the GCV fix; now mixed rather than uniform,
   withdrawn either way.** The prediction was that `auto` reports a *smaller* relative standard
   error than `modulus` for the capacitor's ESR, because `modulus` under-weights it by a factor
@@ -528,8 +535,9 @@ Because there is no truth, the gates are stability gates, each written so it can
   exactly once, on `impedancepy-zplot` (the dataset with the smallest chi2 divergence in R2).
   This check is deliberately the strict, literal-string version — it does not know two runs'
   exact reparameterisations are the same model, unlike `DiscoveryResult.equivalents_of` within
-  one run — so 14% is a *ceiling* on how often a genuinely equivalence-class-aware version would
-  pass, not a measurement of it; that weaker, harder check was not built (§4.4).
+  one run — so 14% is a *floor* on how often a genuinely equivalence-class-aware version would
+  pass, not a ceiling (§4.4 corrects an earlier, backwards reading of this); that looser check
+  is now built and measured at 31%/60% (§4.4).
 - **R4 (agreement with the literature, reported, not scored) — [measured], the one dataset that
   qualifies.** `impedancepy-generic`'s tutorial-fitted `R1-p(R2,C1)-p(R3,C2)-Wo1` is **absent**
   from this project's own candidate list for that spectrum entirely -- not on the front, not
@@ -607,11 +615,22 @@ The lead-inductance and drift follow-ups §4.1 anticipated are still real, still
 of seven Lin-KK verdicts, and still not attempted: an L in series at the terminals is a
 *reporting* question once the fitted ESL can be compared against what the frequency window can
 resolve, and the Lin-KK per-point residual already exists to tell a user *which* points in a
-drifting sweep fail rather than that the whole sweep does. Separately, R3's 14% is measured
-under the strict literal-topology comparison stated in §4.2 on purpose; an equivalence-class-
-aware version -- checking whether the *even*-half recommendation, refit to the *odd* half's
-data, reaches the same score as the odd half's own recommendation -- would answer the sharper
-question and was not built for this round.
+drifting sweep fail rather than that the whole sweep does.
+
+R3's 14% (and `docs/SMALL_SAMPLE_REVIEW.md` A-2's 23%/40%) is measured under the strict
+literal-topology comparison stated in §4.2 on purpose. **Correction: an earlier draft of this
+section called that number "a ceiling on how often a genuinely equivalence-class-aware version
+would pass" -- backwards.** A strictly looser test can only pass *at least* as often as the
+strict one it contains, so the measured rate is a **floor**, not a ceiling. The
+equivalence-class-aware version itself -- checking whether the odd half's recommendation, refit
+to the even half's data, reaches the same score (ΔAICc ≤ 2) as the even half's own
+recommendation fitted there -- **is now built**
+(`benchmarks/measured/measured.py`'s `stable_equiv`/`rescore-split-half`) and measured
+[2026-09-14, `docs/SMALL_SAMPLE_REVIEW.md` A-2]: 31% (elements) / 60% (`params<=6`) under the
+search's own `weighting="auto"`, both still short of the 80% bar, but `params<=6`'s advantage
+over the element axis is now statistically significant (p = 0.0129) where the strict test could
+not tell the two axes apart (p = 0.2101) -- the gap this section named is real and was hiding a
+comparison the strict test had no power to make.
 
 ## 5. Considered and not included, with the reason
 

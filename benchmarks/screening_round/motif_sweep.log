@@ -1,0 +1,177 @@
+=== par6 rate=0.15 budget=150 ===
+{
+  "landscape": "land_rcl6.json",
+  "motif_rate": 0.15,
+  "seeds": 480,
+  "budget": 150,
+  "base_hit_rate": [
+    480,
+    480,
+    0.9920602114410997,
+    1.0
+  ],
+  "motif_hit_rate": [
+    480,
+    480,
+    0.9920602114410997,
+    1.0
+  ],
+  "only_base": 0,
+  "only_motif": 0,
+  "mcnemar_p": 1.0
+}
+=== par6 rate=0.30 budget=150 ===
+{
+  "landscape": "land_rcl6.json",
+  "motif_rate": 0.3,
+  "seeds": 480,
+  "budget": 150,
+  "base_hit_rate": [
+    480,
+    480,
+    0.9920602114410997,
+    1.0
+  ],
+  "motif_hit_rate": [
+    480,
+    480,
+    0.9920602114410997,
+    1.0
+  ],
+  "only_base": 0,
+  "only_motif": 0,
+  "mcnemar_p": 1.0
+}
+=== ser6 rate=0.15 budget=40 ===
+{
+  "landscape": "land_series_rcl6.json",
+  "motif_rate": 0.15,
+  "seeds": 480,
+  "budget": 40,
+  "base_hit_rate": [
+    258,
+    480,
+    0.4927739959508259,
+    0.5816305199072564
+  ],
+  "motif_hit_rate": [
+    262,
+    480,
+    0.5011027665973042,
+    0.5898360861181298
+  ],
+  "only_base": 21,
+  "only_motif": 25,
+  "mcnemar_p": 0.6587380770236564
+}
+=== ser6 rate=0.30 budget=40 ===
+{
+  "landscape": "land_series_rcl6.json",
+  "motif_rate": 0.3,
+  "seeds": 480,
+  "budget": 40,
+  "base_hit_rate": [
+    258,
+    480,
+    0.4927739959508259,
+    0.5816305199072564
+  ],
+  "motif_hit_rate": [
+    272,
+    480,
+    0.5219792296091311,
+    0.610295465249682
+  ],
+  "only_base": 29,
+  "only_motif": 43,
+  "mcnemar_p": 0.12491820036864003
+}
+=== ser7 rate=0.15 budget=40 ===
+{
+  "landscape": "land_series_rcl7.json",
+  "motif_rate": 0.15,
+  "seeds": 480,
+  "budget": 40,
+  "base_hit_rate": [
+    258,
+    480,
+    0.4927739959508259,
+    0.5816305199072564
+  ],
+  "motif_hit_rate": [
+    262,
+    480,
+    0.5011027665973042,
+    0.5898360861181298
+  ],
+  "only_base": 21,
+  "only_motif": 25,
+  "mcnemar_p": 0.6587380770236564
+}
+=== ser7 rate=0.30 budget=40 ===
+{
+  "landscape": "land_series_rcl7.json",
+  "motif_rate": 0.3,
+  "seeds": 480,
+  "budget": 40,
+  "base_hit_rate": [
+    258,
+    480,
+    0.4927739959508259,
+    0.5816305199072564
+  ],
+  "motif_hit_rate": [
+    272,
+    480,
+    0.5219792296091311,
+    0.610295465249682
+  ],
+  "only_base": 29,
+  "only_motif": 43,
+  "mcnemar_p": 0.12491820036864003
+}
+=== rclcpe6 rate=0.15 budget=150 ===
+{
+  "landscape": "land_rclcpe6.json",
+  "motif_rate": 0.15,
+  "seeds": 480,
+  "budget": 150,
+  "base_hit_rate": [
+    268,
+    480,
+    0.5136192545404171,
+    0.6021211034610446
+  ],
+  "motif_hit_rate": [
+    301,
+    480,
+    0.5829728535167075,
+    0.6691757835579054
+  ],
+  "only_base": 70,
+  "only_motif": 103,
+  "mcnemar_p": 0.014738291402465905
+}
+=== rclcpe6 rate=0.30 budget=150 ===
+{
+  "landscape": "land_rclcpe6.json",
+  "motif_rate": 0.3,
+  "seeds": 480,
+  "budget": 150,
+  "base_hit_rate": [
+    268,
+    480,
+    0.5136192545404171,
+    0.6021211034610446
+  ],
+  "motif_hit_rate": [
+    304,
+    480,
+    0.5893222088010526,
+    0.675227180916574
+  ],
+  "only_base": 71,
+  "only_motif": 107,
+  "mcnemar_p": 0.008521348883262012
+}
+ALL_DONE

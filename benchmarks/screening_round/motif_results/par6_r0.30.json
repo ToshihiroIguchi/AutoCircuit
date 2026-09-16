@@ -1,0 +1,21 @@
+{
+  "landscape": "land_rcl6.json",
+  "motif_rate": 0.3,
+  "seeds": 480,
+  "budget": 150,
+  "base_hit_rate": [
+    480,
+    480,
+    0.9920602114410997,
+    1.0
+  ],
+  "motif_hit_rate": [
+    480,
+    480,
+    0.9920602114410997,
+    1.0
+  ],
+  "only_base": 0,
+  "only_motif": 0,
+  "mcnemar_p": 1.0
+}

@@ -1,0 +1,37 @@
+R3: split-half stability (stricter than equivalence-class-aware -- see docstring)
+  diff impedancepy-generic      seed=0 odd=[CPE-p(C,L,R)]           even=[CPE-p(L,R)]
+  ok   impedancepy-generic      seed=1 odd=[CPE-p(L,R)]             even=[CPE-p(L,R)]
+  ok   impedancepy-generic      seed=2 odd=[CPE-p(L,R)]             even=[CPE-p(L,R)]
+  ok   impedancepy-generic      seed=3 odd=[CPE-p(L,R)]             even=[CPE-p(L,R)]
+  diff impedancepy-generic      seed=4 odd=[CPE-L-p(L,R)]           even=[CPE-p(L,R)]
+  diff impedancepy-gamry        seed=0 odd=p(C,[CPE-R])             even=p(CPE,[C-R])
+  diff impedancepy-gamry        seed=1 odd=p(C,[CPE-R])             even=p(CPE,[C-R])
+  diff impedancepy-gamry        seed=2 odd=p(C,[CPE-R])             even=p(CPE,[C-R])
+  diff impedancepy-gamry        seed=3 odd=p(C,[CPE-R])             even=p(CPE,[C-R])
+  diff impedancepy-gamry        seed=4 odd=p(C,[CPE-R])             even=p(CPE,[C-R])
+  diff impedancepy-biologic     seed=0 odd=p(R,[CPE-R])             even=[R-p(C,R)]
+  diff impedancepy-biologic     seed=1 odd=p(R,[CPE-R])             even=[R-p(C,R)]
+  diff impedancepy-biologic     seed=2 odd=p(R,[CPE-R])             even=[R-p(C,R)]
+  diff impedancepy-biologic     seed=3 odd=p(R,[CPE-R])             even=[R-p(C,R)]
+  diff impedancepy-biologic     seed=4 odd=[R-p(CPE,R)]             even=[R-p(C,R)]
+  diff impedancepy-zplot        seed=0 odd=[L-p(C,R,[CPE-R])]       even=[L-p(C,[R-p(CPE,R)])]
+  diff impedancepy-zplot        seed=1 odd=p(R,[L-p(C,[CPE-R])])    even=[L-p(C,R,[CPE-R])]
+  ok   impedancepy-zplot        seed=2 odd=[L-p(C,[R-p(CPE,R)])]    even=[L-p(C,[R-p(CPE,R)])]
+  ok   impedancepy-zplot        seed=3 odd=p(R,[L-p(C,[CPE-R])])    even=p(R,[L-p(C,[CPE-R])])
+  diff impedancepy-zplot        seed=4 odd=[L-p(C,[R-p(CPE,R)])]    even=[L-p(C,R,[CPE-R])]
+  diff zenodo-21700-id15        seed=0 odd=[R-p(C,[CPE-R])]         even=p(CPE,[L-R])
+  ok   zenodo-21700-id15        seed=1 odd=[R-p(C,[CPE-R])]         even=[R-p(C,[CPE-R])]
+  ok   zenodo-21700-id15        seed=2 odd=[R-p(C,[CPE-R])]         even=[R-p(C,[CPE-R])]
+  ok   zenodo-21700-id15        seed=3 odd=[R-p(C,[CPE-R])]         even=[R-p(C,[CPE-R])]
+  diff zenodo-21700-id15        seed=4 odd=[R-p(C,[CPE-R])]         even=p([C-R],[CPE-R])
+  diff zenodo-21700-id34        seed=0 odd=[R-p(C,[CPE-R])]         even=p([C-R],[CPE-R])
+  ok   zenodo-21700-id34        seed=1 odd=[R-p(C,[CPE-R])]         even=[R-p(C,[CPE-R])]
+  ok   zenodo-21700-id34        seed=2 odd=[R-p(C,[CPE-R])]         even=[R-p(C,[CPE-R])]
+  ok   zenodo-21700-id34        seed=3 odd=[R-p(C,[CPE-R])]         even=[R-p(C,[CPE-R])]
+  ok   zenodo-21700-id34        seed=4 odd=[R-p(C,[CPE-R])]         even=[R-p(C,[CPE-R])]
+  diff zenodo-kendall-electrode seed=0 odd=[R-p(CPE,CPE)]           even=p(CPE,[CPE-R])
+  diff zenodo-kendall-electrode seed=1 odd=p(CPE,[CPE-R])           even=[R-p(CPE,CPE)]
+  diff zenodo-kendall-electrode seed=2 odd=p(CPE,[CPE-R])           even=[R-p(CPE,CPE)]
+  ok   zenodo-kendall-electrode seed=3 odd=[R-p(CPE,CPE)]           even=[R-p(CPE,CPE)]
+  ok   zenodo-kendall-electrode seed=4 odd=[R-p(CPE,CPE)]           even=[R-p(CPE,CPE)]
+R3: 14/35 stable (40%); bar is 80%

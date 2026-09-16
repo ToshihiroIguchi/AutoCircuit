@@ -1,0 +1,79 @@
+[
+  {
+    "dataset": "impedancepy-generic",
+    "axis": "elements",
+    "max_params": null,
+    "seed": 0,
+    "time_limit": 60.0,
+    "seconds": 367.7,
+    "odd_circuit": "[L-p(CPE,[C-L-R])]",
+    "even_circuit": "[R-p(CPE,[CPE-R])]",
+    "stable": false
+  },
+  {
+    "dataset": "impedancepy-gamry",
+    "axis": "elements",
+    "max_params": null,
+    "seed": 0,
+    "time_limit": 60.0,
+    "seconds": 348.0,
+    "odd_circuit": "p(R,[CPE-p(CPE,R)])",
+    "even_circuit": "p(CPE,[C-p(C,R)])",
+    "stable": false
+  },
+  {
+    "dataset": "impedancepy-biologic",
+    "axis": "elements",
+    "max_params": null,
+    "seed": 0,
+    "time_limit": 60.0,
+    "seconds": 241.8,
+    "odd_circuit": "p(R,[CPE-R])",
+    "even_circuit": "[R-p(C,R)]",
+    "stable": false
+  },
+  {
+    "dataset": "impedancepy-zplot",
+    "axis": "elements",
+    "max_params": null,
+    "seed": 0,
+    "time_limit": 60.0,
+    "seconds": 245.8,
+    "odd_circuit": "[L-p(CPE,[R-p(C,R)])]",
+    "even_circuit": "p(R,[CPE-L-p(C,R)])",
+    "stable": false
+  },
+  {
+    "dataset": "zenodo-21700-id15",
+    "axis": "elements",
+    "max_params": null,
+    "seed": 0,
+    "time_limit": 60.0,
+    "seconds": 267.3,
+    "odd_circuit": "[R-p(C,[CPE-R])]",
+    "even_circuit": "[R-p(C,[CPE-R])]",
+    "stable": true
+  },
+  {
+    "dataset": "zenodo-21700-id34",
+    "axis": "elements",
+    "max_params": null,
+    "seed": 0,
+    "time_limit": 60.0,
+    "seconds": 272.3,
+    "odd_circuit": "[CPE-p(R,[CPE-R])]",
+    "even_circuit": "[R-p(C,[CPE-R])]",
+    "stable": false
+  },
+  {
+    "dataset": "zenodo-kendall-electrode",
+    "axis": "elements",
+    "max_params": null,
+    "seed": 0,
+    "time_limit": 60.0,
+    "seconds": 276.6,
+    "odd_circuit": "p(R,[CPE-p(CPE,[C-R])])",
+    "even_circuit": "[CPE-p(CPE,CPE,R)]",
+    "stable": false
+  }
+]
