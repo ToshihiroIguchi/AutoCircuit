@@ -2,9 +2,13 @@
 
 **Status: Phases 0-7 done (items 1-7 of §9); phase 8 (moving the default) is blocked on R3's
 absolute level, not on E.2's stop rule -- that trip was re-measured at a proper seed axis and
-retracted (`docs/SMALL_SAMPLE_REVIEW.md` A-2) -- and phase 9 (browser) is not attempted. Phases
-run in order; each states in advance what result means "do not ship" and a null result is an
-acceptable outcome of any phase after Phase 1.**
+retracted (`docs/SMALL_SAMPLE_REVIEW.md` A-2) -- and phase 9 (browser) is not attempted. R3 was
+then re-measured with the equivalence-class-aware check `docs/IMPACT_PLAN.md` section 4.4 had
+left unbuilt: 31% (elements) / 60% (`params<=6`), both still short of the 80% bar, so the
+blocker itself does not move -- but `params<=6`'s advantage over the element axis is now
+statistically significant (p=0.0129) where the strict test saw none (`docs/SMALL_SAMPLE_REVIEW.md`
+A-2 follow-up). Phases run in order; each states in advance what result means "do not ship" and
+a null result is an acceptable outcome of any phase after Phase 1.**
 
 ## 1. Why this needs an experiment before it needs an opinion
 
@@ -808,11 +812,14 @@ Each phase names, in advance, what would make it not ship.
    it previously tied or lost — a real, explicable consequence of the identity now holding, not a
    regression, and the value every report actually leads with (`recommended`) never moved.
 8. **Move the default and the user-facing knob.** Only if 3, 4 and 5 all passed — **item 3 has
-   not**: E.2 tripped its stop rule (e) on 2026-09-10 (above), which this item's own condition
-   already treats as disqualifying rather than a soft note. Not attempted until that finding is
-   addressed, not merely re-read as acceptable. E.6 resolved first. `--exhaustive-limit` kept as
-   a deprecated alias. Requires a re-baselined EV5, fresh G1, fresh X4, and a date beside every
-   number in `docs/` describing the old space.
+   not, on E.2's own successor rather than its original stop rule**. E.2's 2026-09-10 trip
+   (stop rule (e), 2/7 → 0/7) was itself withdrawn on 2026-09-14 as under-powered
+   (`docs/SMALL_SAMPLE_REVIEW.md` A-2), but the blocker did not lift: R3's absolute level
+   (23–40% either axis, then 31%/60% under the equivalence-class-aware check A-2's follow-up
+   built) fails the 80% bar regardless of axis, and that -- not the retracted trip -- is what
+   item 8 is blocked on now. E.6 resolved first. `--exhaustive-limit` kept as a deprecated alias.
+   Requires a re-baselined EV5, fresh G1, fresh X4, and a date beside every number in `docs/`
+   describing the old space.
 9. **Browser**, last. `BRIDGE_VERSION` bump with a changelog line; "Element limit" becomes
    "Parameter limit"; growth controls hidden under a parameter budget rather than computing on
    the wrong axis.

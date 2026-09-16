@@ -165,6 +165,69 @@ level (23–40%, either axis) still fails the 80% bar by a wide margin, for reas
 not investigate further — but the *specific* objection E.2 raised against `max_params` is
 retracted. `docs/PARAM_BUDGET_PLAN.md` is updated accordingly.
 
+### A-2 follow-up: an equivalence-class-aware `stable_equiv`, [measured, 2026-09-14]
+
+R3's `stable` field is the strict test `docs/IMPACT_PLAN.md` section 4.4 names and declines to
+loosen: exact `canonical_form()` string equality between the odd and even halves' recommended
+circuits. Section 4.4 poses the sharper question directly — does the odd half's recommendation,
+refit to the even half's data, reach the same score as the even half's own recommendation — and
+notes it "was not built for this round." It is built now, in `benchmarks/measured/measured.py`
+(`_equiv_verdicts`/`_equiv_report`, the `rescore-split-half` gate), reused rather than
+re-derived from `benchmarks/six_plus/recovery.py`'s `Referee` (canonical match, then a fitted-
+response check) and `discover.py`'s own `EQUIVALENCE_RTOL`.
+
+**Correction to `docs/IMPACT_PLAN.md` section 4.2 while building this**: that section calls the
+strict 14% "a ceiling on how often a genuinely equivalence-class-aware version would pass." A
+strictly looser test (`stable_equiv` is true whenever `stable` is, by the test's own
+construction — canonical match is checked as a fresh refit's zero-gap limit, not skipped) can
+only pass *more* often, so 14% (and this round's own 23%/40%) is a **floor**, not a ceiling.
+Corrected in `docs/IMPACT_PLAN.md` section 4.4.
+
+**Method.** `stable_equiv`: fit the odd half's recommended circuit to the *even* half's data,
+compare its AICc against the even half's own recommendation fitted there, equivalent iff
+ΔAICc ≤ 2 (the band fixed before any row was scored). `stable_reparam` is the strictly narrower
+claim that the two fitted responses agree to `EQUIVALENCE_RTOL` — reported beside it, never
+substituted for the pre-registered criterion. Both are computed **offline**, from the
+already-published `a2_grid_elements.json`/`a2_grid_params6.json` — the split is deterministic,
+so this needed no `discover()` re-run and carries none of that command's wall-clock
+non-determinism (step 1, above). The grids store only canonical-form strings, which
+`Circuit.parse` rejects (`[A-B]` syntax, no labels); stripping every bracket character yields a
+parseable DSL string, and every conversion is verified in-place to round-trip back to the exact
+same canonical form. **Positive control**: on every row where `stable` is already `True`, the
+independently-computed `stable_equiv` came back `True` too, on both axes (8/8, 14/14) — the
+check is not internally broken. A `weighting="modulus"` sensitivity column was run alongside the
+primary `weighting="auto"` column (the search's own weighting) as pre-registered, since a
+constant rescaling of sigma cancels in a same-data AICc gap but its *shape* does not.
+
+**Result**:
+
+| axis | `stable` | `stable_equiv` (auto) | `stable_equiv` (modulus) | `stable_reparam` |
+|---|---:|---:|---:|---:|
+| elements | 8/35 (23%) | 11/35 (31%) | 11/35 (31%) | 9/35 (26%) |
+| `params<=6` | 14/35 (40%) | 21/35 (60%) | 22/35 (63%) | 16/35 (46%) |
+
+Both axes gain under the looser test, as they must. **Neither reaches the 80% bar — item 8
+stays blocked on the same reason as before, R3's absolute level, now measured with the sharper
+instrument section 4.4 asked for rather than the strict one.** What changes is the *comparison
+between axes*: paired exact McNemar on `stable` found no significant difference (p = 0.2101,
+above, direction favouring `params<=6`); on `stable_equiv` the same 35 pairs are now
+**significant** (both = 9, only-elements = 2, only-params6 = 12, 14 discordant, p = 0.0129),
+and the modulus sensitivity column agrees (p = 0.0074, 15 discordant) — so this is not an
+artefact of one weighting choice. **`--max-params 6` is measurably more split-half stable than
+the element axis under the equivalence-aware test, not merely numerically ahead as the strict
+test showed.** This does not move item 8's blocker (both numbers still fail 80%), but it is a
+real, reproducible-in-direction finding that the strict `stable` field was too coarse to see,
+which is exactly the gap section 4.4 named. Files: `benchmarks/measured/a2_grid_elements_equiv.json`,
+`a2_grid_params6_equiv.json`.
+
+**What this offline route does not establish.** The grids carry no `FitResult`, so an offline
+refit cannot be checked against the fit `discover()` actually found — a refit landing in a worse
+basin than the original search would inflate a delta AICc and read as *less* stable, never more,
+biasing this measurement against the change rather than for it. The positive control bounds this
+risk (a broken refit would have failed it) but does not eliminate it; a live re-run through
+`run_split_half`, which now computes the same three verdicts inline from the search's own
+`Candidate.result` objects, is the confirmation step and was not run this round.
+
 ## A-3. `weighting="auto"` N2 — deliberately not run
 
 Recorded in `docs/IMPACT_PLAN.md` §2.4 directly (the load-bearing document for this lever): the
