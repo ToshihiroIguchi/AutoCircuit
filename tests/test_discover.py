@@ -26,7 +26,16 @@ import numpy as np
 # by design, since neither is ever published. The module itself is imported as well, so that a
 # test can spy on one internal call without reaching through the package each time.
 from autocircuit.core import discover as discover_module
-from autocircuit.core.circuit import Circuit, count_elements, simplify
+from autocircuit.core.circuit import (
+    Circuit,
+    ElementNode,
+    count_elements,
+    replace_subtree,
+    series,
+    simplify,
+    subtree_at,
+    subtree_paths,
+)
 from autocircuit.core.discover import (
     Candidate,
     DiscoveryResult,
@@ -918,19 +927,107 @@ def test_the_mutation_weights_choose_the_operator_and_default_to_the_shipped_tup
     assert discover_module.MUTATION_WEIGHTS == (0.35, 0.25, 0.25, 0.15)
 
 
-def test_neither_step_five_knob_is_reachable_from_discover() -> None:
+# -- The two-element insertion step (`motif_rate`) --------------------------------------------
+#
+# docs/EVOLVE_SEARCH_PLAN.md §3.8. Measured on frozen tables, then on a real-fit gate
+# (`benchmarks/six_plus/motif_gate.py`) that found a significant throughput improvement and no
+# resolvable evidence of harm to recovery; shipped as a lever, `MOTIF_RATE = 0.0`, same shape as
+# `MUTATION_WEIGHTS` and `BREEDING_EXTRA` -- reachable from the benchmarks, not from `discover()`.
+
+
+def test_motif_rate_inserts_two_elements_instead_of_one() -> None:
+    """`motif_rate=1.0` forces every insertion to place a fresh `series(A,B)`/`parallel(A,B)`
+    pair; `motif_rate=0.0` (the default) never does. `weights` is pinned to `insert_series`
+    alone so the operation itself is not also a random draw.
+    """
+    rng = np.random.default_rng(0)
+    node = Circuit.parse("R1-C1").root
+    insert_only = (0.0, 1.0, 0.0, 0.0)
+
+    two_at_a_time = [
+        mutate(node, rng, ("R", "C", "L"), 8, weights=insert_only, motif_rate=1.0)
+        for _ in range(20)
+    ]
+    assert all(count_elements(child) == 4 for child in two_at_a_time)
+
+    one_at_a_time = [
+        mutate(node, rng, ("R", "C", "L"), 8, weights=insert_only, motif_rate=0.0)
+        for _ in range(20)
+    ]
+    assert all(count_elements(child) == 3 for child in one_at_a_time)
+
+    # The default (no `motif_rate` argument at all) is the same as passing 0.0 explicitly.
+    default_rate = [
+        mutate(node, rng, ("R", "C", "L"), 8, weights=insert_only) for _ in range(20)
+    ]
+    assert all(count_elements(child) == 3 for child in default_rate)
+    assert discover_module.MOTIF_RATE == 0.0
+
+
+def test_motif_rate_declines_the_pair_rather_than_exceed_max_elements() -> None:
+    """A two-element insertion that would exceed `max_elements` falls back to one element,
+    exactly like `benchmarks/screening_round/motif_probe.py`'s prior-art operator.
+    """
+    rng = np.random.default_rng(0)
+    node = Circuit.parse("R1-C1-L1").root  # 3 elements; max_elements=4 leaves room for +1, not +2
+    insert_only = (0.0, 1.0, 0.0, 0.0)
+
+    children = [
+        mutate(node, rng, ("R", "C", "L"), 4, weights=insert_only, motif_rate=1.0)
+        for _ in range(20)
+    ]
+    assert all(count_elements(child) == 4 for child in children)
+
+
+def test_motif_rate_at_default_consumes_no_extra_random_draw() -> None:
+    """The default must not shift the RNG stream: `benchmarks/ev5_fingerprint.py` fingerprints
+    `discover()`'s full output byte-for-byte, and a shifted stream would move every seed's
+    result downstream of the first insertion. Reproduces the pre-`motif_rate` insertion branch
+    by hand and checks that an identically-seeded `mutate` call leaves the RNG in the same state
+    afterward, not just that it returns the same tree.
+    """
+    seed = 0
+    node = Circuit.parse("R1-C1").root
+    insert_only = (0.0, 1.0, 0.0, 0.0)
+
+    rng_a = np.random.default_rng(seed)
+    child = mutate(node, rng_a, ("R", "C", "L"), 8, weights=insert_only)
+    draw_a = rng_a.random()
+
+    # The exact pre-`motif_rate` insertion branch: one `rng.choice(operations, ...)` draw
+    # (forced to `insert_series` by `insert_only`), one `rng.integers` for the subtree path,
+    # one `rng.choice(pool)` for the fresh element -- no `rng.random()` call anywhere.
+    rng_b = np.random.default_rng(seed)
+    active = np.array(insert_only)
+    operations = ["retype", "insert_series", "insert_parallel", "delete"]
+    operation = str(rng_b.choice(operations, p=active))
+    assert operation == "insert_series"
+    paths = subtree_paths(node)
+    path = paths[int(rng_b.integers(len(paths)))]
+    subtree = subtree_at(node, path)
+    fresh = ElementNode(str(rng_b.choice(("R", "C", "L"))))
+    expected = replace_subtree(node, path, series(subtree, fresh))
+    draw_b = rng_b.random()
+
+    assert Circuit(child).canonical_form() == Circuit(expected).canonical_form()
+    assert draw_a == draw_b  # the RNG streams are in lockstep afterward, not merely equal now
+
+
+def test_neither_step_five_knob_nor_motif_rate_is_reachable_from_discover() -> None:
     """CLAUDE.md's rule, held by the signature rather than by convention.
 
-    "How much should the search prefer deleting an element" and "how hard should a crowded
-    complexity be penalised" are exactly the search internals a non-expert cannot set
-    correctly, and the project's answer to those is a measured module constant -- the shape
-    `BREEDING_EXTRA` already has. A byte-identical wire payload cannot say this; only the
-    absence of the parameter can.
+    "How much should the search prefer deleting an element", "how hard should a crowded
+    complexity be penalised" and "how often should an insertion place two elements instead of
+    one" are exactly the search internals a non-expert cannot set correctly, and the project's
+    answer to those is a measured module constant -- the shape `BREEDING_EXTRA` already has. A
+    byte-identical wire payload cannot say this; only the absence of the parameter can.
     """
     import inspect
 
     taken = set(inspect.signature(discover).parameters)
-    assert not taken & {"weights", "mutation_weights", "parsimony", "parsimony_scaling"}
+    assert not taken & {
+        "weights", "mutation_weights", "parsimony", "parsimony_scaling", "motif_rate", "motif",
+    }
     assert discover_module.PARSIMONY_SCALING == 0.0
 
 

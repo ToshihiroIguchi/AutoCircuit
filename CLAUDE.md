@@ -413,7 +413,25 @@ static-site Web UI running the same core via WASM (Pyodide).
    hit counts were suspiciously identical to the cap-6 arena's, and re-run correctly. **Nothing
    shipped to `discover.py` this round** — scope was measurement and a verdict only; production
    wiring still needs an EV3-style real-fit throughput/recovery gate first, per every other step
-   in this document.
+   in this document. **That gate ran 2026-09-15/16** (`benchmarks/six_plus/motif_gate.py`, 30
+   seeds x 2 real arenas x 2 arms, `discover(mode="evolve")` at `time_limit=300s, workers=8`,
+   sized by a pre-registered pilot): throughput rose significantly on both arenas (19-23%
+   faster, p<0.001), score showed no significant difference, and `PROPOSE_RETRY_CAP` exhaustion
+   *fell* under the motif operator rather than rising — the opposite of the interaction this
+   round worried about. Recovery could not be read at this budget (`par6` saturates 30/30 on
+   both arms, `ser6` falls short of the pre-registered 10-discordant-pair floor), so the ship
+   decision rests on the fallback basis the pre-registered rule named in advance for exactly
+   this case, not on a demonstrated recovery win. **Shipped**: `discover.py` gains
+   `MOTIF_RATE = 0.0` and a `motif_rate` keyword threaded through `mutate`/`_propose_child`/
+   `_next_generation`/`_SteadyState` the same way `MUTATION_WEIGHTS` is — reachable from the
+   benchmarks, not from `discover()`. `ev5_fingerprint.py --mode exhaustive,auto,evolve` is
+   byte-identical on all three `REFERENCES` at the shipped default; four new tests in
+   `tests/test_discover.py` cover the operator, its `max_elements` decline, the RNG
+   short-circuit, and its absence from `discover()`'s signature. **The default stays `0.0`** —
+   this round shipped the lever, not a new default, since recovery evidence (as opposed to
+   absence-of-harm on two proxies) was never obtained. See `docs/EVOLVE_SEARCH_PLAN.md` §3.8 for
+   the full numbers, including a bug in this round's own analysis code (a non-inferiority clause
+   that failed on a significant *improvement*) caught and fixed before any verdict was drawn.
 
 11. `docs/KK_RESONANCE_PLAN.md` — the Lin-KK test and the resonance its basis cannot express.
    **Implemented; gates K1–K4 measured.** Its §2 is the one to read, and it is the whole point
@@ -961,7 +979,12 @@ static-site Web UI running the same core via WASM (Pyodide).
     **Phases 0-7 done (all seven items of that plan's §9); phase 8 (moving the default) is
     blocked on R3's absolute level, not on E.2's stop rule below — that trip was re-measured at a
     proper seed axis and retracted, see the correction after item 5 below — phase 9 (browser) not
-    attempted.**
+    attempted.** R3 was then re-measured with the equivalence-class-aware check
+    `docs/IMPACT_PLAN.md` §4.4 had left unbuilt (`docs/SMALL_SAMPLE_REVIEW.md` A-2 follow-up,
+    2026-09-14): 31% (elements) / 60% (`params<=6`), both still short of the 80% bar, so item 8's
+    blocker does not move — but `params<=6`'s advantage over the element axis is now
+    statistically significant (p=0.0129, robust to the weighting used, p=0.0074 under
+    `modulus`) where the strict `stable` field saw none (p=0.2101).
     `discover(max_params=...)` and `--max-params` ship as an opt-in lever, default `None`, and no
     default has moved. The originally suspected mechanism does not exist: tier 1 and
     tier 2 already feed `n_params` to the chosen criterion, and `recommended`'s first key,
